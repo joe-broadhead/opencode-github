@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "jsx": "preserve",
+    "jsxImportSource": "@opentui/solid",
+    "types": ["node", "bun"]
+  },
+  "include": ["src/**/*.ts", "src/tui/**/*.tsx", "test/unit/**/*.ts", "test/tui/**/*.ts", "test/host/**/*.ts"]
+}
