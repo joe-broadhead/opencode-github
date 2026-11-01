@@ -1,0 +1,71 @@
+# Repository rules
+
+This repository builds `@joe-broadhead/opencode-github`, an unofficial OpenCode plugin that registers GitHub's
+hosted MCP server (`https://api.githubcopilot.com/mcp/`) under the name `github` and uses GitHub's own tools. User
+docs: `README.md`, `docs/configuration.md`; contributor docs: `docs/architecture.md`, `CONTRIBUTING.md`.
+
+## Platform
+
+- Use only public APIs of `@opencode/plugin` 2.2.3. The tested host range is exactly `>=2.2.3 <2.3.0`, in both
+  `package.json` `opencode.host` and `TESTED_HOST_RANGE` in `src/host-version.ts`. Never write it as `^2.2.3`.
+- Test against stock OpenCode 2.2.3 and 2.2.4 only.
+- Keep plugin ids `github.platform` (server and RPC) and `github.platform.tui` (TUI), and the server name `github`.
+
+## Forbidden
+
+`npm run lint` (`scripts/check-forbidden.mjs`) runs its self-test, then scans `src/`, `test/`, `scripts/`
+and `dist/`. Do not use:
+
+- the V1 packages under `@opencode-ai/`;
+- `ctx.generate.*` and `experimental.policies` (deprecated);
+- `ctx.experimental.artifact` (experimental, new in 2.2.4);
+- imports of `@opencode/ai` (it breaks between patch releases);
+- imports of private OpenCode source (`packages/<name>/src`);
+- machine-local home or temporary paths;
+- a `.tsx` or relative import in `dist/`, or a `node:` import in `dist/tui.js`.
+
+When you add a rule here, add it to the scan and its self-test too.
+
+## Design
+
+- GitHub's own MCP tools are the tool surface. The plugin adds one tool, `github_api` (`src/api/`), for what they
+  cannot do. It classifies each call itself (GET and HEAD, or one GraphQL query, read; everything else writes),
+  asserts `github_api` on `METHOD /path` for writes, refuses writes while read-only, sends requests only to the
+  configured API and uploads bases, and never forwards the token across origins. Status lives in `/github-status`,
+  the `/github` dialog and the status RPC, which all render one status model (`src/rpc.ts`).
+- `KNOWN_TOOLS` in `src/tools.ts` lists the known reads and writes. Unknown tools ask, or are hidden with
+  `unknownTools: "hide"`. `npm run drift` finds upstream changes; it never acts at runtime.
+- Permission defaults go through `ctx.agent.transform`: the `github_*` ask rule and one allow rule per known read,
+  directly after each agent's base `* * allow` rule. No permission hook. User rules and saved approvals keep winning,
+  and a stricter agent is never weakened.
+- Agents defined only in the user's config get no rules. Status names them and gives the fix: the block **first** in
+  **that agent's own** `permissions` list, followed by the user's top-level rules for `github_` tools. Never recommend the
+  top-level `permissions` for the block.
+- With `host` (GitHub Enterprise Server) no MCP server is registered: sign-in lives on the plugin's own
+  `github-enterprise` integration and `github_api` is the tool.
+- A server named `github` that the user configured is left alone: no headers, no sign-in methods, status `conflict`.
+- Sign-in methods attach to the `github` server's integration. No client secret, no refresh hook. No OAuth App client
+  ID ships: token sign-in always, device sign-in only when the user or an organisation sets `clientId`.
+- The plugin's own errors are `GitHubPluginError(code, message, nextStep)`. Errors from OpenCode and GitHub pass
+  through unchanged. No error, log or output contains a token, a device code or raw upstream content.
+- `dist/` holds exactly two self-contained bundles, `index.js` and `tui.js` (esbuild, no splitting, no chunks, no
+  relative imports), so an in-place update never pairs a new entry with a stale sibling module. The TUI part ships
+  prebuilt in `dist/tui.js`. Register keymaps and palette commands from setup with a `global`
+  layer. No `ctx.ui.slot`.
+
+## Package
+
+- No peer and no runtime dependencies: esbuild bundles zod into `dist/index.js` only (`import * as z from "zod"`). The RPC contract (`src/rpc.ts`) is
+  plain JSON Schema with a hand-written type, never zod, so `dist/tui.js` stays small. `@opencode/*`
+  (exactly 2.2.3), OpenTUI, Solid, TypeScript, Babel, esbuild and zod are dev dependencies. Do not add 2.2.4 to the lockfile.
+- Ship prebuilt `dist/` and no `.d.ts` files. No install, `prepare` or `prepack` scripts.
+- Releases publish from CI on a `v<version>` tag (see CONTRIBUTING). The release workflow refuses a private package or
+  a tag that differs from the version.
+
+## Hygiene
+
+- Greenfield: no legacy or dead code, exports, dependencies, docs, tests or fixtures.
+- No tokens, client secrets, personal data or machine-local paths in the repository.
+- Tests use narrow `Pick<Plugin.Context, …>` fakes. Host tests use the public `@opencode/sdk` and isolate `HOME`, the
+  XDG folders, `TMPDIR` and `OPENCODE_TEST_HOME` inside a temporary folder.
+- Run `npm run check` before every commit. Commit messages use `type(scope): summary`.

@@ -1,0 +1,303 @@
+import { createHash } from "node:crypto"
+import { createServer } from "node:http"
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import type { RestInput } from "../../src/api/contract.js"
+import { MAX_INLINE_BYTES, callGraphql, callRest, projectPath, restTarget } from "../../src/api/request.js"
+import { type Endpoints, GITHUB_COM } from "../../src/config.js"
+
+const TOKEN = "gho_" + "t".repeat(36)
+const GHES: Endpoints = {
+  web: "https://ghe.example.com",
+  api: "https://ghe.example.com/api/v3",
+  graphql: "https://ghe.example.com/api/graphql",
+  uploads: "https://ghe.example.com/api/uploads",
+}
+
+type Seen = { url: string; method: string; headers: Record<string, string>; body?: unknown; redirect?: string }
+
+/** A fetch that answers each URL from `routes` and records what it was sent. */
+function fakeFetch(routes: Record<string, (seen: Seen) => Response | Response[]>) {
+  const seen: Seen[] = []
+  const queues = new Map<string, Response[]>()
+  const fetch = async (url: string, init: RequestInit) => {
+    const request: Seen = {
+      url,
+      method: init.method ?? "GET",
+      headers: Object.fromEntries(new Headers(init.headers).entries()),
+      ...(init.body !== undefined ? { body: init.body } : {}),
+      ...(init.redirect ? { redirect: init.redirect } : {}),
+    }
+    seen.push(request)
+    const route = routes[url]
+    if (!route) throw new TypeError(`fetch failed: no route for ${url}`)
+    if (!queues.has(url)) {
+      const answer = route(request)
+      queues.set(url, Array.isArray(answer) ? answer : [answer])
+    }
+    const queue = queues.get(url)!
+    return queue.length > 1 ? queue.shift()! : queue[0]!.clone()
+  }
+  return { fetch, seen }
+}
+
+const json = (body: unknown, init: ResponseInit = {}) =>
+  new Response(JSON.stringify(body), { status: 200, ...init, headers: { "content-type": "application/json; charset=utf-8", ...(init.headers as object) } })
+const redirect = (location: string, status = 302) => new Response(null, { status, headers: { location } })
+const rest = (input: Partial<RestInput> & Pick<RestInput, "method" | "path">): RestInput => input as RestInput
+
+let root: string
+beforeEach(() => {
+  root = realpathSync(mkdtempSync(join(tmpdir(), "github-api-test-")))
+})
+afterEach(() => rmSync(root, { recursive: true, force: true }))
+
+const deps = (fetch: ReturnType<typeof fakeFetch>["fetch"], endpoints: Endpoints = GITHUB_COM) => ({ token: TOKEN, endpoints, service: "GitHub", fetch, root })
+
+describe("restTarget pins requests to the API host", () => {
+  it.each([
+    ["a full URL", "https://evil.example/repos"],
+    ["a scheme-relative URL", "//evil.example/repos"],
+    ["no leading slash", "repos/o/r"],
+    ["a .. segment", "/repos/../user"],
+    ["an encoded .. segment", "/repos/%2e%2e/user"],
+    ["a backslash", "/repos\\o"],
+    ["whitespace", "/repos/o r"],
+    ["a fragment", "/repos#x"],
+    ["a control character", "/repos/\u0000"],
+  ])("refuses %s", (_name, path) => {
+    expect(() => restTarget(rest({ method: "GET", path }), GITHUB_COM)).toThrow(/^API_PATH_INVALID: /)
+  })
+
+  it("refuses /graphql through method and path", () => {
+    expect(() => restTarget(rest({ method: "POST", path: "/graphql" }), GITHUB_COM)).toThrow(/^API_GRAPHQL_PATH: .* Next step: Pass \{ graphql/)
+  })
+
+  it("joins the path to the base, merges the query, and names the resource without the query", () => {
+    const target = restTarget(rest({ method: "GET", path: "/repos/o/r/issues?state=open", query: { per_page: 5, labels: ["a", "b"] } }), GITHUB_COM)
+    expect(target.url.href).toBe("https://api.github.com/repos/o/r/issues?state=open&per_page=5&labels=a&labels=b")
+    expect(target.resource).toBe("GET /repos/o/r/issues")
+  })
+
+  it("keeps a GitHub Enterprise Server API path, and sends uploads to the uploads base", () => {
+    expect(restTarget(rest({ method: "GET", path: "/user" }), GHES).url.href).toBe("https://ghe.example.com/api/v3/user")
+    const upload = rest({ method: "POST", path: "/repos/o/r/releases/1/assets?name=a.zip", upload: { path: "a.zip", contentType: "application/zip" } })
+    expect(restTarget(upload, GITHUB_COM).url.href).toBe("https://uploads.github.com/repos/o/r/releases/1/assets?name=a.zip")
+    expect(restTarget(upload, GHES).url.href).toBe("https://ghe.example.com/api/uploads/repos/o/r/releases/1/assets?name=a.zip")
+  })
+})
+
+describe("callRest", () => {
+  it("sends the token and API version only to the API host, with manual redirects", async () => {
+    const { fetch, seen } = fakeFetch({ "https://api.github.com/user": () => json({ login: "octocat" }, { headers: rateHeaders(4999) }) })
+    const input = rest({ method: "GET", path: "/user" })
+    const output = await callRest(input, restTarget(input, GITHUB_COM), deps(fetch))
+    expect(output).toMatchObject({ ok: true, status: 200, data: { login: "octocat" }, truncated: false, trust: { githubContent: "untrusted" } })
+    expect(output.rateLimit).toEqual({ limit: 5000, remaining: 4999, resetAt: "2026-10-31T00:00:00.000Z" })
+    expect(seen[0]).toMatchObject({ redirect: "manual", headers: { authorization: `Bearer ${TOKEN}`, "x-github-api-version": "2022-11-28", accept: "application/vnd.github+json" } })
+  })
+
+  it("drops Authorization on a redirect to another host, and keeps it on the API host", async () => {
+    const { fetch, seen } = fakeFetch({
+      "https://api.github.com/repos/o/r/actions/jobs/1/logs": () => redirect("https://blob.example.net/logs/1?sig=x"),
+      "https://blob.example.net/logs/1?sig=x": () => new Response("line 1\nline 2\n", { headers: { "content-type": "text/plain" } }),
+      "https://api.github.com/repositories/9": () => redirect("/repositories/10", 301),
+      "https://api.github.com/repositories/10": () => json({ id: 10 }),
+    })
+    const logs = rest({ method: "GET", path: "/repos/o/r/actions/jobs/1/logs" })
+    const output = await callRest(logs, restTarget(logs, GITHUB_COM), deps(fetch))
+    expect(output).toMatchObject({ ok: true, data: "line 1\nline 2\n", contentType: "text/plain" })
+    expect(seen[1]!.url).toBe("https://blob.example.net/logs/1?sig=x")
+    expect(seen[1]!.headers.authorization).toBeUndefined()
+    expect(seen[1]!.headers["x-github-api-version"]).toBeUndefined()
+
+    const moved = rest({ method: "GET", path: "/repositories/9" })
+    await callRest(moved, restTarget(moved, GITHUB_COM), deps(fetch))
+    expect(seen.at(-1)).toMatchObject({ url: "https://api.github.com/repositories/10", headers: { authorization: `Bearer ${TOKEN}` } })
+  })
+
+  it("relies on Node's fetch returning a manual redirect with its Location, not following it", async () => {
+    const server = createServer((request, response) => {
+      response.writeHead(302, { location: "https://blob.example.net/x" }).end()
+    })
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+    try {
+      const { port } = server.address() as { port: number }
+      const response = await fetch(`http://127.0.0.1:${port}/`, { redirect: "manual", headers: { Authorization: "Bearer x" } })
+      expect(response.status).toBe(302)
+      expect(response.headers.get("location")).toBe("https://blob.example.net/x")
+    } finally {
+      server.close()
+    }
+  })
+
+  it("refuses a redirect to plain HTTP, and a redirect loop", async () => {
+    const { fetch } = fakeFetch({
+      "https://api.github.com/a": () => redirect("http://api.github.com/b"),
+      "https://api.github.com/loop": () => redirect("/loop"),
+    })
+    const insecure = rest({ method: "GET", path: "/a" })
+    await expect(callRest(insecure, restTarget(insecure, GITHUB_COM), deps(fetch))).rejects.toThrow(/^API_REDIRECT_INSECURE: /)
+    const loop = rest({ method: "GET", path: "/loop" })
+    await expect(callRest(loop, restTarget(loop, GITHUB_COM), deps(fetch))).rejects.toThrow(/^API_REDIRECT_LOOP: /)
+  })
+
+  it("sends a JSON body, and turns a 303 into a GET without it", async () => {
+    const { fetch, seen } = fakeFetch({
+      "https://api.github.com/repos/o/r/pulls": () => redirect("https://api.github.com/repos/o/r/pulls/7", 303),
+      "https://api.github.com/repos/o/r/pulls/7": () => json({ number: 7 }, { status: 200 }),
+    })
+    const input = rest({ method: "POST", path: "/repos/o/r/pulls", body: { title: "t", head: "a", base: "main" } })
+    const output = await callRest(input, restTarget(input, GITHUB_COM), deps(fetch))
+    expect(output.data).toEqual({ number: 7 })
+    expect(seen[0]).toMatchObject({ method: "POST", body: JSON.stringify({ title: "t", head: "a", base: "main" }), headers: { "content-type": "application/json" } })
+    expect(seen[1]).toMatchObject({ method: "GET" })
+    expect(seen[1]!.body).toBeUndefined()
+    expect(seen[1]!.headers["content-type"]).toBeUndefined()
+  })
+
+  it("follows Link pages on the API host, joins list objects, and caps items", async () => {
+    const page = (n: number, next?: string) =>
+      json({ total_count: 5, items: [n * 2 - 1, n * 2] }, { headers: next ? { link: `<${next}>; rel="next", <https://api.github.com/x?page=9>; rel="last"` } : {} })
+    const { fetch, seen } = fakeFetch({
+      "https://api.github.com/search/issues?q=x": () => page(1, "https://api.github.com/search/issues?q=x&page=2"),
+      "https://api.github.com/search/issues?q=x&page=2": () => page(2, "https://api.github.com/search/issues?q=x&page=3"),
+      "https://api.github.com/search/issues?q=x&page=3": () => page(3),
+    })
+    const input = rest({ method: "GET", path: "/search/issues", query: { q: "x" }, paginate: true })
+    const all = await callRest(input, restTarget(input, GITHUB_COM), deps(fetch))
+    expect(all.data).toEqual({ total_count: 5, items: [1, 2, 3, 4, 5, 6] })
+    expect(all.pagination).toEqual({ pages: 3, items: 6, more: false })
+
+    const capped = rest({ ...input, maxItems: 3 })
+    expect(await callRest(capped, restTarget(capped, GITHUB_COM), deps(fetch))).toMatchObject({ data: { items: [1, 2, 3] }, pagination: { pages: 2, items: 3, more: true } })
+    const onePage = rest({ ...input, maxPages: 1 })
+    expect((await callRest(onePage, restTarget(onePage, GITHUB_COM), deps(fetch))).pagination).toEqual({ pages: 1, items: 2, more: true })
+    expect(seen.every((request) => request.url.startsWith("https://api.github.com/"))).toBe(true)
+  })
+
+  it("stops paginating at a Link to another host", async () => {
+    const { fetch, seen } = fakeFetch({
+      "https://api.github.com/user/repos": () => json([1, 2], { headers: { link: '<https://evil.example/user/repos?page=2>; rel="next"' } }),
+    })
+    const input = rest({ method: "GET", path: "/user/repos", paginate: true })
+    expect(await callRest(input, restTarget(input, GITHUB_COM), deps(fetch))).toMatchObject({ data: [1, 2], pagination: { pages: 1, items: 2, more: false } })
+    expect(seen).toHaveLength(1)
+  })
+
+  it("cuts a large result to whole items, with a next step", async () => {
+    const items = Array.from({ length: 2000 }, (_, index) => ({ id: index, body: "x".repeat(100) }))
+    const { fetch } = fakeFetch({ "https://api.github.com/big": () => json(items) })
+    const input = rest({ method: "GET", path: "/big" })
+    const output = await callRest(input, restTarget(input, GITHUB_COM), deps(fetch))
+    expect(output.truncated).toBe(true)
+    expect(output.nextStep).toMatch(/Narrow it with query parameters/)
+    expect(Buffer.byteLength(JSON.stringify(output.data))).toBeLessThanOrEqual(MAX_INLINE_BYTES)
+    expect((output.data as unknown[]).length).toBeGreaterThan(100)
+  })
+
+  it("returns diff text, and points binary responses to download", async () => {
+    const { fetch, seen } = fakeFetch({
+      "https://api.github.com/repos/o/r/pulls/1": () => new Response("diff --git a/x b/x\n", { headers: { "content-type": "application/vnd.github.diff; charset=utf-8" } }),
+      "https://api.github.com/repos/o/r/zipball": () => new Response(new Uint8Array([80, 75, 3, 4]), { headers: { "content-type": "application/zip" } }),
+    })
+    const diff = rest({ method: "GET", path: "/repos/o/r/pulls/1", accept: "diff" })
+    expect(await callRest(diff, restTarget(diff, GITHUB_COM), deps(fetch))).toMatchObject({ data: "diff --git a/x b/x\n" })
+    expect(seen[0]!.headers.accept).toBe("application/vnd.github.diff")
+    const zip = rest({ method: "GET", path: "/repos/o/r/zipball" })
+    const output = await callRest(zip, restTarget(zip, GITHUB_COM), deps(fetch))
+    expect(output.data).toBeUndefined()
+    expect(output.nextStep).toBe("The response is 4 bytes of application/zip; pass download: { path } to save it.")
+  })
+
+  it("gives next steps for 401, a missing scope, an exhausted rate limit and a missing fine-grained permission", async () => {
+    const { fetch } = fakeFetch({
+      "https://api.github.com/a": () => json({ message: "Bad credentials" }, { status: 401 }),
+      "https://api.github.com/b": () => json({ message: "Resource not accessible" }, { status: 403, headers: { "x-accepted-oauth-scopes": "workflow", "x-oauth-scopes": "repo, read:org" } }),
+      "https://api.github.com/c": () => json({ message: "rate limit" }, { status: 403, headers: rateHeaders(0) }),
+      "https://api.github.com/d": () =>
+        json({ message: "Resource not accessible by personal access token" }, { status: 403, headers: { "x-accepted-github-permissions": "actions=read" } }),
+      "https://api.github.com/e": () => json({ message: "Resource not accessible by personal access token" }, { status: 403 }),
+    })
+    const call = (path: string) => {
+      const input = rest({ method: "GET", path })
+      return callRest(input, restTarget(input, GITHUB_COM), deps(fetch))
+    }
+    expect(await call("/a")).toMatchObject({ ok: false, status: 401, data: { message: "Bad credentials" }, nextStep: expect.stringContaining("Run /connect and choose GitHub") })
+    expect((await call("/b")).nextStep).toBe("The sign-in lacks the scope workflow. Add it to the plugin option scopes, then run /connect and choose GitHub to sign in again.")
+    expect((await call("/c")).nextStep).toBe("The rate limit is used up. Try again after 2026-10-31T00:00:00.000Z.")
+    expect((await call("/d")).nextStep).toBe(
+      "The token lacks the fine-grained permission Actions (read). Add it to the token on GitHub (Settings, Developer settings, Personal access tokens).",
+    )
+    const withDevice = rest({ method: "GET", path: "/d" })
+    expect((await callRest(withDevice, restTarget(withDevice, GITHUB_COM), { ...deps(fetch), deviceSignIn: true })).nextStep).toBe(
+      "The token lacks the fine-grained permission Actions (read). Add it to the token on GitHub (Settings, Developer settings, Personal access tokens), or run /connect, choose GitHub and sign in with GitHub instead of a token.",
+    )
+    expect((await call("/e")).nextStep).toMatch(/^The token lacks a fine-grained permission this endpoint needs\./)
+  })
+
+  it("reports an unreachable host without the token", async () => {
+    const input = rest({ method: "GET", path: "/nowhere" })
+    const error = await callRest(input, restTarget(input, GITHUB_COM), deps(fakeFetch({}).fetch)).catch((cause: Error) => cause)
+    expect((error as Error).message).toBe("API_UNREACHABLE: Could not reach api.github.com. Next step: Check your network, then try again.")
+  })
+})
+
+describe("download and upload", () => {
+  it("saves a download inside the project with its size and SHA-256, following the asset redirect without the token", async () => {
+    const bytes = new Uint8Array([1, 2, 3, 4, 5])
+    const { fetch, seen } = fakeFetch({
+      "https://api.github.com/repos/o/r/actions/artifacts/3/zip": () => redirect("https://blob.example.net/a.zip?sig=x"),
+      "https://blob.example.net/a.zip?sig=x": () => new Response(bytes, { headers: { "content-type": "application/zip" } }),
+    })
+    const input = rest({ method: "GET", path: "/repos/o/r/actions/artifacts/3/zip", download: { path: "out/a.zip" } })
+    const output = await callRest(input, restTarget(input, GITHUB_COM), deps(fetch))
+    expect(output.download).toEqual({ path: "out/a.zip", bytes: 5, sha256: createHash("sha256").update(bytes).digest("hex") })
+    expect(readFileSync(join(root, "out", "a.zip"))).toEqual(Buffer.from(bytes))
+    expect(seen[0]!.headers.accept).toBe("application/octet-stream")
+    expect(seen[1]!.headers.authorization).toBeUndefined()
+    await expect(callRest(input, restTarget(input, GITHUB_COM), deps(fetch))).rejects.toThrow(/^API_FILE_EXISTS: /)
+    await callRest({ ...input, download: { path: "out/a.zip", overwrite: true } }, restTarget(input, GITHUB_COM), deps(fetch))
+  })
+
+  it("keeps files inside the project, also through a symbolic link", async () => {
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), "github-api-outside-")))
+    try {
+      symlinkSync(outside, join(root, "link"))
+      for (const path of ["../x", "/etc/passwd", "link/x", "."]) {
+        await expect(projectPath(root, path)).rejects.toThrow(/^API_FILE_OUTSIDE_PROJECT: /)
+      }
+      expect(await projectPath(root, "a/b/c.txt")).toEqual({ absolute: join(root, "a", "b", "c.txt"), relative: "a/b/c.txt" })
+    } finally {
+      rmSync(outside, { recursive: true, force: true })
+    }
+  })
+
+  it("uploads a project file to the uploads host with its content type", async () => {
+    mkdirSync(join(root, "dist"))
+    writeFileSync(join(root, "dist", "a.zip"), "zip-bytes")
+    const { fetch, seen } = fakeFetch({ "https://uploads.github.com/repos/o/r/releases/1/assets?name=a.zip": () => json({ id: 5, state: "uploaded" }, { status: 201 }) })
+    const input = rest({ method: "POST", path: "/repos/o/r/releases/1/assets", query: { name: "a.zip" }, upload: { path: "dist/a.zip", contentType: "application/zip" } })
+    const output = await callRest(input, restTarget(input, GITHUB_COM), deps(fetch))
+    expect(output).toMatchObject({ ok: true, status: 201, data: { id: 5 } })
+    expect(seen[0]).toMatchObject({ method: "POST", headers: { "content-type": "application/zip", authorization: `Bearer ${TOKEN}` } })
+    expect(Buffer.from(seen[0]!.body as Uint8Array).toString()).toBe("zip-bytes")
+  })
+})
+
+describe("callGraphql", () => {
+  it("posts the document to the GraphQL endpoint, and is not ok when GitHub returns errors", async () => {
+    const { fetch, seen } = fakeFetch({
+      "https://ghe.example.com/api/graphql": () => json({ data: null, errors: [{ message: "Field 'x' doesn't exist" }] }),
+    })
+    const output = await callGraphql({ graphql: { query: "{ x }", variables: { a: 1 } } }, deps(fetch, GHES))
+    expect(output).toMatchObject({ ok: false, status: 200, data: { errors: [{ message: "Field 'x' doesn't exist" }] } })
+    expect(seen[0]).toMatchObject({ method: "POST", headers: { authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ query: "{ x }", variables: { a: 1 } }) })
+  })
+})
+
+function rateHeaders(remaining: number) {
+  return { "x-ratelimit-limit": "5000", "x-ratelimit-remaining": String(remaining), "x-ratelimit-reset": String(Date.parse("2026-10-31T00:00:00Z") / 1000) }
+}

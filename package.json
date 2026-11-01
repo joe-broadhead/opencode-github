@@ -1,0 +1,69 @@
+{
+  "name": "@joe-broadhead/opencode-github",
+  "version": "0.0.0",
+  "description": "Unofficial OpenCode plugin for GitHub",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "github"
+  ],
+  "homepage": "https://github.com/joe-broadhead/opencode-github#readme",
+  "bugs": {
+    "url": "https://github.com/joe-broadhead/opencode-github/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/joe-broadhead/opencode-github.git"
+  },
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./dist/index.js"
+    },
+    "./tui": {
+      "default": "./dist/tui.js"
+    }
+  },
+  "files": [
+    "dist",
+    "skills",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "node scripts/build.mjs",
+    "test": "vitest run",
+    "test:tui": "npm run build && bun test test/tui",
+    "test:host": "npm run build && bun test test/host",
+    "lint": "node scripts/check-forbidden.mjs --self-test && node scripts/check-forbidden.mjs",
+    "test:pack": "npm run build && node scripts/pack-smoke.mjs",
+    "check": "npm run typecheck && npm test && npm run build && npm run lint && npm run test:pack && npm run test:tui && npm run test:host",
+    "e2e": "npm run build && bun scripts/e2e-live.mjs",
+    "drift": "node scripts/drift.mjs",
+    "release:check": "node scripts/release-check.mjs"
+  },
+  "devDependencies": {
+    "@babel/core": "7.29.7",
+    "@babel/preset-typescript": "7.27.1",
+    "@opencode/client": "2.2.3",
+    "@opencode/plugin": "2.2.3",
+    "@opencode/sdk": "2.2.3",
+    "@opentui/core": "0.8.0",
+    "@opentui/solid": "0.8.0",
+    "@types/bun": "1.4.4",
+    "@types/node": "24.19.2",
+    "babel-preset-solid": "1.9.16",
+    "esbuild": "0.28.2",
+    "solid-js": "1.9.18",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5",
+    "zod": "4.6.7"
+  },
+  "opencode": {
+    "host": ">=2.2.3 <2.3.0"
+  }
+}
