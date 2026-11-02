@@ -67,6 +67,7 @@
     "host": ">=2.2.3 <2.3.0"
   },
   "jelly": {
+    "title": "GitHub",
     "tools": [
       {
         "name": "github.actions_get",
@@ -652,6 +653,13 @@
     ],
     "rpc": [],
     "views": [],
+    "signIns": [
+      {
+        "id": "github",
+        "label": "GitHub",
+        "server": "github"
+      }
+    ],
     "contributes": {
       "homeFeeds": [],
       "homeWidgets": [],
