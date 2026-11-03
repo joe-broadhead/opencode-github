@@ -8,7 +8,7 @@ Jelly names the plugin **GitHub** (`jelly.title`), with the package name and ver
 
 ## Tools and permissions
 
-96 tools are declared (59 read-only). Jelly's agents have no base "allow everything"
+97 tools are declared (60 read-only). Jelly's agents have no base "allow everything"
 rule, so this plugin's own default rules, which it puts after that rule, never reach them. Jelly
 writes each declared `ask` or `deny` as that tool's default instead (the person's own choice
 replaces it), and denies a read-only helper every tool not marked `readOnly`. A declared `allow`

@@ -113,6 +113,12 @@
         "readOnly": true
       },
       {
+        "name": "github.check_dependency_vulnerabilities",
+        "permission": "github_check_dependency_vulnerabilities",
+        "effect": "allow",
+        "readOnly": true
+      },
+      {
         "name": "github.get_dependabot_alert",
         "permission": "github_get_dependabot_alert",
         "effect": "allow",

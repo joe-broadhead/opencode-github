@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { readdirSync, readFileSync } from "node:fs"
 import { defaultRules } from "../../src/permissions.js"
+import { API_TOOL_NAME, HIDDEN, KNOWN_TOOLS, TOOL_PREFIX } from "../../src/tools.js"
 
 /**
  * The `jelly` section of package.json, which Jelly reads without loading the plugin. Jelly's agents have no base
@@ -25,6 +26,19 @@ describe("the jelly declaration", () => {
     const names = jelly.tools.map((tool) => tool.name)
     expect(new Set(names).size).toBe(names.length)
     for (const tool of jelly.tools) expect(tool.name.replaceAll(".", "_"), tool.name).toBe(tool.permission)
+  })
+
+  it("declares every known tool but the hidden ones, and github_api, marking the reads read-only", () => {
+    const hidden = new Set<string>(HIDDEN)
+    const known = new Map<string, boolean>()
+    for (const toolset of Object.values(KNOWN_TOOLS)) {
+      for (const name of toolset.write) known.set(`${TOOL_PREFIX}${name}`, false)
+      for (const name of toolset.read) if (!hidden.has(name)) known.set(`${TOOL_PREFIX}${name}`, true)
+    }
+    known.set(`${TOOL_PREFIX}${API_TOOL_NAME}`, false)
+    const declared = new Map(jelly.tools.map((tool) => [tool.permission, tool.readOnly]))
+    expect([...declared.keys()].sort()).toEqual([...known.keys()].sort())
+    for (const [permission, readOnly] of known) expect(declared.get(permission), permission).toBe(readOnly)
   })
 
   it("names every skill the package ships", () => {
