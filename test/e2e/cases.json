@@ -78,6 +78,7 @@
     { "tool": "list_secret_scanning_alerts", "args": { "owner": "{writable_owner}", "repo": "{writable_repo}" } },
     { "tool": "get_secret_scanning_alert", "args": { "owner": "{writable_owner}", "repo": "{writable_repo}", "alertNumber": "{secret_scanning_alert}" } },
     { "tool": "list_dependabot_alerts", "args": { "owner": "{writable_owner}", "repo": "{writable_repo}" } },
+    { "tool": "check_dependency_vulnerabilities", "args": { "owner": "{writable_owner}", "repo": "{writable_repo}", "dependencies": [{ "ecosystem": "npm", "name": "lodash", "version": "4.17.15" }] } },
     { "tool": "get_dependabot_alert", "args": { "owner": "{writable_owner}", "repo": "{writable_repo}", "alertNumber": "{dependabot_alert}" } },
     { "tool": "get_global_security_advisory", "args": { "ghsaId": "{ghsa}" } },
     { "tool": "list_global_security_advisories", "args": {} },
