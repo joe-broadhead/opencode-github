@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { loadOptions } from "../../src/config.js"
-import { registerMcp } from "../../src/mcp.js"
+import { observeMcp, registerMcp } from "../../src/mcp.js"
 
 type Ctx = Parameters<typeof registerMcp>[0]
 type Editor = Parameters<Parameters<Ctx["mcp"]["transform"]>[0]>[0]
@@ -92,5 +92,22 @@ describe("registerMcp", () => {
     expect(host.build()).toEqual(host.build())
     await mcp.dispose()
     expect(host.build()).toEqual({})
+  })
+})
+
+describe("observeMcp (GitHub Enterprise Server)", () => {
+  it("registers nothing and reports whether another server named github exists", async () => {
+    const none = fakeMcp()
+    const watched = await observeMcp(none.ctx)
+    expect(watched.conflict()).toBeUndefined()
+    expect(none.build()).toEqual({})
+    expect(watched.conflict()).toBe(false)
+
+    const user = fakeMcp({ github: { type: "remote", url: "https://example.com/mcp" } as Config })
+    const other = await observeMcp(user.ctx)
+    expect(user.build()).toEqual({ github: { type: "remote", url: "https://example.com/mcp" } })
+    expect(other.conflict()).toBe(true)
+    await other.dispose()
+    expect(user.transforms).toEqual([])
   })
 })

@@ -42,6 +42,13 @@ export const GraphqlInput = z.strictObject({
 })
 
 export const ApiInput = z.union([RestInput, GraphqlInput])
+
+/** What a script may send: a REST GET or HEAD without a body or a file, or one GraphQL document. */
+const ScriptRestInput = z.strictObject({
+  method: z.enum(["GET", "HEAD"]),
+  ...RestInput.pick({ path: true, query: true, accept: true, paginate: true, maxPages: true, maxItems: true }).shape,
+})
+export const ScriptApiInput = z.union([ScriptRestInput, GraphqlInput])
 export type ApiInput = z.output<typeof ApiInput>
 export type RestInput = z.output<typeof RestInput>
 export type GraphqlInput = z.output<typeof GraphqlInput>

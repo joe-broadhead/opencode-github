@@ -62,6 +62,13 @@ describe("the catalog", () => {
     expect(toolKind("brand_new_tool")).toBeUndefined()
   })
 
+  it("knows the hosted server's dependency check as a dependabot read", () => {
+    // It looks up packages in the GitHub Advisory Database and changes nothing on GitHub.
+    expect(KNOWN_TOOLS.dependabot.read).toContain("check_dependency_vulnerabilities")
+    expect(toolKind("check_dependency_vulnerabilities")).toBe("read")
+    expect(allReadTools()).toContain("check_dependency_vulnerabilities")
+  })
+
   it("never lists a tool as both read and write", () => {
     const writes = new Set(Object.values(KNOWN_TOOLS).flatMap((toolset) => toolset.write as readonly string[]))
     expect(allReadTools().filter((name) => writes.has(name))).toEqual([])

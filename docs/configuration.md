@@ -65,7 +65,7 @@ from the agents' tools, and the default rules have no allow rule for it.
 | `copilot` | none | `assign_copilot_to_issue`, `create_pull_request_with_copilot`, `request_copilot_review` |
 | `copilot_issue_intents` | none | `assign_copilot_to_issue_with_intent` |
 | `copilot_spaces` | `get_copilot_space`, `list_copilot_spaces` | none |
-| `dependabot` (default) | `get_dependabot_alert`, `list_dependabot_alerts` | none |
+| `dependabot` (default) | `check_dependency_vulnerabilities`, `get_dependabot_alert`, `list_dependabot_alerts` | none |
 | `discussions` (default) | `get_discussion`, `get_discussion_comments`, `list_discussion_categories`, `list_discussions` | `discussion_comment_write` |
 | `gists` | `get_gist`, `list_gists` | `create_gist`, `update_gist` |
 | `git` (default) | `get_repository_tree` | none |
@@ -84,7 +84,8 @@ from the agents' tools, and the default rules have no allow rule for it.
 | `users` (default) | `search_users` | none |
 
 The catalog follows github-mcp-server v2.0.3. Some toolsets, such as `copilot`, `copilot_spaces` and
-`github_support_docs_search`, exist only on GitHub's hosted server.
+`github_support_docs_search`, exist only on GitHub's hosted server, as does `check_dependency_vulnerabilities`, which
+looks up a list of packages in the GitHub Advisory Database.
 
 GitHub's tools are available to agents through Code Mode, in the `github` namespace. The plugin keeps three entry
 tools in the model's direct tool list: `github_get_me`, `github_issue_read` and `github_pull_request_read`.
@@ -238,6 +239,9 @@ output, errors or logs. A 401 marks the account in `/connect` as needing a new s
 
 A deny on `{ "action": "github_api", "resource": "*" }` as the last matching rule removes the tool from that agent.
 
+Scripts can call `github_api` for reads through the tools RPC's `api` method, never for writes, downloads or uploads;
+see [Scripting](scripting.md#api).
+
 ## Repository scope
 
 The plugin has no repository allowlist. MCP permissions cannot name a repository, so scope comes from the
@@ -366,6 +370,10 @@ passed through unchanged.
 | `API_UNREACHABLE` | The API host could not be reached. | Check your network, then try again. |
 | `API_REDIRECT_LOOP` | GitHub redirected more than 5 times. | Try again later. |
 | `API_REDIRECT_INSECURE` | GitHub redirected to a non-HTTPS address. | Try again later. |
+| `SCRIPT_READ_ONLY` | A script's `api` call could change GitHub, or would download or upload a file. | Call api with GET, HEAD or a single GraphQL query; make changes from an OpenCode session, where they ask first. |
+
+A script's calls through the tools RPC, `github.platform.tools`, have more codes for sessions, permissions and the
+server's state; see [Scripting](scripting.md#errors).
 
 When the status cannot be read, the `/github` view shows "GitHub status unavailable. Run /github-status for
 details."

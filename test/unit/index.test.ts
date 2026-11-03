@@ -39,6 +39,7 @@ function fakeContext(input: { version?: string; options?: Record<string, unknown
     command: { transform: transform("command") },
     rpc: { register: async () => ({ ...registration("rpc"), events: { emit: async () => {} } }) },
     session: { synthetic: async () => ({}) },
+    permission: { hook: async () => registration("permission hook") },
     skill: {
       transform: async () => {
         if (input.failSkills) throw new Error("skills failed")
@@ -62,15 +63,35 @@ describe("github.platform", () => {
     expect(plugin.id).toBe("github.platform")
   })
 
-  it("registers permissions, the tool filter, the server, github_api, status and skills in order, and cleans up in reverse", async () => {
+  it("registers permissions, the tool filter, the server, github_api, status, the tools RPC and skills in order, and cleans up in reverse", async () => {
     const host = fakeContext()
     const cleanup = await plugin.setup(host.ctx)
-    expect(host.log).toEqual(["register agent", "register tool", "register mcp", "register tool", "register command", "register rpc", "register skill"])
+    expect(host.log).toEqual([
+      "register agent",
+      "register tool",
+      "register mcp",
+      "register tool",
+      "register command",
+      "register rpc",
+      "register rpc",
+      "register permission hook",
+      "register skill",
+    ])
     expect(host.streams()).toBe(2)
     expect(typeof cleanup).toBe("function")
     host.log.length = 0
     await (cleanup as () => Promise<void>)()
-    expect(host.log).toEqual(["dispose skill", "dispose rpc", "dispose command", "dispose tool", "dispose mcp", "dispose tool", "dispose agent"])
+    expect(host.log).toEqual([
+      "dispose skill",
+      "dispose permission hook",
+      "dispose rpc",
+      "dispose rpc",
+      "dispose command",
+      "dispose tool",
+      "dispose mcp",
+      "dispose tool",
+      "dispose agent",
+    ])
     expect(host.streams()).toBe(0)
     expect(vi.getTimerCount()).toBe(0)
   })
@@ -78,7 +99,18 @@ describe("github.platform", () => {
   it("with host set, registers no MCP server and no tool filter, and keeps the sign-in on its own integration", async () => {
     const host = fakeContext({ options: { host: "ghe.example.com" } })
     const cleanup = (await plugin.setup(host.ctx)) as () => Promise<void>
-    expect(host.log).toEqual(["register agent", "register integration", "register tool", "register command", "register rpc", "register skill"])
+    // The MCP transform only watches for another server named github, for the tools RPC.
+    expect(host.log).toEqual([
+      "register agent",
+      "register integration",
+      "register mcp",
+      "register tool",
+      "register command",
+      "register rpc",
+      "register rpc",
+      "register permission hook",
+      "register skill",
+    ])
     await cleanup()
     expect(host.streams()).toBe(0)
   })
@@ -108,7 +140,16 @@ describe("github.platform", () => {
   it("disposes what it registered when a later step fails, then rethrows", async () => {
     const host = fakeContext({ failSkills: true })
     await expect(Promise.resolve(plugin.setup(host.ctx))).rejects.toThrow("skills failed")
-    expect(host.log.filter((line) => line.startsWith("dispose"))).toEqual(["dispose rpc", "dispose command", "dispose tool", "dispose mcp", "dispose tool", "dispose agent"])
+    expect(host.log.filter((line) => line.startsWith("dispose"))).toEqual([
+      "dispose permission hook",
+      "dispose rpc",
+      "dispose rpc",
+      "dispose command",
+      "dispose tool",
+      "dispose mcp",
+      "dispose tool",
+      "dispose agent",
+    ])
     expect(host.streams()).toBe(0)
     expect(vi.getTimerCount()).toBe(0)
   })

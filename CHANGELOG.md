@@ -9,6 +9,24 @@ All notable changes to this project are documented here. The format follows [Kee
 - A `jelly` section in `package.json`: each tool with its permission, its default effect and whether it only reads, the skill ids. Jelly reads it without loading the plugin and applies the declared asks, because its agents have no base allow rule for this plugin's own default rules to follow. `docs/jelly.md` explains it.
 - `title` and `signIns` in the `jelly` section: the name Jelly shows on the plugin's card, and what the plugin signs in to, so that one card can say whether each sign-in is connected and start, renew or end it. `docs/jelly.md` lists them.
 
+## [0.0.1] - 2026-11-03
+
+### Added
+
+- The tools RPC, `github.platform.tools`: a script can call GitHub's known MCP reads, and `api` (`github_api` limited
+  to REST GET and HEAD and single GraphQL queries), with no model, through `opencode api`, as a session and its agent.
+  It gets exactly the access that agent's model has: a tool its rules hide is refused, OpenCode checks each MCP call
+  against the agent's and the session's rules, and an ask is refused at once because no one is there to answer it.
+  `describe` lists the methods with each tool's live input schema. GitHub's writes, `ui_get` and any tool GitHub adds
+  later are never methods, and `api` refuses changes, downloads and uploads with `SCRIPT_READ_ONLY` before any
+  request. With `host` (GitHub Enterprise Server) only `api` runs. `docs/scripting.md` explains it.
+
+### Changed
+
+- `check_dependency_vulnerabilities`, which GitHub's hosted server now lists in the `dependabot` toolset, is a known
+  read: it looks up a list of packages in the GitHub Advisory Database and changes nothing, so it runs without a
+  prompt, and `/github-status` no longer lists it as unknown.
+
 ## [0.0.0] - 2026-11-01
 
 ### Added

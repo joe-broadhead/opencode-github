@@ -1,6 +1,6 @@
 {
   "name": "@joe-broadhead/opencode-github",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Unofficial OpenCode plugin for GitHub",
   "keywords": [
     "opencode",
@@ -39,9 +39,10 @@
     "test": "vitest run",
     "test:tui": "npm run build && bun test test/tui",
     "test:host": "npm run build && bun test test/host",
+    "test:stock": "npm run build && bun test test/stock",
     "lint": "node scripts/check-forbidden.mjs --self-test && node scripts/check-forbidden.mjs",
     "test:pack": "npm run build && node scripts/pack-smoke.mjs",
-    "check": "npm run typecheck && npm test && npm run build && npm run lint && npm run test:pack && npm run test:tui && npm run test:host",
+    "check": "npm run typecheck && npm test && npm run build && npm run lint && npm run test:pack && npm run test:tui && npm run test:host && npm run test:stock",
     "e2e": "npm run build && bun scripts/e2e-live.mjs",
     "drift": "node scripts/drift.mjs",
     "release:check": "node scripts/release-check.mjs"
