@@ -42,7 +42,14 @@ export type ApiDeps = {
   readonly fetch?: Fetch
 }
 
-type Call = { readonly sessionID: string; readonly agent: string; readonly messageID: string; readonly id: string; readonly signal?: AbortSignal }
+export type Call = { readonly sessionID: string; readonly agent: string; readonly messageID: string; readonly id: string; readonly signal?: AbortSignal }
+
+/** The input, checked against github_api's schema. */
+export function parseInput(raw: unknown): ApiInput {
+  const parsed = InputSchema.safeParse(raw)
+  if (!parsed.success) throw usage(parsed.error.issues.map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`).join("; "))
+  return parsed.data
+}
 
 /** What a call does, for the read-only check and the permission prompt. */
 export function describeCall(input: ApiInput, endpoints: Endpoints) {
@@ -82,7 +89,13 @@ function bodySummary(body: unknown): { keys?: string[]; bytes: number } {
   return body && typeof body === "object" && !Array.isArray(body) ? { keys: Object.keys(body), bytes } : { bytes }
 }
 
-export async function registerApiTool(ctx: ApiContext, deps: ApiDeps): Promise<{ dispose(): Promise<void> }> {
+/**
+ * Registers github_api. `run` is its spec, for the tools RPC's api method: a checked input, and the call's context.
+ */
+export async function registerApiTool(
+  ctx: ApiContext,
+  deps: ApiDeps,
+): Promise<{ dispose(): Promise<void>; run(input: ApiInput, call: Call): Promise<ApiOutput>; signedIn(): Promise<boolean> }> {
   const send: Fetch = deps.fetch ?? ((url, init) => fetch(url, init))
 
   const assert = (call: Call, resource: string, metadata: Record<string, unknown>) =>
@@ -95,6 +108,14 @@ export async function registerApiTool(ctx: ApiContext, deps: ApiDeps): Promise<{
       metadata,
       source: { type: "tool", messageID: call.messageID, id: call.id },
     })
+
+  /** The sign-in github_api uses: the integration's active connection and its credential. */
+  const signIn = async () => {
+    const integrationID = deps.integrationID()
+    const connection = integrationID ? await ctx.integration.connection.active(integrationID) : undefined
+    const credential = connection ? await ctx.integration.connection.resolve(connection) : undefined
+    return { integrationID, connection, credential }
+  }
 
   const run = async (input: ApiInput, call: Call): Promise<ApiOutput> => {
     const described = describeCall(input, deps.endpoints)
@@ -113,9 +134,7 @@ export async function registerApiTool(ctx: ApiContext, deps: ApiDeps): Promise<{
       await assert(call, `download ${file.relative}`, { ...described.metadata, download: file.relative })
     }
 
-    const integrationID = deps.integrationID()
-    const connection = integrationID ? await ctx.integration.connection.active(integrationID) : undefined
-    const credential = connection ? await ctx.integration.connection.resolve(connection) : undefined
+    const { integrationID, connection, credential } = await signIn()
     if (!integrationID || !connection || credential?.type !== "oauth") {
       throw new GitHubPluginError("AUTH_REQUIRED", `${deps.service} is not signed in.`, `Run /connect and choose ${deps.service}.`)
     }
@@ -134,7 +153,7 @@ export async function registerApiTool(ctx: ApiContext, deps: ApiDeps): Promise<{
     return output
   }
 
-  return ctx.tool.transform((editor) => {
+  const registration = await ctx.tool.transform((editor) => {
     editor.add({
       name: API_TOOL_NAME,
       description: API_DESCRIPTION,
@@ -143,9 +162,7 @@ export async function registerApiTool(ctx: ApiContext, deps: ApiDeps): Promise<{
       options: { namespace: SERVER_NAME, permission: API_ACTION, codemode: true, pinned: true },
       execute: async (raw, context) => {
         try {
-          const parsed = InputSchema.safeParse(raw)
-          if (!parsed.success) throw usage(parsed.error.issues.map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`).join("; "))
-          const output = await run(parsed.data, context)
+          const output = await run(parseInput(raw), context)
           return {
             output,
             content: JSON.stringify(output),
@@ -158,4 +175,5 @@ export async function registerApiTool(ctx: ApiContext, deps: ApiDeps): Promise<{
       },
     })
   })
+  return { dispose: registration.dispose, run, signedIn: async () => (await signIn()).credential?.type === "oauth" }
 }

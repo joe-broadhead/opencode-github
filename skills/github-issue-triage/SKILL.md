@@ -37,6 +37,10 @@ For each issue, give:
 
 Present the result as a table when there are several issues.
 
+## Scripts
+
+When the user wants a job that runs without you, such as a cron job or a shell script, it can call GitHub's read tools with no model, through the OpenCode server: `opencode api post /api/rpc/github.platform.tools/<tool>` with the body `{"input":{"sessionID":"<session>","input":<the tool's input>}}`, where `<tool>` is the name without `github_`, such as `pull_request_read`. The method `api` reads GitHub's REST or GraphQL API (GET, HEAD or one query), and `describe` lists every method with its input schema. The script runs as that session's agent, under its permission rules, so have it create its session once with `opencode api post /api/session` and a body such as `{"title":"nightly triage","agent":"build"}`. Scripts can never change anything on GitHub. The details are in the plugin's `docs/scripting.md`.
+
 ## Change nothing unless asked
 
 - Do not add labels, comment, assign, close or edit issues unless the user explicitly asks for that action.
