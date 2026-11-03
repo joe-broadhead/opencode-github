@@ -9,6 +9,7 @@ permission prompts and the TUI. The plugin uses only public `@opencode/plugin` 2
 | --- | --- | --- |
 | Server | `dist/index.js` (`src/index.ts`) | `github.platform` |
 | Status RPC contract (internal; bundled into both entries) | `src/rpc.ts` | `github.platform` |
+| Tools RPC for scripts (bundled into `dist/index.js`) | `src/host/tools-rpc.ts`, `src/api/script.ts` | `github.platform.tools` |
 | TUI | `dist/tui.js` (`src/tui/index.tsx`) | `github.platform.tui` |
 
 Setup runs these steps in order and undoes them in reverse on cleanup, or when a later step fails:
@@ -18,11 +19,13 @@ Setup runs these steps in order and undoes them in reverse on cleanup, or when a
    `HOST_UNTESTED`, unless `allowUntestedHost` turns them into a status warning.
 3. `registerPermissionDefaults` (`src/permissions.ts`) inserts the default rules into each agent.
 4. `registerToolFilter` (`src/tools.ts`) watches the `github` server's tools.
-5. `registerMcp` (`src/mcp.ts`) registers the MCP server.
+5. `registerMcp` (`src/mcp.ts`) registers the MCP server. With `host`, `observeMcp` only records whether another
+   server named github exists, for the tools RPC.
 6. `registerAuth` (`src/auth.ts`) attaches the sign-in methods.
 7. `registerSignInStatus` (`src/sign-in-status.ts`) reports a rejected sign-in to `/connect`.
 8. `registerStatus` (`src/status.ts`) adds the `/github-status` command and the RPC handler.
-9. `registerSkills` (`src/skills.ts`) adds the three skills from `skills/*/SKILL.md`.
+9. `registerToolsRpc` (`src/host/tools-rpc.ts`) adds the tools RPC for scripts and its `evaluate` hook.
+10. `registerSkills` (`src/skills.ts`) adds the three skills from `skills/*/SKILL.md`.
 
 ## MCP registration
 
@@ -99,9 +102,10 @@ OpenCode applies the last matching rule, and saved approvals come after configur
 rules, the user's top-level `permissions` and saved "Always allow" approvals all override the defaults, and a stricter
 agent is never weakened.
 
-There is no permission evaluate hook. A hook would decide outside OpenCode's rules, so user rules and saved
+No permission hook decides the defaults. A hook would decide outside OpenCode's rules, so user rules and saved
 approvals could not override it, and the same call could be judged differently by the plugin and the host. Plain
-rules keep one source of truth that the user can read and change.
+rules keep one source of truth that the user can read and change. The plugin's one hook belongs to the tools RPC: it
+only turns an ask on one of the RPC's own script calls into a deny (see [Tools RPC](#tools-rpc)).
 
 Agents defined only in the user's config are created after plugins run and get no rules. `unguardedAgents` in
 `src/permissions.ts` finds agents with a base allow rule but no default block, and the status names them with the
@@ -132,6 +136,46 @@ The TUI part registers the `github.status` command (slash `/github`, palette "Gi
 `credential.updated`, `credential.switched`, `agent.updated` and `server.connected` events, and shows a fixed message
 instead of raw errors. `scripts/build.mjs` compiles its JSX with Babel and `babel-preset-solid` and bundles it into `dist/tui.js`,
 so no `.tsx` runs from `node_modules`. OpenTUI and Solid come from the host.
+
+## Tools RPC
+
+`github.platform.tools` lets a script call GitHub's reads with no model; [Scripting](scripting.md) is the user's view.
+Its methods are `describe`, one per known read in `allReadTools()` (`src/tools.ts`, every toolset, without `ui_get`),
+named after the upstream tool, and `api`. The MCP list is an allowlist: a write or a tool that GitHub adds later is
+never a method.
+
+A call is `{ sessionID, input }`. The shared module (`src/host/tools-rpc.ts`):
+
+1. looks up the session with `ctx.session.get`, and its agent's rules with `ctx.agent.get` in the session's location
+   (`SESSION_UNKNOWN`, `SESSION_AGENT_REQUIRED`);
+2. refuses the tool when the last rule that matches its permission action (`github_<tool>`, or `github_api`) on `*`, in
+   the agent's rules followed by the session's, is a deny: OpenCode hides such a tool from the model
+   (`PERMISSION_DENIED`);
+3. for an MCP method: refuses with `SERVER_CONFLICT` while the plugin does not own the `github` server (another server
+   of that name, also with `host`); finds the tool's executor in `ctx.tool.list()`, or names the server's state
+   (`AUTH_REQUIRED` and so on, `NOT_REGISTERED` with `host`) or `TOOL_UNAVAILABLE` (a toolset that is off); calls
+   `execute(input, { sessionID, agent, messageID, id, signal, progress })` with a new call id, so OpenCode checks
+   `github_<tool>` on `*` itself and sends its own credential; and returns `{ output?, text }`;
+4. for `api`: runs `scriptApi` (`src/api/script.ts`), which checks the input with `github_api`'s schema, refuses with
+   `SCRIPT_READ_ONLY` anything `describeCall` classifies as a write, `download` and `upload`, then runs `github_api`'s
+   own `run` with the call's context. A read asserts nothing, exactly as on the model path.
+
+While a call runs, its id is live. A `permission.hook("evaluate")` turns an `ask` whose source id is live into a deny,
+so the script gets `PERMISSION_DENIED` at once and no prompt waits. It changes nothing else; the forbidden-API scan
+allows exactly this one.
+
+A `Tool.Error` with a cause is a permission refusal; one without a cause is GitHub's own error (`isError`), which
+becomes `UPSTREAM_ERROR` with its first line, at most 300 characters, with tokens and URL queries removed. A
+`GitHubPluginError` from `api` keeps its code and next step. Any other failure is OpenCode's own and passes through.
+
+OpenCode decodes a plain JSON Schema input with Effect, which drops unknown keys of an object that has properties
+instead of refusing them. So the envelope's schema carries a strict Standard Schema validator as a non-enumerable
+`~standard` property, which OpenCode prefers. The contract still serialises as plain JSON Schema, and OpenCode
+answers a bad envelope with `rpc.invalid_input`.
+
+The executor does not run `execute.before` and `execute.after` hooks; GitHub has none, so results are unchanged.
+`ctx.tool.list()` returning callable executors is not documented as an entry point: the embedded host test and the
+stock test (`test/stock`, stock `opencode serve` 2.2.3 and 2.2.4) check the whole path against the loopback fake.
 
 ## Drift check
 

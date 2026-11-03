@@ -23,6 +23,7 @@ import {
   ownMethods,
   pluginState,
   type Rule,
+  script,
   SDK_VERSION,
   session,
   settledAttempt,
@@ -375,6 +376,67 @@ describe(`GitHub Enterprise Server on OpenCode ${SDK_VERSION}`, () => {
     expect(host.fake.requests.slice(before).map((request) => `${request.method} ${request.path} ${request.authorized}`)).toEqual(["GET /repos/octo/hello true"])
     expect(mcpRequests(host)).toEqual([])
   })
+
+  test("a script reads through api with the GitHub Enterprise sign-in; GitHub's MCP methods are not registered", async () => {
+    const sessionID = await session(host)
+    const before = host.fake.requests.length
+    const read = await script(host, "api", { sessionID, input: { method: "GET", path: "/repos/octo/hello" } })
+    expect(read.value).toMatchObject({ ok: true, status: 200, data: { full_name: "octo/hello" } })
+    // readOnly is off, and a script's write is still refused before any request.
+    expect(await script(host, "api", { sessionID, input: { method: "POST", path: "/repos/octo/hello/releases", body: { tag_name: "v1" } } })).toMatchObject({
+      type: "failed",
+      code: "SCRIPT_READ_ONLY",
+    })
+    expect(host.fake.requests.slice(before).map((request) => `${request.method} ${request.path} ${request.authorized}`)).toEqual(["GET /repos/octo/hello true"])
+    const refused = await script(host, "get_me", { sessionID, input: {} })
+    expect(refused).toMatchObject({ type: "failed", code: "NOT_REGISTERED" })
+    expect(refused.message).toContain("call the api method instead")
+  })
+})
+
+describe(`the tools RPC on OpenCode ${SDK_VERSION}`, () => {
+  let host: Host
+  beforeAll(async () => {
+    host = await startHost({ config: () => ({ agents: { locked: { mode: "primary", permissions: [deny("github_*")] } } }) })
+    expect((await signInWithToken(host)).settled).toMatchObject({ status: "complete" })
+    await connected(host)
+    await tool(host, "github_get_me")
+  })
+  afterAll(() => host?.close())
+
+  test("runs a known read through OpenCode's own GitHub sign-in, as the session's agent", async () => {
+    const sessionID = await session(host)
+    const before = host.fake.requests.length
+    const result = await script(host, "get_me", { sessionID, input: { query: "hello" } })
+    expect(result.value).toEqual({ output: { tool: "get_me", arguments: { query: "hello" } }, text: expect.stringContaining(`"login":"${PAT_LOGIN}"`) })
+    expect(host.fake.requests.slice(before).filter((request) => request.rpc === "tools/call").map((request) => [request.tool, request.authorized])).toEqual([["get_me", true]])
+    expect(JSON.stringify(result)).not.toContain(FIXTURE_PAT)
+  })
+
+  test("api reads GitHub's REST and GraphQL API with the same sign-in, and refuses a write before any request", async () => {
+    const sessionID = await session(host)
+    const description = await script(host, "describe", {})
+    expect(description.value.methods.find((method: { name: string }) => method.name === "api")).toMatchObject({ kind: "plugin", action: "github_api", available: true })
+    const before = host.fake.requests.length
+    const read = await script(host, "api", { sessionID, input: { method: "GET", path: "/repos/octo/hello" } })
+    expect(read.value).toMatchObject({ ok: true, status: 200, data: { full_name: "octo/hello" }, trust: { githubContent: "untrusted" } })
+    expect(JSON.stringify(read)).not.toContain(FIXTURE_PAT)
+    for (const input of [
+      { method: "DELETE", path: "/repos/octo/hello" },
+      { method: "GET", path: "/repos/octo/hello/zipball", download: { path: "hello.zip" } },
+      { graphql: { query: "mutation { addStar(input: {starrableId: \"x\"}) { clientMutationId } }" } },
+    ])
+      expect(await script(host, "api", { sessionID, input })).toMatchObject({ type: "failed", code: "SCRIPT_READ_ONLY" })
+    expect(host.fake.requests.slice(before).map((request) => `${request.method} ${request.path} ${request.authorized}`)).toEqual(["GET /repos/octo/hello true"])
+  })
+
+  test("refuses an agent that denies GitHub, for both kinds of method, before anything is called", async () => {
+    const sessionID = await session(host, "locked")
+    const before = host.fake.requests.length
+    expect(await script(host, "get_me", { sessionID, input: {} })).toMatchObject({ type: "failed", code: "PERMISSION_DENIED" })
+    expect(await script(host, "api", { sessionID, input: { method: "GET", path: "/repos/octo/hello" } })).toMatchObject({ type: "failed", code: "PERMISSION_DENIED" })
+    expect(host.fake.requests.slice(before)).toEqual([])
+  })
 })
 
 describe("a github server the user already configured", () => {
@@ -397,6 +459,12 @@ describe("a github server the user already configured", () => {
     const { data } = await host.client.integration.get({ integrationID: id, location: host.location })
     expect(data.name).toBe("github")
     expect(data.methods.map((method) => (method.type === "oauth" ? method.id : method.type))).toEqual([id])
+  })
+
+  test("is never called by a script", async () => {
+    const before = host.fake.requests.length
+    expect(await script(host, "get_me", { sessionID: await session(host), input: {} })).toMatchObject({ type: "failed", code: "SERVER_CONFLICT" })
+    expect(host.fake.requests.slice(before).filter((request) => request.rpc === "tools/call")).toEqual([])
   })
 })
 

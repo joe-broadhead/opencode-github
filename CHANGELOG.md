@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- The tools RPC, `github.platform.tools`: a script can call GitHub's known MCP reads, and `api` (`github_api` limited
+  to REST GET and HEAD and single GraphQL queries), with no model, through `opencode api`, as a session and its agent.
+  It gets exactly the access that agent's model has: a tool its rules hide is refused, OpenCode checks each MCP call
+  against the agent's and the session's rules, and an ask is refused at once because no one is there to answer it.
+  `describe` lists the methods with each tool's live input schema. GitHub's writes, `ui_get` and any tool GitHub adds
+  later are never methods, and `api` refuses changes, downloads and uploads with `SCRIPT_READ_ONLY` before any
+  request. With `host` (GitHub Enterprise Server) only `api` runs. `docs/scripting.md` explains it.
+
 ### Changed
 
 - `check_dependency_vulnerabilities`, which GitHub's hosted server now lists in the `dependabot` toolset, is a known

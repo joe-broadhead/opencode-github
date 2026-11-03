@@ -45,11 +45,12 @@ One command runs every local check, in this order. It must pass before every com
 | Pack and install | `npm run test:pack` | Packs the package, checks its file list and size, installs the tarball into a new project with scripts disabled, loads it in stock OpenCode 2.2.3 and 2.2.4 (plugin active, `/connect` lists GitHub with its sign-in methods, default rules, status RPC), and imports the server and RPC entries. |
 | TUI | `npm run test:tui` | Renders the built `dist/tui.js` with OpenTUI's test renderer under Bun. |
 | Host | `npm run test:host` | Loads the built plugin into an embedded OpenCode host from the public `@opencode/sdk` 2.2.3 under Bun, with GitHub replaced by a loopback fake. |
+| Stock | `npm run test:stock` | Runs stock `opencode serve` 2.2.3 and 2.2.4 with the built plugin and a test probe plugin (`test/stock/probe`) that points the `github` server at the loopback fake, and calls the tools RPC as a script: known reads, denies, refused asks, session rules, excluded tools, upstream errors and `api` refusals. |
 
-The pack check takes the stock OpenCode binaries from `OPENCODE_BIN_2_2_3` and `OPENCODE_BIN_2_2_4`. When one is
-unset, it installs `@opencode/cli` at that version into a temporary folder.
+The pack check and the stock test take the stock OpenCode binaries from `OPENCODE_BIN_2_2_3` and `OPENCODE_BIN_2_2_4`.
+When one is unset, each installs `@opencode/cli` at that version into a temporary folder, once per run.
 
-The host tests and the pack check run OpenCode in a temporary profile: `HOME`, the XDG folders, `TMPDIR` and
+The host tests, the stock test and the pack check run OpenCode in a temporary profile: `HOME`, the XDG folders, `TMPDIR` and
 `OPENCODE_TEST_HOME` all point inside a temporary folder, because Bun's `os.homedir()` ignores a changed `HOME`.
 Every request outside the loopback fake fails the test.
 

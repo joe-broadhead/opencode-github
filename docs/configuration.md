@@ -239,6 +239,9 @@ output, errors or logs. A 401 marks the account in `/connect` as needing a new s
 
 A deny on `{ "action": "github_api", "resource": "*" }` as the last matching rule removes the tool from that agent.
 
+Scripts can call `github_api` for reads through the tools RPC's `api` method, never for writes, downloads or uploads;
+see [Scripting](scripting.md#api).
+
 ## Repository scope
 
 The plugin has no repository allowlist. MCP permissions cannot name a repository, so scope comes from the
@@ -367,6 +370,10 @@ passed through unchanged.
 | `API_UNREACHABLE` | The API host could not be reached. | Check your network, then try again. |
 | `API_REDIRECT_LOOP` | GitHub redirected more than 5 times. | Try again later. |
 | `API_REDIRECT_INSECURE` | GitHub redirected to a non-HTTPS address. | Try again later. |
+| `SCRIPT_READ_ONLY` | A script's `api` call could change GitHub, or would download or upload a file. | Call api with GET, HEAD or a single GraphQL query; make changes from an OpenCode session, where they ask first. |
+
+A script's calls through the tools RPC, `github.platform.tools`, have more codes for sessions, permissions and the
+server's state; see [Scripting](scripting.md#errors).
 
 When the status cannot be read, the `/github` view shows "GitHub status unavailable. Run /github-status for
 details."
