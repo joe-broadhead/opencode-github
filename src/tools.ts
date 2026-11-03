@@ -2,7 +2,9 @@
 // list in the README of github/github-mcp-server v2.0.3
 // (b98d115bbb080e9555466a96656ec4df605aea21), with each tool's readOnlyHint from its
 // tool snapshot at that commit. The remote-only tools in copilot, copilot_spaces and
-// github_support_docs_search have no snapshot there and are classified by what they do.
+// github_support_docs_search have no snapshot there and are classified by what they do, as is
+// check_dependency_vulnerabilities, which the hosted server added to dependabot later (it looks
+// up packages in the GitHub Advisory Database and changes nothing).
 // `npm run drift` compares this list with the live server and warns about changes.
 import type { Plugin } from "@opencode/plugin"
 import type { Toolset } from "./config.js"
@@ -16,7 +18,7 @@ export const KNOWN_TOOLS = {
   copilot: { read: [], write: ["assign_copilot_to_issue", "create_pull_request_with_copilot", "request_copilot_review"] },
   copilot_issue_intents: { read: [], write: ["assign_copilot_to_issue_with_intent"] },
   copilot_spaces: { read: ["get_copilot_space", "list_copilot_spaces"], write: [] },
-  dependabot: { read: ["get_dependabot_alert", "list_dependabot_alerts"], write: [] },
+  dependabot: { read: ["check_dependency_vulnerabilities", "get_dependabot_alert", "list_dependabot_alerts"], write: [] },
   discussions: {
     read: ["get_discussion", "get_discussion_comments", "list_discussion_categories", "list_discussions"],
     write: ["discussion_comment_write"],

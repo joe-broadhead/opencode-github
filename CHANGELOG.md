@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `check_dependency_vulnerabilities`, which GitHub's hosted server now lists in the `dependabot` toolset, is a known
+  read: it looks up a list of packages in the GitHub Advisory Database and changes nothing, so it runs without a
+  prompt, and `/github-status` no longer lists it as unknown.
+
 ## [0.0.0] - 2026-11-01
 
 ### Added

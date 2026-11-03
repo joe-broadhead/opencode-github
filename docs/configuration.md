@@ -65,7 +65,7 @@ from the agents' tools, and the default rules have no allow rule for it.
 | `copilot` | none | `assign_copilot_to_issue`, `create_pull_request_with_copilot`, `request_copilot_review` |
 | `copilot_issue_intents` | none | `assign_copilot_to_issue_with_intent` |
 | `copilot_spaces` | `get_copilot_space`, `list_copilot_spaces` | none |
-| `dependabot` (default) | `get_dependabot_alert`, `list_dependabot_alerts` | none |
+| `dependabot` (default) | `check_dependency_vulnerabilities`, `get_dependabot_alert`, `list_dependabot_alerts` | none |
 | `discussions` (default) | `get_discussion`, `get_discussion_comments`, `list_discussion_categories`, `list_discussions` | `discussion_comment_write` |
 | `gists` | `get_gist`, `list_gists` | `create_gist`, `update_gist` |
 | `git` (default) | `get_repository_tree` | none |
@@ -84,7 +84,8 @@ from the agents' tools, and the default rules have no allow rule for it.
 | `users` (default) | `search_users` | none |
 
 The catalog follows github-mcp-server v2.0.3. Some toolsets, such as `copilot`, `copilot_spaces` and
-`github_support_docs_search`, exist only on GitHub's hosted server.
+`github_support_docs_search`, exist only on GitHub's hosted server, as does `check_dependency_vulnerabilities`, which
+looks up a list of packages in the GitHub Advisory Database.
 
 GitHub's tools are available to agents through Code Mode, in the `github` namespace. The plugin keeps three entry
 tools in the model's direct tool list: `github_get_me`, `github_issue_read` and `github_pull_request_read`.
