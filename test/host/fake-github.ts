@@ -1,7 +1,9 @@
 // A loopback fake of the GitHub endpoints the plugin and the host use: GitHub's MCP server
 // (Streamable HTTP, JSON responses), the device-flow endpoints and GET /user. It accepts only
 // the fixture tokens below and records each request's method, path, JSON-RPC method, tool,
-// MCP headers and whether Authorization was present, never a token value.
+// MCP headers and whether Authorization was present, never a token value. A tools/call answers
+// with the tool and its arguments as structured content, or, for a `query` argument that starts
+// with "fail", with an upstream error (`isError`) whose first line holds a signed URL.
 
 export const FIXTURE_PAT = `github_pat_${"x".repeat(40)}`
 const FIXTURE_DEVICE_TOKEN = `gho_${"d".repeat(36)}`
@@ -10,6 +12,11 @@ export const DEVICE_LOGIN = "fixture-device"
 export const USER_CODE = "WDJB-MJHT"
 /** Text in every tools/call result, so a test can check that output never shows response content. */
 export const CONTENT_MARKER = "fake-response-content"
+/** The upstream error a "fail" query gets: two lines, the first with a signed URL. */
+export const UPSTREAM_FAILURE = "Validation failed for https://objects.example.invalid/log.txt?X-Amz-Signature=fake-signature-123\nstack: second line"
+
+/** Each fake tool's input schema. */
+export const FAKE_INPUT = { type: "object", properties: { query: { type: "string" } } } as const
 
 export type FakeTool = { readonly name: string; readonly readOnly: boolean }
 
@@ -47,7 +54,12 @@ export interface FakeGitHub {
   close(): Promise<void>
 }
 
-type Message = { jsonrpc: "2.0"; id?: string | number | null; method: string; params?: { protocolVersion?: string; name?: string } }
+type Message = {
+  jsonrpc: "2.0"
+  id?: string | number | null
+  method: string
+  params?: { protocolVersion?: string; name?: string; arguments?: Record<string, unknown> }
+}
 
 const loginFor = (authorization: string | null, revoked = false) => {
   if (revoked) return undefined
@@ -147,12 +159,18 @@ function answer(message: Message, tools: readonly FakeTool[], readOnly: boolean,
         tools: tools.filter((tool) => !readOnly || tool.readOnly).map((tool) => ({
           name: tool.name,
           description: `Fake ${tool.name}`,
-          inputSchema: { type: "object", properties: {} },
+          inputSchema: FAKE_INPUT,
           annotations: { readOnlyHint: tool.readOnly },
         })),
       })
-    case "tools/call":
-      return reply({ content: [{ type: "text", text: JSON.stringify({ tool: message.params?.name, login, body: CONTENT_MARKER }) }] })
+    case "tools/call": {
+      const args = message.params?.arguments ?? {}
+      if (String(args["query"] ?? "").startsWith("fail")) return reply({ content: [{ type: "text", text: UPSTREAM_FAILURE }], isError: true })
+      return reply({
+        content: [{ type: "text", text: JSON.stringify({ tool: message.params?.name, login, body: CONTENT_MARKER }) }],
+        structuredContent: { tool: message.params?.name, arguments: args },
+      })
+    }
     case "ping":
       return reply({})
     default:

@@ -26,6 +26,7 @@ export const SDK_VERSION = manifest.version
 
 if (!existsSync(join(REPO, "dist", "index.js"))) throw new Error("dist/ is missing. Run npm run build first.")
 export { GithubRpc } from "../../src/rpc.js"
+import { TOOLS_RPC_ID } from "../../src/host/tools-rpc.js"
 
 export type Rule = { action: string; resource: string; effect: "allow" | "ask" | "deny" }
 
@@ -266,4 +267,14 @@ export async function statusCommand(host: Host, sessionID: string) {
     const posted = inbox.filter((item) => item.type === "synthetic").at(-1)
     return posted?.type === "synthetic" ? posted.payload.text : undefined
   })
+}
+
+/** A tools RPC call's output, or its error's `{ type, code, message }`. */
+export async function script(host: Host, method: string, input: unknown): Promise<Record<string, any>> {
+  try {
+    return { value: (await host.client.rpc.call({ rpcID: TOOLS_RPC_ID, method, input: input as never, location: host.location })).output }
+  } catch (error) {
+    const e = error as Record<string, any>
+    return { type: e.type ?? e._tag, code: e.data?.code, message: String(e.message ?? e) }
+  }
 }

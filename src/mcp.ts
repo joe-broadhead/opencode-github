@@ -37,3 +37,15 @@ export async function registerMcp(
   })
   return { dispose: registration.dispose, conflict: () => conflict }
 }
+
+/**
+ * With `host` (GitHub Enterprise Server) the plugin registers no server. This only records whether
+ * another server named github exists, so the tools RPC never calls a server the plugin does not manage.
+ */
+export async function observeMcp(ctx: McpContext): Promise<{ dispose(): Promise<void>; conflict(): boolean | undefined }> {
+  let conflict: boolean | undefined
+  const registration = await ctx.mcp.transform((editor) => {
+    conflict = editor.get(SERVER_NAME) !== undefined
+  })
+  return { dispose: registration.dispose, conflict: () => conflict }
+}

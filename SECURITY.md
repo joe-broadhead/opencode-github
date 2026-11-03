@@ -74,3 +74,28 @@ public issues, can place text that tries to steer your agent.
 - The default `github_*` ask rule also matches tools of any other MCP server whose name starts with `github_`.
 
 See [docs/configuration.md](docs/configuration.md#permissions).
+
+## Scripts
+
+The tools RPC (`github.platform.tools`, see [docs/scripting.md](docs/scripting.md)) runs GitHub's read tools and
+`github_api`'s reads for a script, with no model. It adds no authority:
+
+- A script names a session that names an agent, and runs as them. A tool that the agent's or the session's rules hide
+  from the model is refused. OpenCode's own executor then checks each MCP call against the agent's rules, the
+  session's rules and saved approvals, as it does for the model. An `api` read asserts nothing, as for the model.
+- An ask on a script's call is denied, not prompted: no one is there to answer it. The plugin's one permission hook
+  changes only an ask on one of its own script calls in flight, only to a deny, and leaves every other call alone. The
+  default rules themselves still use no hook.
+- Only the known reads are methods. GitHub's write tools, `ui_get` and any tool that GitHub adds later are never
+  methods, even with an allow rule. `api` refuses every call that could change GitHub, every GraphQL document that is
+  not one query, `download` and `upload` with `SCRIPT_READ_ONLY` before any request, whatever `readOnly` and the rules
+  say.
+- MCP calls go through OpenCode's own connection and sign-in, and `api` uses the same sign-in, hosts and redirect
+  handling as `github_api`. No token is returned.
+- GitHub's MCP error text reaches the script only as the first line, at most 300 characters, with tokens and URL query
+  strings removed. Results are GitHub content, which is untrusted, as for the model.
+- OpenCode's `execute.before` and `execute.after` tool hooks, from any plugin, do not run for a script's call, so
+  another plugin's policy hook does not see it. A script's calls are not recorded in the session; GitHub records API
+  calls in its audit logs.
+- The RPC is reachable only by callers of the OpenCode server API, who already hold the server's full authority. The
+  session is not a login: it scopes a script to what its agent may do.

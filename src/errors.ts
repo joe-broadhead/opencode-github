@@ -33,15 +33,19 @@ type ErrorCode =
   | "API_UNREACHABLE"
   | "API_REDIRECT_LOOP"
   | "API_REDIRECT_INSECURE"
+  | "SCRIPT_READ_ONLY"
 
 export class GitHubPluginError extends Error {
   readonly code: ErrorCode
+  /** What happened, without the code or the next step. */
+  readonly detail: string
   readonly nextStep: string
 
   constructor(code: ErrorCode, message: string, nextStep: string) {
     super(`${code}: ${message} Next step: ${nextStep}`)
     this.name = "GitHubPluginError"
     this.code = code
+    this.detail = message
     this.nextStep = nextStep
   }
 }
