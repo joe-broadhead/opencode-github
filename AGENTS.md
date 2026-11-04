@@ -34,9 +34,11 @@ When you add a rule here, add it to the scan and its self-test too.
 ## Design
 
 - GitHub's own MCP tools are the tool surface. The plugin adds one tool, `github_api` (`src/api/`), for what they
-  cannot do. It classifies each call itself (GET and HEAD, or one GraphQL query, read; everything else writes),
-  asserts `github_api` on `METHOD /path` for writes, refuses writes while read-only, sends requests only to the
-  configured API and uploads bases, and never forwards the token across origins. Status lives in `/github-status`,
+  cannot do. It classifies each call itself (GET and HEAD, `POST /markdown` and `/markdown/raw`, or one GraphQL query,
+  read; everything else writes), asserts `github_api` on `METHOD /path` for writes, with exactly the path it sends
+  (dot segments and needless percent-encoding are refused), refuses writes while read-only, sends requests only to the
+  configured API and uploads bases, and never forwards the token across origins. It and GitHub's MCP tools share the
+  Code Mode namespace `github`, which it describes. Status lives in `/github-status`,
   the `/github` dialog and the status RPC, which all render one status model (`src/rpc.ts`).
 - `KNOWN_TOOLS` in `src/tools.ts` lists the known reads and writes. Unknown tools ask, or are hidden with
   `unknownTools: "hide"`. `npm run drift` finds upstream changes; it never acts at runtime.

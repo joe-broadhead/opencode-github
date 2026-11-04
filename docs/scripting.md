@@ -96,8 +96,8 @@ opencode api post /api/rpc/github.platform.tools/api -d '{"input":{
 The result is `github_api`'s output: `{ ok, status, data, contentType?, truncated, rateLimit?, pagination?, trust }`.
 A REST error status, such as 404, is a result with `ok: false`, not an RPC error, as for the model.
 
-Anything else is refused with `SCRIPT_READ_ONLY` before any request: every other method, a GraphQL document that is
-not one query, `download` (a file write) and `upload`. This holds with `readOnly: false` and with an allow rule for
+Anything else is refused with `SCRIPT_READ_ONLY` before any request: every other method (also `POST /markdown`, which
+the model may call as a read), a GraphQL document that is not one query, `download` (a file write) and `upload`. This holds with `readOnly: false` and with an allow rule for
 `github_api`, because a script cannot answer the prompt a change asks for. Make changes from an OpenCode session.
 
 ## Errors

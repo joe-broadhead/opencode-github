@@ -51,7 +51,7 @@ async function setUp(
       list: async () =>
         (input.listed ?? []).map((name) => ({ id: `github_${name}`, name, description: name, input: { type: "object" }, execute: async () => ({ output: { name }, content: [{ type: "text", text: name }] }) })),
       transform: async (callback: (editor: unknown) => void) => {
-        callback({ add: () => {} })
+        callback({ add: () => {}, namespace: () => {} })
         return { dispose: async () => {} }
       },
     },
@@ -154,6 +154,7 @@ describe("the api method", () => {
     ["two GraphQL operations", { graphql: { query: "query A { viewer { login } } query B { viewer { id } }" } }, "not a single query"],
     ["a download", { method: "GET", path: "/repos/octo/repo/zipball", download: { path: "repo.zip" } }, "scripts never write files"],
     ["an upload", { method: "POST", path: "/repos/octo/repo/releases/1/assets", upload: { path: "a.zip", contentType: "application/zip" } }, "upload sends a file"],
+    ["POST /markdown, a read with a body", { method: "POST", path: "/markdown", body: { text: "x" } }, "POST /markdown is not a GET or HEAD"],
   ])("refuses %s with SCRIPT_READ_ONLY before any request, even when the agent allows github_api", async (_name, input, what) => {
     const h = await setUp({ agents: { build: [...BASE, rule("github_api", "allow")] } })
     const result = await h.call(SCRIPT_API_METHOD, input)

@@ -28,7 +28,9 @@ function change(input: ApiInput, endpoints: Endpoints): string | undefined {
   if (input.download) return "download saves a file in the project, and scripts never write files."
   if (input.upload) return "upload sends a file to GitHub, and scripts only read."
   const described = describeCall(input, endpoints)
-  return described.kind === "write" ? `${described.resource} changes GitHub, and scripts only read.` : undefined
+  if (described.kind === "write") return `${described.resource} changes GitHub, and scripts only read.`
+  // POST /markdown changes nothing, but a script's read is a GET or HEAD without a body.
+  return input.method === "GET" || input.method === "HEAD" ? undefined : `${described.resource} is not a GET or HEAD, and scripts send only those and single GraphQL queries.`
 }
 
 export function scriptApi(
