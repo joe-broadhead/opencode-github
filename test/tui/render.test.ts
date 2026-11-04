@@ -21,12 +21,13 @@ const UNAVAILABLE = "GitHub status unavailable. Run /github-status for details."
 const row = (label: string, value: string) => `${label.padEnd(28)} ${value}`
 
 const needsAuth: Status = {
-  state: "needs_auth",
+  version: "0.0.2",
+  state: "sign_in_required",
   readOnly: true,
   toolsets: ["context", "repos", "issues", "pull_requests"],
   tools: { visible: 26, unknown: [], mode: "ask" },
   unguardedAgents: [],
-  host: { version: "2.2.3" },
+  host: { version: "2.2.3", range: ">=2.2.3 <2.3.0", tested: true },
   nextStep: "Run /connect and choose GitHub.",
 }
 
@@ -99,20 +100,21 @@ describe("GitHub TUI status view", () => {
     expect(view.calls[0]?.options.location).toEqual(DEFAULT_LOCATION)
   })
 
-  test("renders needs_auth with the /connect next step", async () => {
+  test("renders sign_in_required with the /connect next step, and every row", async () => {
     const view = await open()
     const frame = await answer(view, { status: needsAuth })
     expect(frame).not.toContain("Loading")
     expect(frame).toContain(row("Connection", "sign-in required"))
-    expect(frame).not.toContain("Account")
+    expect(frame).toContain(row("Account", "none"))
     expect(frame).toContain(row("Access", "read-only"))
     expect(frame).toContain(row("Toolsets", "context, repos, issues, pull_requests"))
     expect(frame).toContain(row("Host", "github.com"))
     expect(frame).toContain(row("Tools", "26 available"))
     expect(frame).toContain(row("OpenCode", "2.2.3 (tested)"))
     expect(frame).toContain(row("Next step", "Run /connect and choose GitHub"))
-    expect(frame).not.toContain("Agents without")
-    const order = ["Connection", "Access", "Toolsets", "Host", "Tools ", "OpenCode", "Next step"].map((text) => frame.indexOf(text))
+    expect(frame).toContain(row("Agents without default rules", "none"))
+    expect(frame).not.toContain("rules below")
+    const order = ["Connection", "Account", "Access", "Toolsets", "Host", "Tools ", "Agents without default rules", "OpenCode", "Next step"].map((text) => frame.indexOf(text))
     expect([...order].sort((a, b) => a - b)).toEqual(order)
     expect(jargonIn(frame)).toEqual([])
   })
@@ -153,7 +155,8 @@ describe("GitHub TUI status view", () => {
           { action: "github_*", resource: "*", effect: "ask" },
           { action: "github_get_me", resource: "*", effect: "allow" },
         ],
-        host: { version: "2.3.0", warning: "OpenCode 2.3.0 is outside the tested range." },
+        host: { version: "2.3.0", range: ">=2.2.3 <2.3.0", tested: false },
+        hostWarning: "OpenCode 2.3.0 is outside the tested range.",
       } satisfies Status,
     })
     expect(frame).toContain(row("Access", "reads and writes (writes ask first)"))

@@ -6,9 +6,10 @@ docs: `README.md`, `docs/configuration.md`; contributor docs: `docs/architecture
 
 ## Platform
 
-- Use only public APIs of `@opencode/plugin` 2.2.3. The tested host range is exactly `>=2.2.3 <2.3.0`, in both
-  `package.json` `opencode.host` and `TESTED_HOST_RANGE` in `src/host-version.ts`. Never write it as `^2.2.3`.
-- Test against stock OpenCode 2.2.3 and 2.2.4 only.
+- Use only public APIs of `@opencode/plugin` 2.2.3. The supported host range is exactly `>=2.2.3 <2.3.0`, in both
+  `package.json` `opencode.host` and `HOST_RANGE` in `src/host-version.ts`. Never write it as `^2.2.3`.
+- Test against stock OpenCode 2.2.3, 2.2.4 and 2.2.5 only. `TESTED_HOSTS` in `src/host-version.ts` is the one list:
+  the status's `host.tested`, the host, pack and stock tests and CI all take it from there.
 - Keep plugin ids `github.platform` (server and status RPC), `github.platform.tools` (tools RPC) and
   `github.platform.tui` (TUI), and the server name `github`.
 
@@ -33,9 +34,13 @@ When you add a rule here, add it to the scan and its self-test too.
 ## Design
 
 - GitHub's own MCP tools are the tool surface. The plugin adds one tool, `github_api` (`src/api/`), for what they
-  cannot do. It classifies each call itself (GET and HEAD, or one GraphQL query, read; everything else writes),
-  asserts `github_api` on `METHOD /path` for writes, refuses writes while read-only, sends requests only to the
-  configured API and uploads bases, and never forwards the token across origins. Status lives in `/github-status`,
+  cannot do. It classifies each call itself (GET and HEAD, `POST /markdown` and `/markdown/raw`, or one GraphQL query,
+  read; everything else writes), asserts `github_api` on `METHOD /path` for writes, with exactly the path it sends
+  (dot segments and needless percent-encoding are refused) and the names GitHub reads without regard to case in lower
+  case (`src/api/names.ts`), never follows a redirect for a change, follows a read's redirect within the API only after
+  the same assert on the new path, and leaves the API only for a download's storage redirect, refuses writes while read-only, sends requests only to the
+  configured API and uploads bases, and never forwards the token across origins. It and GitHub's MCP tools share the
+  Code Mode namespace `github`, which it describes. Status lives in `/github-status`,
   the `/github` dialog and the status RPC, which all render one status model (`src/rpc.ts`).
 - `KNOWN_TOOLS` in `src/tools.ts` lists the known reads and writes. Unknown tools ask, or are hidden with
   `unknownTools: "hide"`. `npm run drift` finds upstream changes; it never acts at runtime.
@@ -46,8 +51,9 @@ When you add a rule here, add it to the scan and its self-test too.
   method per known read (`allReadTools()`, through OpenCode's own executors from `ctx.tool.list()`, never an MCP client
   of the plugin's), and `api` (`src/api/script.ts`): `github_api`'s own spec, refusing writes, GraphQL that is not one
   query, `download` and `upload` with `SCRIPT_READ_ONLY` before any request. Writes, `ui_get` and unknown tools are
-  never methods. A script runs as a session and its agent; its one permission hook only turns its own script calls'
-  asks into denies. `src/host/tools-rpc.ts` is a copy of a module shared by several plugins: change only its block
+  never methods. `describe` gives a read GitHub does not list a `detail` naming its toolset and the `toolsets` option
+  (`unavailableDetail` in `src/tools.ts`). A script runs as a session and its agent; its one permission hook only turns
+  its own script calls' asks into denies. `src/host/tools-rpc.ts` is a copy of a module shared by several plugins: change only its block
   between the `PLUGIN-SPECIFIC` markers here, and the rest in the shared copy first.
 - Agents defined only in the user's config get no rules. Status names them and gives the fix: the block **first** in
   **that agent's own** `permissions` list, followed by the user's top-level rules for `github_` tools. Never recommend the
@@ -79,5 +85,6 @@ When you add a rule here, add it to the scan and its self-test too.
 - No tokens, client secrets, personal data or machine-local paths in the repository.
 - Tests use narrow `Pick<Plugin.Context, …>` fakes. Host tests use the public `@opencode/sdk`, and the stock test
   (`test/stock`) stock `opencode serve` binaries; both isolate `HOME`, the XDG folders, `TMPDIR` and
-  `OPENCODE_TEST_HOME` inside a temporary folder.
+  `OPENCODE_TEST_HOME` inside a temporary folder under the system's `/tmp` (`test/host/scratch.ts`), never under
+  `$TMPDIR` or `$HOME`, and each stock host gets its own free port. Never touch the owner's real OpenCode.
 - Run `npm run check` before every commit. Commit messages use `type(scope): summary`.

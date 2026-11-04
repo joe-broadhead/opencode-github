@@ -1,7 +1,8 @@
 // The known GitHub MCP tools, per toolset, marked read or write. Seeded from the tool
-// list in the README of github/github-mcp-server v2.0.3
-// (b98d115bbb080e9555466a96656ec4df605aea21), with each tool's readOnlyHint from its
-// tool snapshot at that commit. The remote-only tools in copilot, copilot_spaces and
+// list in the README of github/github-mcp-server v2.1.0
+// (4bcdcdf8d7beee98c9448e73e257308280924cc4), with each tool's readOnlyHint from its
+// tool snapshot at that commit. issue_artifact_read and issue_artifact_write are behind the
+// issue_artifacts feature flag, which is off unless X-MCP-Features names it; the plugin sends none. The remote-only tools in copilot, copilot_spaces and
 // github_support_docs_search have no snapshot there and are classified by what they do, as is
 // check_dependency_vulnerabilities, which the hosted server added to dependabot later (it looks
 // up packages in the GitHub Advisory Database and changes nothing).
@@ -31,8 +32,8 @@ export const KNOWN_TOOLS = {
     write: ["create_repository_ruleset", "custom_properties_write"],
   },
   issues: {
-    read: ["get_label", "issue_read", "list_issue_fields", "list_issue_types", "list_issues", "search_issues"],
-    write: ["add_issue_comment", "issue_write", "sub_issue_write", "update_issue_comment"],
+    read: ["get_label", "issue_artifact_read", "issue_read", "list_issue_fields", "list_issue_types", "list_issues", "search_issues"],
+    write: ["add_issue_comment", "issue_artifact_write", "issue_write", "sub_issue_write", "update_issue_comment"],
   },
   labels: { read: ["get_label", "list_label"], write: ["label_write"] },
   notifications: {
@@ -106,6 +107,12 @@ export const KNOWN_TOOLS = {
  */
 export const HIDDEN = ["ui_get"] as const
 
+/**
+ * Catalogued tools GitHub offers only behind an X-MCP-Features flag. The plugin sends none, so GitHub does not list
+ * them today: the live e2e cases and the drift check leave them out.
+ */
+export const FLAGGED = ["issue_artifact_read", "issue_artifact_write"] as const
+
 /** MCP tool names are `<server>_<tool>`; this is the prefix for the github server. */
 export const TOOL_PREFIX = `${SERVER_NAME}_`
 /** The plugin's own github_api tool, which shares the prefix and the Code Mode namespace. */
@@ -122,6 +129,30 @@ const hidden = new Set<string>(HIDDEN)
 /** Every catalogued read tool across all toolsets that agents can use, sorted, without the server prefix. */
 export function allReadTools(): string[] {
   return [...reads].filter((name) => !hidden.has(name)).sort()
+}
+
+/** The toolsets a known tool (without the prefix) belongs to, in catalog order; most have one. */
+export function toolsetsOf(name: string): Toolset[] {
+  return (Object.entries(KNOWN_TOOLS) as [Toolset, { readonly read: readonly string[]; readonly write: readonly string[] }][])
+    .filter(([, tools]) => tools.read.includes(name) || tools.write.includes(name))
+    .map(([toolset]) => toolset)
+}
+
+const quoted = (toolsets: readonly string[]) => toolsets.map((toolset) => `"${toolset}"`).join(" or ")
+
+/**
+ * Why a known read that GitHub does not list now cannot run, for the tools RPC's describe (`detail` beside
+ * TOOL_UNAVAILABLE): the toolset it is in, and whether the plugin's toolsets option turns that on.
+ */
+export function unavailableDetail(method: string, enabled: readonly Toolset[]): string | undefined {
+  const toolsets = toolsetsOf(method)
+  if (toolsets.length === 0) return undefined
+  const names = toolsets.join(" or ")
+  if ((FLAGGED as readonly string[]).includes(method))
+    return `${method} is in the ${names} toolset, but GitHub lists it only behind a feature flag that this plugin does not turn on, whatever the toolsets option says.`
+  if (!toolsets.some((toolset) => enabled.includes(toolset)))
+    return `${method} is in the ${names} toolset, which is off: add ${quoted(toolsets)} to the plugin's toolsets option, then run opencode reload.`
+  return `${method} is in the ${names} toolset, which the toolsets option turns on, but GitHub does not list it now: run /github-status.`
 }
 
 /** Whether a GitHub MCP tool name (without the prefix) is a known read or write. */

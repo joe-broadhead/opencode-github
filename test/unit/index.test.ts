@@ -6,8 +6,10 @@ import plugin from "../../src/index.js"
 const LOCATION = { directory: "/workspace" }
 
 // Only the parts of the context the server part uses; every registration is logged.
-function fakeContext(input: { version?: string; options?: Record<string, unknown>; failSkills?: boolean } = {}) {
+function fakeContext(input: { version?: string; options?: Record<string, unknown>; failSkills?: boolean; servers?: { name: string; status: { status: string } }[] } = {}) {
   const log: string[] = []
+  // Each registered RPC's handlers, by RPC id.
+  const rpcs = new Map<string, Record<string, (input: unknown, context: unknown) => Promise<unknown>>>()
   const registration = (name: string) => {
     log.push(`register ${name}`)
     return { dispose: async () => void log.push(`dispose ${name}`) }
@@ -19,8 +21,15 @@ function fakeContext(input: { version?: string; options?: Record<string, unknown
     location: LOCATION,
     options: input.options ?? {},
     agent: { transform: transform("agent"), list: async () => ({ location: LOCATION, data: [] }) },
-    tool: { transform: transform("tool") },
-    mcp: { transform: transform("mcp"), list: async () => ({ location: LOCATION, data: [] }) },
+    tool: { transform: transform("tool"), list: async () => [] },
+    mcp: {
+      // Applies the transform to an empty config, as OpenCode does after setup, so the plugin's server is its own.
+      transform: async (callback: (editor: { get(name: string): unknown; set(name: string, value: unknown): void }) => void) => {
+        callback({ get: () => undefined, set: () => {} })
+        return registration("mcp")
+      },
+      list: async () => ({ location: LOCATION, data: input.servers ?? [] }),
+    },
     integration: { transform: transform("integration"), get: async () => ({ location: LOCATION, data: { methods: [] } }), connection: { active: async () => undefined } },
     event: {
       subscribe: ({ signal }: { signal: AbortSignal }) => ({
@@ -37,7 +46,12 @@ function fakeContext(input: { version?: string; options?: Record<string, unknown
       }),
     },
     command: { transform: transform("command") },
-    rpc: { register: async () => ({ ...registration("rpc"), events: { emit: async () => {} } }) },
+    rpc: {
+      register: async (definition: { id: string }, handlers: Record<string, (input: unknown, context: unknown) => Promise<unknown>>) => {
+        rpcs.set(definition.id, handlers)
+        return { ...registration("rpc"), events: { emit: async () => {} } }
+      },
+    },
     session: { synthetic: async () => ({}) },
     permission: { hook: async () => registration("permission hook") },
     skill: {
@@ -47,7 +61,7 @@ function fakeContext(input: { version?: string; options?: Record<string, unknown
       },
     },
   }
-  return { ctx: ctx as unknown as Plugin.Context, log, streams: () => streams }
+  return { ctx: ctx as unknown as Plugin.Context, log, streams: () => streams, rpcs }
 }
 
 beforeEach(() => {
@@ -152,5 +166,27 @@ describe("github.platform", () => {
     ])
     expect(host.streams()).toBe(0)
     expect(vi.getTimerCount()).toBe(0)
+  })
+  // QA LIVE-9: a known read GitHub does not list says which toolset it is in, and how the toolsets option turns it on.
+  it("gives describe a detail for each read GitHub does not list: its toolset, and the toolsets option", async () => {
+    const { ctx, rpcs } = fakeContext({ options: { toolsets: ["context", "issues"] }, servers: [{ name: "github", status: { status: "connected" } }] })
+    const cleanup = await plugin.setup(ctx)
+    const describe = rpcs.get("github.platform.tools")!["describe"]!
+    const { methods } = (await describe({}, { signal: new AbortController().signal, error: () => undefined })) as { methods: { name: string; available: boolean; reason?: string; detail?: string }[] }
+    const byName = new Map(methods.map((method) => [method.name, method]))
+    expect(byName.get("list_gists")).toEqual(expect.objectContaining({
+      available: false,
+      reason: "TOOL_UNAVAILABLE",
+      detail: 'list_gists is in the gists toolset, which is off: add "gists" to the plugin\'s toolsets option, then run opencode reload.',
+    }))
+    expect(byName.get("list_issues")).toEqual(expect.objectContaining({
+      reason: "TOOL_UNAVAILABLE",
+      detail: "list_issues is in the issues toolset, which the toolsets option turns on, but GitHub does not list it now: run /github-status.",
+    }))
+    expect(byName.get("issue_artifact_read")?.detail).toContain("behind a feature flag that this plugin does not turn on")
+    // Every MCP read is unlisted here, so each has a detail naming its toolset; api has none.
+    for (const method of methods.filter((method) => method.name !== "api")) expect(method.detail, method.name).toMatch(/ toolset/)
+    expect(byName.get("api")).not.toHaveProperty("detail")
+    await cleanup?.()
   })
 })

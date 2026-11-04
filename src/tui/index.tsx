@@ -22,11 +22,11 @@ type Colors = {
 
 const TONES: Record<Status["state"], Tone> = {
   connected: "success",
-  needs_auth: "warning",
-  pending: "warning",
+  sign_in_required: "warning",
+  connecting: "warning",
   failed: "error",
   disabled: "warning",
-  not_registered: "error",
+  not_configured: "error",
   conflict: "warning",
 }
 
@@ -71,7 +71,7 @@ function StatusDialog(props: {
   const ready = () => (props.view.state === "ready" ? props.view.status : undefined)
   const rowColor = (row: StatusRow, status: Status) => {
     if (row.label === "Connection") return tone(TONES[status.state])
-    if (row.label === "Agents without default rules" || (row.label === "OpenCode" && status.host.warning)) return tone("warning")
+    if (row.label === "Rules that never match" || (row.label === "Agents without default rules" && status.unguardedAgents.length > 0) || (row.label === "OpenCode" && !status.host.tested)) return tone("warning")
     return colors().text.base
   }
   return (
@@ -99,7 +99,7 @@ function StatusDialog(props: {
               {(row) => (
                 <>
                   <Row label={row.label} value={row.value} fg={rowColor(row, status())} muted={colors().text.muted} />
-                  <Show when={row.label === "Agents without default rules"}>
+                  <Show when={row.label === "Agents without default rules" && status().unguardedAgents.length > 0}>
                     <Row label="" value={AGENT_FIX} fg={colors().text.base} muted={colors().text.muted} />
                     <box flexDirection="row" gap={1}>
                       <box width={LABEL_WIDTH} flexShrink={0} />

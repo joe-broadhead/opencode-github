@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { DEFAULT_TOOLSETS } from "../../src/config.js"
-import { HIDDEN, KNOWN_TOOLS } from "../../src/tools.js"
+import { FLAGGED, HIDDEN, KNOWN_TOOLS } from "../../src/tools.js"
 import { CONTENT_MARKER, type FakeGitHub, FIXTURE_PAT, startFakeGitHub } from "./fake-github.js"
 
 // The script starts an OpenCode host, which takes several seconds on a busy machine.
@@ -14,7 +14,8 @@ setDefaultTimeout(180_000)
 const REPO = fileURLToPath(new URL("../../", import.meta.url))
 const PRELOAD = fileURLToPath(new URL("./route-preload.mjs", import.meta.url))
 const unique = (names: readonly string[]) => [...new Set(names)]
-const reads = unique(DEFAULT_TOOLSETS.flatMap((toolset) => KNOWN_TOOLS[toolset].read)).filter((name) => !(HIDDEN as readonly string[]).includes(name))
+const skipped: readonly string[] = [...HIDDEN, ...FLAGGED]
+const reads = unique(DEFAULT_TOOLSETS.flatMap((toolset) => KNOWN_TOOLS[toolset].read)).filter((name) => !skipped.includes(name))
 const writes = unique(DEFAULT_TOOLSETS.flatMap((toolset) => KNOWN_TOOLS[toolset].write))
 
 type Cases = { values: Record<string, unknown>; cases: { tool: string; args: Record<string, unknown> }[] }

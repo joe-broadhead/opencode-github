@@ -111,10 +111,10 @@ describe("constants", () => {
     expect(loadOptions({ clientId: "Ov23liExample" }).clientId).toBe("Ov23liExample")
   })
 
-  it("defaults to the read-only toolsets that repo and read:org cover: 48 reads once ui_get is hidden", () => {
+  it("defaults to the read-only toolsets that repo and read:org cover: 49 reads once ui_get is hidden", () => {
     const reads = new Set(DEFAULT_TOOLSETS.flatMap((toolset) => KNOWN_TOOLS[toolset].read))
     for (const name of HIDDEN) reads.delete(name)
-    expect(reads.size).toBe(48)
+    expect(reads.size).toBe(49)
     for (const needsMoreScopes of ["projects", "gists", "notifications"]) expect(DEFAULT_TOOLSETS).not.toContain(needsMoreScopes)
   })
 

@@ -2,12 +2,89 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.4] - 2026-11-04
 
 ### Added
 
-- A `jelly` section in `package.json`: each tool with its permission, its default effect and whether it only reads, the skill ids. Jelly reads it without loading the plugin and applies the declared asks, because its agents have no base allow rule for this plugin's own default rules to follow. `docs/jelly.md` explains it.
-- `title` and `signIns` in the `jelly` section: the name Jelly shows on the plugin's card, and what the plugin signs in to, so that one card can say whether each sign-in is connected and start, renew or end it. `docs/jelly.md` lists them.
+- Jelly shows the plugin's one-line summary and icon: `jelly.summary`, and `jelly.icon`, a branch-and-merge mark on a muted slate tile, shipped as `assets/icon.svg`.
+- The tools RPC's `describe` gives each method GitHub does not list a `detail` beside `reason: "TOOL_UNAVAILABLE"`: the method's toolset, and either what to add to the `toolsets` option (`list_gists is in the gists toolset, which is off: add "gists" to the plugin's toolsets option, then run opencode reload.`), or that the toolset is on and GitHub does not list it now, or the feature flag that hides `issue_artifact_read`.
+
+## [0.0.3] - 2026-11-04
+
+### Added
+
+- A `jelly` section in `package.json`, which [Jelly](https://heyjelly.ai) reads without loading the plugin:
+  - every known tool and `github_api`, with its permission, the effect the plugin's default rules give it and
+    whether it only reads, so that Jelly's agents, which have no base allow rule for those rules to follow, still
+    ask before a write. It includes `issue_artifact_read` (runs) and `issue_artifact_write` (asks);
+  - the skill ids, and the name Jelly shows on the plugin's card;
+  - two sign-ins, of which one connected is enough: the `github` server's, and the **GitHub Enterprise** one that
+    the `host` option uses.
+
+  [docs/jelly.md](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/jelly.md) explains each part.
+
+## [0.0.2] - 2026-11-04
+
+### Fixed
+
+- **Security:** `github_api` checked its permission rules against the path as written, but sent the request to the
+  path after the URL parser removed percent-encoded dot segments such as `.%2e`, `%2e.` and `%2e`. A write could
+  therefore reach another repository or endpoint than the one an allow or deny rule named, and the prompt showed the
+  wrong path. It now refuses a `.` or `..` segment however it is encoded (double encoding too) and a percent-encoded
+  character a path can hold as itself, such as `%6F` for `o`, with `API_PATH_INVALID`, before any prompt or request.
+  The path that rules and the prompt see is exactly the path sent, on GitHub.com and with `host`, for uploads too.
+- **Security:** `github_api` rules could be dodged by case and by redirects. GitHub reads owner and repository names
+  (and organisation, user, team, environment, label, secret and variable names) without regard to case, so a deny on
+  `/repos/owner/prod/*` did not stop `/repos/Owner/Prod/…`. The permission resource now has those names in lower
+  case; write rules that way. The status lists rules with an upper-case owner or repo name, which never match, under
+  "Rules that never match". And a redirect could take a call to a path no rule had checked: a change now never
+  follows one (`API_REDIRECTED`, naming the new path), a read follows one within the API only after the permission
+  check passes for the new path, and a read redirected outside the API fails with `API_REDIRECT_OFF_HOST`. Downloads
+  still follow GitHub's storage redirects without the token. The tools RPC's `api` method does the same.
+- Status listed agents whose own rules already ask for or deny GitHub's tools, such as agents that end with
+  `* * ask`, as agents without default rules. It now lists an agent only when its rules would let a GitHub tool run
+  without asking.
+- Status said "Nothing to do." while it listed agents without default rules. The next step now names them and the
+  fix.
+- `github_api` downloads had no size limit. A download now stops at 2 GiB with `API_DOWNLOAD_TOO_LARGE`, checked
+  against `Content-Length` and while it streams, and the partial file is removed.
+- A `github_api` download without `overwrite` could replace a file created while it ran. It now keeps that file and
+  fails with `API_FILE_EXISTS`.
+- A download to a file that already exists asked for approval first and only then failed. It is now refused before
+  the prompt.
+- The scripting docs said `opencode api` runs in the directory you call it from. It runs in the OpenCode service's
+  default location, your home directory; the docs now say how to target a project. They also say that `opencode api`
+  exits with status 1 on an RPC error, and that a tool with no structured content returns its text as `output`.
+- The README says to run `opencode reload` after install, how to update, and orders Uninstall as sign out, remove,
+  data folders (none) and copied rules. Its sign-out step is `opencode auth logout GitHub <login>`: without the
+  account's label the command needs an interactive terminal, and a token left behind after removing the plugin no
+  longer shows in `opencode auth list`.
+- `/github-status` and the dialog left out the Account and Agents without default rules rows when they were empty,
+  and `/github-status` had no title line. Every row is now shown, with `none` where it is empty, under
+  "GitHub status".
+
+### Changed
+
+- `POST /markdown` and `POST /markdown/raw` through `github_api` are reads: they only render Markdown, so they run
+  without a prompt and also while read-only. Every other POST is still a write.
+- Code Mode shows a description for the `github` namespace, and every `github_api` input field has one.
+- `issue_artifact_read` (a read) and `issue_artifact_write` (a write), which github-mcp-server v2.1.0 adds to the
+  `issues` toolset behind a feature flag the plugin does not turn on, are known tools.
+- A script's `TOOL_UNAVAILABLE` next step names the toolsets that are off by default, and says to add the method's
+  toolset to `toolsets` and run `opencode reload`.
+- The tools RPC's shared module is updated: `describe` given any input but nothing or `{}` answers
+  `describe takes no input`, an envelope that is not an object gets a plain message, a permission refusal names the
+  action that was refused, and a server that reconnects during a call gives `CONNECTING` instead of
+  `CONNECTION_FAILED`.
+- OpenCode 2.2.5 is a tested release. The status calls 2.2.3, 2.2.4 and 2.2.5 tested, and a later 2.2 release
+  "untested; supported range >=2.2.3 <2.3.0". `HOST_UNTESTED` and the `allowUntestedHost` warning now say "outside
+  the supported range".
+- The status RPC (`github.platform`) has the fields every plugin of this family shares
+  ([Scripting](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/scripting.md#status)):
+  - new `version`, the plugin's version;
+  - `host` is `{ version, range, tested }`; `host.warning` is now `hostWarning`;
+  - `state` values: `needs_auth` is now `sign_in_required`, `pending` is now `connecting`, and `not_registered` is
+    now `not_configured`.
 
 ## [0.0.1] - 2026-11-03
 
