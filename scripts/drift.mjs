@@ -11,7 +11,7 @@
 import { loadSource } from "./source.mjs"
 
 const { MCP_URL } = await loadSource("config.ts")
-const { KNOWN_TOOLS } = await loadSource("tools.ts")
+const { FLAGGED, KNOWN_TOOLS } = await loadSource("tools.ts")
 
 const PROTOCOL_VERSION = "2025-06-18"
 const TIMEOUT_MS = 30_000
@@ -125,7 +125,9 @@ function compare(toolset, live, findings) {
       findings.push(`${toolset}: ${name} is now a ${kind} (catalogued as a ${readOnly ? "write" : "read"})`)
     }
   }
-  for (const name of catalogued.keys()) if (!live.has(name)) findings.push(`${toolset}: ${name} is catalogued but GitHub no longer offers it`)
+  for (const name of catalogued.keys()) {
+    if (!live.has(name) && !FLAGGED.includes(name)) findings.push(`${toolset}: ${name} is catalogued but GitHub no longer offers it`)
+  }
 }
 
 const toolsets = Object.keys(KNOWN_TOOLS)

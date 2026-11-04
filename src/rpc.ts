@@ -7,14 +7,20 @@ import { Rpc } from "@opencode/plugin/rpc"
 /** The MCP server name; GitHub's tools are named `github_<tool>`. */
 export const SERVER_NAME = "github"
 
-export const STATES = ["connected", "needs_auth", "pending", "failed", "disabled", "not_registered", "conflict"] as const
+/**
+ * The S13 machine names of the shared status labels. GitHub never reports host_untested: outside
+ * the supported range the plugin does not load unless allowUntestedHost is set, and then it works.
+ */
+export const STATES = ["connected", "sign_in_required", "connecting", "failed", "disabled", "not_configured", "conflict"] as const
 const EFFECTS = ["allow", "ask", "deny"] as const
 const UNKNOWN_TOOL_MODES = ["ask", "hide"] as const
 
 export type Rule = { readonly action: string; readonly resource: string; readonly effect: (typeof EFFECTS)[number] }
 
-/** In the order the dialog and /github-status show it. */
+/** In the order the dialog and /github-status show it. version, host, state, unguardedAgents and nextStep are the shared fields. */
 export type Status = {
+  /** The plugin's version. */
+  readonly version: string
   readonly state: (typeof STATES)[number]
   /** The GitHub login of the active sign-in. */
   readonly account?: string
@@ -22,12 +28,16 @@ export type Status = {
   readonly toolsets: readonly string[]
   /** The github server's tools that agents can use, the ones this plugin does not know yet, and whether those ask first or are hidden. */
   readonly tools: { readonly visible: number; readonly unknown: readonly string[]; readonly mode: (typeof UNKNOWN_TOOL_MODES)[number] }
-  /** Agents that run GitHub tools without the default rules (defined only in the user's config). */
+  /** Agents whose own rules let GitHub tools run without asking, because they lack the default rules (defined only in the user's config). */
   readonly unguardedAgents: readonly string[]
+  /** github_api rule resources with an owner, repo or other name not in lower case: they never match. Present only when there are any. */
+  readonly unmatchedRules?: readonly string[]
   /** The default rules to add to those agents; present only when there are any. */
   readonly permissionsBlock?: readonly Rule[]
-  /** The OpenCode release, and a warning when it is outside the tested range. */
-  readonly host: { readonly version: string; readonly warning?: string }
+  /** The OpenCode release, the supported range, and whether this release is a tested one. */
+  readonly host: { readonly version: string; readonly range: string; readonly tested: boolean }
+  /** Present when OpenCode is outside the supported range and allowUntestedHost let the plugin load. */
+  readonly hostWarning?: string
   /** The GitHub Enterprise Server host. GitHub's hosted MCP server does not serve it, so only github_api works there. */
   readonly enterprise?: string
   readonly nextStep: string
@@ -42,18 +52,21 @@ const rule = object({ action: text, resource: text, effect: { enum: EFFECTS } },
 
 export const STATUS_SCHEMA = object(
   {
+    version: text,
     state: { enum: STATES },
     account: text,
     readOnly: { type: "boolean" },
     toolsets: texts,
     tools: object({ visible: { type: "integer", minimum: 0 }, unknown: texts, mode: { enum: UNKNOWN_TOOL_MODES } }, ["visible", "unknown", "mode"]),
     unguardedAgents: texts,
+    unmatchedRules: texts,
     permissionsBlock: { type: "array", items: rule },
-    host: object({ version: text, warning: text }, ["version"]),
+    host: object({ version: text, range: text, tested: { type: "boolean" } }, ["version", "range", "tested"]),
+    hostWarning: text,
     enterprise: text,
     nextStep: text,
   },
-  ["state", "readOnly", "toolsets", "tools", "unguardedAgents", "host", "nextStep"],
+  ["version", "state", "readOnly", "toolsets", "tools", "unguardedAgents", "host", "nextStep"],
 )
 
 export const GithubRpc = Rpc.define({
@@ -82,6 +95,7 @@ export function isStatus(value: unknown): value is Status {
   if (!isRecord(value) || !only(value, Object.keys(STATUS_SCHEMA.properties))) return false
   const { tools, host } = value
   return (
+    isText(value.version) &&
     (STATES as readonly unknown[]).includes(value.state) &&
     optional(value.account, isText) &&
     typeof value.readOnly === "boolean" &&
@@ -93,11 +107,14 @@ export function isStatus(value: unknown): value is Status {
     isTexts(tools.unknown) &&
     (UNKNOWN_TOOL_MODES as readonly unknown[]).includes(tools.mode) &&
     isTexts(value.unguardedAgents) &&
+    optional(value.unmatchedRules, isTexts) &&
     optional(value.permissionsBlock, (block) => Array.isArray(block) && block.every(isRule)) &&
     isRecord(host) &&
-    only(host, ["version", "warning"]) &&
+    only(host, ["version", "range", "tested"]) &&
     isText(host.version) &&
-    optional(host.warning, isText) &&
+    isText(host.range) &&
+    typeof host.tested === "boolean" &&
+    optional(value.hostWarning, isText) &&
     optional(value.enterprise, isText) &&
     isText(value.nextStep)
   )
@@ -106,11 +123,11 @@ export function isStatus(value: unknown): value is Status {
 /** The connection label for each state, shared by every plugin's status. */
 export const STATE_LABELS: Record<Status["state"], string> = {
   connected: "connected",
-  needs_auth: "sign-in required",
-  pending: "connecting",
+  sign_in_required: "sign-in required",
+  connecting: "connecting",
   failed: "failed",
   disabled: "disabled",
-  not_registered: "not configured",
+  not_configured: "not configured",
   conflict: "conflict",
 }
 
@@ -119,6 +136,9 @@ export const NOTHING_TO_DO = "Nothing to do."
 /** The fix for agents without the default rules, after their names. */
 export const AGENT_FIX =
   'These agents run GitHub tools, including writes, without asking. Put the rules below first in each one\'s own "permissions" list, in opencode.json or in its Markdown file, followed by your top-level rules for github_ tools.'
+
+/** The value of a row that has nothing to show. */
+export const NONE = "none"
 
 export type StatusRow = { readonly label: string; readonly value: string }
 
@@ -137,30 +157,37 @@ export function describeTools(status: Pick<Status, "tools" | "enterprise">): str
   return `${visible}, ${tools.unknown.length} unknown (${handling}): ${tools.unknown.join(", ")}`
 }
 
-export function describeHost(host: Status["host"]): string {
-  return host.warning ? `${host.version} (untested: ${host.warning})` : `${host.version} (tested)`
+export function describeHost(status: Pick<Status, "host" | "hostWarning">): string {
+  const { host } = status
+  if (host.tested) return `${host.version} (tested)`
+  if (status.hostWarning) return `${host.version} (untested: ${status.hostWarning})`
+  return `${host.version} (untested; supported range ${host.range})`
 }
 
 /** The status as labelled rows, in the order the dialog and /github-status show them. */
 export function statusRows(status: Status): StatusRow[] {
   return [
     { label: "Connection", value: STATE_LABELS[status.state] },
-    ...(status.account ? [{ label: "Account", value: status.account }] : []),
+    { label: "Account", value: status.account ?? NONE },
     { label: "Access", value: status.readOnly ? "read-only" : "reads and writes (writes ask first)" },
     ...(status.enterprise ? [] : [{ label: "Toolsets", value: status.toolsets.join(", ") }]),
     { label: "Host", value: status.enterprise ? `${status.enterprise} (GitHub Enterprise Server)` : "github.com" },
+    ...(status.unmatchedRules?.length ? [{ label: "Rules that never match", value: status.unmatchedRules.join("; ") }] : []),
     { label: "Tools", value: describeTools(status) },
-    ...(status.unguardedAgents.length > 0 ? [{ label: "Agents without default rules", value: status.unguardedAgents.join(", ") }] : []),
-    { label: "OpenCode", value: describeHost(status.host) },
+    { label: "Agents without default rules", value: status.unguardedAgents.length > 0 ? status.unguardedAgents.join(", ") : NONE },
+    { label: "OpenCode", value: describeHost(status) },
     { label: "Next step", value: status.nextStep },
   ]
 }
 
+/** The title line of /github-status and the dialog. */
+export const STATUS_TITLE = "GitHub status"
+
 export function formatStatus(status: Status): string {
-  const lines: string[] = []
+  const lines: string[] = [STATUS_TITLE]
   for (const row of statusRows(status)) {
     lines.push(`${row.label}: ${row.value}`)
-    if (row.label === "Agents without default rules") lines.push(AGENT_FIX, formatRules(status.permissionsBlock ?? []))
+    if (row.label === "Agents without default rules" && status.unguardedAgents.length > 0) lines.push(AGENT_FIX, formatRules(status.permissionsBlock ?? []))
   }
   return lines.join("\n")
 }

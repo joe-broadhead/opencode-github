@@ -1,6 +1,6 @@
 {
   "name": "@joe-broadhead/opencode-github",
-  "version": "0.0.1",
+  "version": "0.0.4",
   "description": "Unofficial OpenCode plugin for GitHub",
   "keywords": [
     "opencode",
@@ -27,7 +27,7 @@
   },
   "files": [
     "dist",
-    "assets",
+    "assets/icon.svg",
     "skills",
     "README.md",
     "LICENSE",
@@ -39,7 +39,7 @@
     "build": "node scripts/build.mjs",
     "test": "vitest run",
     "test:tui": "npm run build && bun test test/tui",
-    "test:host": "npm run build && bun test test/host",
+    "test:host": "npm run build && node scripts/host-tests.mjs",
     "test:stock": "npm run build && bun test test/stock",
     "lint": "node scripts/check-forbidden.mjs --self-test && node scripts/check-forbidden.mjs",
     "test:pack": "npm run build && node scripts/pack-smoke.mjs",
@@ -86,6 +86,12 @@
         "readOnly": true
       },
       {
+        "name": "github.check_dependency_vulnerabilities",
+        "permission": "github_check_dependency_vulnerabilities",
+        "effect": "allow",
+        "readOnly": true
+      },
+      {
         "name": "github.custom_properties_read",
         "permission": "github_custom_properties_read",
         "effect": "allow",
@@ -112,12 +118,6 @@
       {
         "name": "github.get_copilot_space",
         "permission": "github_get_copilot_space",
-        "effect": "allow",
-        "readOnly": true
-      },
-      {
-        "name": "github.check_dependency_vulnerabilities",
-        "permission": "github_check_dependency_vulnerabilities",
         "effect": "allow",
         "readOnly": true
       },
@@ -226,6 +226,12 @@
       {
         "name": "github.github_support_docs_search",
         "permission": "github_github_support_docs_search",
+        "effect": "allow",
+        "readOnly": true
+      },
+      {
+        "name": "github.issue_artifact_read",
+        "permission": "github_issue_artifact_read",
         "effect": "allow",
         "readOnly": true
       },
@@ -548,6 +554,12 @@
         "readOnly": false
       },
       {
+        "name": "github.issue_artifact_write",
+        "permission": "github_issue_artifact_write",
+        "effect": "ask",
+        "readOnly": false
+      },
+      {
         "name": "github.issue_write",
         "permission": "github_issue_write",
         "effect": "ask",
@@ -667,7 +679,14 @@
       {
         "id": "github",
         "label": "GitHub",
-        "server": "github"
+        "server": "github",
+        "group": "github"
+      },
+      {
+        "id": "github-enterprise",
+        "label": "GitHub Enterprise",
+        "integration": "github-enterprise",
+        "group": "github"
       }
     ],
     "contributes": {

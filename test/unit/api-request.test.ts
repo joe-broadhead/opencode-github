@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { createServer } from "node:http"
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -54,7 +54,18 @@ beforeEach(() => {
 })
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
-const deps = (fetch: ReturnType<typeof fakeFetch>["fetch"], endpoints: Endpoints = GITHUB_COM) => ({ token: TOKEN, endpoints, service: "GitHub", fetch, root })
+/** The redirect checks callRest asked for, in order; a resource in `refuse` is refused, as a deny would be. */
+let checked: string[] = []
+let refuse = new Set<string>()
+beforeEach(() => {
+  checked = []
+  refuse = new Set()
+})
+const checkRedirect = async (resource: string) => {
+  checked.push(resource)
+  if (refuse.has(resource)) throw new Error(`refused ${resource}`)
+}
+const deps = (fetch: ReturnType<typeof fakeFetch>["fetch"], endpoints: Endpoints = GITHUB_COM) => ({ token: TOKEN, endpoints, service: "GitHub", fetch, root, checkRedirect })
 
 describe("restTarget pins requests to the API host", () => {
   it.each([
@@ -69,6 +80,87 @@ describe("restTarget pins requests to the API host", () => {
     ["a control character", "/repos/\u0000"],
   ])("refuses %s", (_name, path) => {
     expect(() => restTarget(rest({ method: "GET", path }), GITHUB_COM)).toThrow(/^API_PATH_INVALID: /)
+  })
+
+  // QA GITHUB-1: the URL parser reads all of these as dot segments, so the path sent was not the path checked.
+  const DOT_BYPASSES = [
+    "/repos/OWNER/REPO/pulls/1/.%2e/.%2e/.%2e/.%2e/OTHER/PROD/pulls/9/merge",
+    "/repos/OWNER/x/%2E./%2e./.%2E/user/repos",
+    "/repos/OWNER/x/.%2e/.%2e/OTHER/y/hooks",
+    "/repos/OWNER/x/%2e/OTHER",
+    "/repos/OWNER/x/%2E",
+    "/repos/OWNER/x/%2e%2E/y",
+    "/repos/OWNER/x/%2E%2e",
+    "/repos/OWNER/x/%252e%252e/y",
+    "/repos/OWNER/x/%25252E%25252E/y",
+    "/repos/OWNER/x/.%252e/y",
+    "/repos/OWNER/x/..%2fOTHER/y",
+    "/repos/OWNER/x/%2e%2e%5cOTHER",
+    "/repos/OWNER/x/a%2f..%2f..",
+    "/repos/OWNER/x/.",
+    "/repos/OWNER/x/../y",
+  ]
+  it.each(DOT_BYPASSES.flatMap((path) => ["github.com", "host"].flatMap((on) => ["api", "uploads"].map((base) => [path, on, base] as const))))(
+    "refuses the dot segment in %s (%s, %s base)",
+    (path, on, base) => {
+      const upload = base === "uploads" ? { upload: { path: "a.zip", contentType: "application/zip" } } : {}
+      const input = rest({ method: base === "uploads" ? "POST" : "PUT", path, ...upload })
+      expect(() => restTarget(input, on === "host" ? GHES : GITHUB_COM)).toThrow(/^API_PATH_INVALID: .* has a \. or \.\. segment\./)
+    },
+  )
+
+  it("refuses an encoded plain character, which GitHub would read as itself", () => {
+    for (const path of ["/repos/OWNER/pr%6Fd/hooks", "/repos/OWNER/x/%2D", "/repos/o/r/branches/release%2B1", "/user%40x", "/graphq%6C"]) {
+      expect(() => restTarget(rest({ method: "DELETE", path }), GITHUB_COM)).toThrow(/^API_PATH_INVALID: .* percent-encodes /)
+    }
+  })
+
+  it("sends exactly the path it names: encodings in upper case, the URL parser's own encodings done first", () => {
+    for (const [path, sent] of [
+      ["/repos/o/r/environments/a%2fb", "/repos/o/r/environments/a%2Fb"],
+      ["/repos/o/r/branches/caf%c3%a9", "/repos/o/r/branches/caf%C3%A9"],
+      ["/repos/o/r/branches/café", "/repos/o/r/branches/caf%C3%A9"],
+      ["/repos/o/r/contents/a^b{c}", "/repos/o/r/contents/a%5Eb%7Bc%7D"],
+      ["/repos/o/r/contents/.github/x...y", "/repos/o/r/contents/.github/x...y"],
+      ["/repos/o/r/git/refs/heads/a!$&'()*+,;=:@~", "/repos/o/r/git/refs/heads/a!$&'()*+,;=:@~"],
+    ] as const) {
+      for (const endpoints of [GITHUB_COM, GHES]) {
+        const target = restTarget(rest({ method: "PUT", path }), endpoints)
+        expect(target.resource).toBe(`PUT ${sent}`)
+        expect(target.path).toBe(sent)
+        expect(target.url.pathname).toBe(`${new URL(endpoints.api).pathname.replace(/\/$/, "")}${sent}`)
+      }
+    }
+  })
+
+  // QA GITHUB-1 follow-up: GitHub reads owner and repo names without regard to case, so the resource does too.
+  it("names the resource with owner, repo and other case-insensitive names in lower case, and sends the path as written", () => {
+    for (const [path, resource] of [
+      ["/repos/Owner/Prod/pulls/1/merge", "/repos/owner/prod/pulls/1/merge"],
+      ["/repos/OWNER/REPO/branches/Main/protection", "/repos/owner/repo/branches/Main/protection"],
+      ["/orgs/Acme/teams/Core-Team/repos/Acme/Site", "/orgs/acme/teams/core-team/repos/acme/site"],
+      ["/orgs/Acme/members/Octo-Cat", "/orgs/acme/members/octo-cat"],
+      ["/users/Octo/repos", "/users/octo/repos"],
+      ["/user/following/Octo", "/user/following/octo"],
+      ["/repos/O/R/collaborators/Someone/permission", "/repos/o/r/collaborators/someone/permission"],
+      ["/repos/O/R/environments/Production/secrets/API_KEY", "/repos/o/r/environments/production/secrets/api_key"],
+      ["/orgs/Acme/actions/variables/Region", "/orgs/acme/actions/variables/region"],
+      ["/repos/O/R/labels/Bug%20Fix", "/repos/o/r/labels/bug%20fix"],
+      ["/repos/O/R/issues/3/labels/Bug", "/repos/o/r/issues/3/labels/bug"],
+      ["/enterprises/Big/actions/runners", "/enterprises/big/actions/runners"],
+      ["/repos/O/R/contents/README.md", "/repos/o/r/contents/README.md"],
+      ["/repos/O/R/git/refs/heads/Feature", "/repos/o/r/git/refs/heads/Feature"],
+      ["/markdown", "/markdown"],
+    ] as const) {
+      const target = restTarget(rest({ method: "DELETE", path }), GITHUB_COM)
+      expect(target.resource).toBe(`DELETE ${resource}`)
+      expect(target.path).toBe(path)
+      expect(target.url.pathname).toBe(path)
+    }
+  })
+
+  it("keeps every ? after the first in the query", () => {
+    expect(restTarget(rest({ method: "GET", path: "/search/code?q=a?b" }), GITHUB_COM).url.href).toBe("https://api.github.com/search/code?q=a%3Fb")
   })
 
   it("refuses /graphql through method and path", () => {
@@ -99,23 +191,75 @@ describe("callRest", () => {
     expect(seen[0]).toMatchObject({ redirect: "manual", headers: { authorization: `Bearer ${TOKEN}`, "x-github-api-version": "2022-11-28", accept: "application/vnd.github+json" } })
   })
 
-  it("drops Authorization on a redirect to another host, and keeps it on the API host", async () => {
+  // QA GITHUB-1 follow-up: a redirect never takes a call past the rules that checked it.
+  it("follows a read's redirect within the API only after the permission check passes for the new path", async () => {
+    const { fetch, seen } = fakeFetch({
+      "https://api.github.com/repos/Old/Name/pulls": () => redirect("/repositories/10/pulls?state=all", 301),
+      "https://api.github.com/repositories/10/pulls?state=all": () => json([{ number: 1 }]),
+    })
+    const moved = rest({ method: "GET", path: "/repos/Old/Name/pulls" })
+    expect(await callRest(moved, restTarget(moved, GITHUB_COM), deps(fetch))).toMatchObject({ ok: true, data: [{ number: 1 }] })
+    expect(checked).toEqual(["GET /repositories/10/pulls"])
+    expect(seen.at(-1)).toMatchObject({ url: "https://api.github.com/repositories/10/pulls?state=all", headers: { authorization: `Bearer ${TOKEN}` } })
+
+    refuse.add("GET /repositories/10/pulls")
+    const before = seen.length
+    await expect(callRest(moved, restTarget(moved, GITHUB_COM), deps(fetch))).rejects.toThrow("refused GET /repositories/10/pulls")
+    expect(seen.slice(before).map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name/pulls"])
+  })
+
+  it("checks a GitHub Enterprise Server redirect as a path on its API base, in lower case, and refuses one outside it", async () => {
+    const { fetch } = fakeFetch({
+      "https://ghe.example.com/api/v3/repos/a/b": () => redirect("https://ghe.example.com/api/v3/repos/Other/Prod"),
+      "https://ghe.example.com/api/v3/repos/Other/Prod": () => json({ id: 1 }),
+      "https://ghe.example.com/api/v3/repos/c/d": () => redirect("https://ghe.example.com/admin/x"),
+    })
+    const moved = rest({ method: "GET", path: "/repos/a/b" })
+    await callRest(moved, restTarget(moved, GHES), deps(fetch, GHES))
+    expect(checked).toEqual(["GET /repos/other/prod"])
+    const outside = rest({ method: "GET", path: "/repos/c/d" })
+    await expect(callRest(outside, restTarget(outside, GHES), deps(fetch, GHES))).rejects.toThrow(/^API_REDIRECT_OFF_HOST: /)
+  })
+
+  it("refuses a read's redirect to another host, and points to download", async () => {
     const { fetch, seen } = fakeFetch({
       "https://api.github.com/repos/o/r/actions/jobs/1/logs": () => redirect("https://blob.example.net/logs/1?sig=x"),
-      "https://blob.example.net/logs/1?sig=x": () => new Response("line 1\nline 2\n", { headers: { "content-type": "text/plain" } }),
-      "https://api.github.com/repositories/9": () => redirect("/repositories/10", 301),
-      "https://api.github.com/repositories/10": () => json({ id: 10 }),
     })
     const logs = rest({ method: "GET", path: "/repos/o/r/actions/jobs/1/logs" })
-    const output = await callRest(logs, restTarget(logs, GITHUB_COM), deps(fetch))
-    expect(output).toMatchObject({ ok: true, data: "line 1\nline 2\n", contentType: "text/plain" })
-    expect(seen[1]!.url).toBe("https://blob.example.net/logs/1?sig=x")
-    expect(seen[1]!.headers.authorization).toBeUndefined()
-    expect(seen[1]!.headers["x-github-api-version"]).toBeUndefined()
+    await expect(callRest(logs, restTarget(logs, GITHUB_COM), deps(fetch))).rejects.toThrow(
+      "API_REDIRECT_OFF_HOST: GitHub redirected GET /repos/o/r/actions/jobs/1/logs outside its API, to blob.example.net, and a read follows redirects only within the API. Next step: Pass download: { path } to save the response; a download follows GitHub's storage redirects, without the token.",
+    )
+    expect(seen).toHaveLength(1)
+  })
 
-    const moved = rest({ method: "GET", path: "/repositories/9" })
-    await callRest(moved, restTarget(moved, GITHUB_COM), deps(fetch))
-    expect(seen.at(-1)).toMatchObject({ url: "https://api.github.com/repositories/10", headers: { authorization: `Bearer ${TOKEN}` } })
+  it.each(["POST", "PUT", "PATCH", "DELETE"] as const)("never follows a redirect for %s, and names the new path", async (method) => {
+    const { fetch, seen } = fakeFetch({
+      "https://api.github.com/repos/Old/Name/pulls/1/merge": () => redirect("/repositories/10/pulls/1/merge", 307),
+      "https://api.github.com/repos/o/r/x": () => redirect("https://evil.example/x?sig=s", 308),
+    })
+    const moved = rest({ method, path: "/repos/Old/Name/pulls/1/merge", body: {} })
+    await expect(callRest(moved, restTarget(moved, GITHUB_COM), deps(fetch))).rejects.toThrow(
+      `API_REDIRECTED: GitHub answered ${method} /repos/old/name/pulls/1/merge with a redirect to /repositories/10/pulls/1/merge, and a change never follows a redirect. Next step: Call github_api again with path /repositories/10/pulls/1/merge, so the change is checked for that path.`,
+    )
+    const away = rest({ method, path: "/repos/o/r/x" })
+    const error = await callRest(away, restTarget(away, GITHUB_COM), deps(fetch)).catch((cause: Error) => cause.message)
+    expect(error).toMatch(/^API_REDIRECTED: .* outside its API, to evil\.example, .* Next step: Check the path/)
+    expect(error).not.toContain("sig=")
+    expect(seen.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name/pulls/1/merge", "https://api.github.com/repos/o/r/x"])
+    expect(checked).toEqual([])
+  })
+
+  it("never follows a redirect for GraphQL or an upload", async () => {
+    mkdirSync(join(root, "dist"))
+    writeFileSync(join(root, "dist", "a.zip"), "zip")
+    const { fetch, seen } = fakeFetch({
+      "https://api.github.com/graphql": () => redirect("/graphql2", 307),
+      "https://uploads.github.com/repos/o/r/releases/1/assets?name=a.zip": () => redirect("https://uploads.github.com/repos/p/q/releases/1/assets", 307),
+    })
+    await expect(callGraphql({ graphql: { query: "{ viewer { login } }" } }, deps(fetch))).rejects.toThrow(/^API_REDIRECTED: GitHub answered POST \/graphql /)
+    const upload = rest({ method: "POST", path: "/repos/o/r/releases/1/assets", query: { name: "a.zip" }, upload: { path: "dist/a.zip", contentType: "application/zip" } })
+    await expect(callRest(upload, restTarget(upload, GITHUB_COM), deps(fetch))).rejects.toThrow(/^API_REDIRECTED: /)
+    expect(seen).toHaveLength(2)
   })
 
   it("relies on Node's fetch returning a manual redirect with its Location, not following it", async () => {
@@ -144,18 +288,12 @@ describe("callRest", () => {
     await expect(callRest(loop, restTarget(loop, GITHUB_COM), deps(fetch))).rejects.toThrow(/^API_REDIRECT_LOOP: /)
   })
 
-  it("sends a JSON body, and turns a 303 into a GET without it", async () => {
-    const { fetch, seen } = fakeFetch({
-      "https://api.github.com/repos/o/r/pulls": () => redirect("https://api.github.com/repos/o/r/pulls/7", 303),
-      "https://api.github.com/repos/o/r/pulls/7": () => json({ number: 7 }, { status: 200 }),
-    })
+  it("sends a JSON body", async () => {
+    const { fetch, seen } = fakeFetch({ "https://api.github.com/repos/o/r/pulls": () => json({ number: 7 }, { status: 201 }) })
     const input = rest({ method: "POST", path: "/repos/o/r/pulls", body: { title: "t", head: "a", base: "main" } })
     const output = await callRest(input, restTarget(input, GITHUB_COM), deps(fetch))
     expect(output.data).toEqual({ number: 7 })
     expect(seen[0]).toMatchObject({ method: "POST", body: JSON.stringify({ title: "t", head: "a", base: "main" }), headers: { "content-type": "application/json" } })
-    expect(seen[1]).toMatchObject({ method: "GET" })
-    expect(seen[1]!.body).toBeUndefined()
-    expect(seen[1]!.headers["content-type"]).toBeUndefined()
   })
 
   it("follows Link pages on the API host, joins list objects, and caps items", async () => {
@@ -260,6 +398,66 @@ describe("download and upload", () => {
     expect(seen[1]!.headers.authorization).toBeUndefined()
     await expect(callRest(input, restTarget(input, GITHUB_COM), deps(fetch))).rejects.toThrow(/^API_FILE_EXISTS: /)
     await callRest({ ...input, download: { path: "out/a.zip", overwrite: true } }, restTarget(input, GITHUB_COM), deps(fetch))
+    expect(checked).toEqual([])
+  })
+
+  it("checks a download's redirect to another API path first, then follows the storage redirect without the token", async () => {
+    const { fetch, seen } = fakeFetch({
+      "https://api.github.com/repos/Old/Name/zipball": () => redirect("/repos/new/name/zipball", 301),
+      "https://api.github.com/repos/new/name/zipball": () => redirect("https://codeload.example.net/z?sig=x"),
+      "https://codeload.example.net/z?sig=x": () => new Response(new Uint8Array([1]), { headers: { "content-type": "application/zip" } }),
+    })
+    const input = rest({ method: "GET", path: "/repos/Old/Name/zipball", download: { path: "z.zip" } })
+    expect((await callRest(input, restTarget(input, GITHUB_COM), deps(fetch))).download?.bytes).toBe(1)
+    expect(checked).toEqual(["GET /repos/new/name/zipball"])
+    expect(seen.map((request) => Boolean(request.headers.authorization))).toEqual([true, true, false])
+  })
+
+  // QA GITHUB-2: a download has a size cap, by its Content-Length and while it streams.
+  it("stops a download over the cap and leaves no file behind", async () => {
+    const stream = () =>
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.enqueue(new Uint8Array(3))
+        },
+      })
+    // A fresh response per call: a cloned endless stream never finishes cancelling.
+    const routes: Record<string, () => Response> = {
+      "https://api.github.com/declared": () => new Response(new Uint8Array(5), { headers: { "content-type": "application/zip", "content-length": "5" } }),
+      "https://api.github.com/endless": () => new Response(stream(), { headers: { "content-type": "application/zip" } }),
+      "https://api.github.com/fits": () => new Response(new Uint8Array(4), { headers: { "content-type": "application/zip", "content-length": "4" } }),
+    }
+    const capped = { ...deps(async (url: string) => routes[url]!()), maxDownloadBytes: 4 }
+    for (const path of ["/declared", "/endless"]) {
+      const input = rest({ method: "GET", path, download: { path: `out${path}.zip` } })
+      await expect(callRest(input, restTarget(input, GITHUB_COM), capped)).rejects.toThrow(
+        "API_DOWNLOAD_TOO_LARGE: The download is over 4 bytes. Next step: Narrow the request, or download it outside OpenCode.",
+      )
+    }
+    const fits = rest({ method: "GET", path: "/fits", download: { path: "out/fits.zip" } })
+    expect((await callRest(fits, restTarget(fits, GITHUB_COM), capped)).download?.bytes).toBe(4)
+    expect(readdirSync(join(root, "out"))).toEqual(["fits.zip"])
+  })
+
+  // QA GITHUB-7: without overwrite, a file that appears while the download runs is kept.
+  it("never replaces a file that appeared during the download, unless overwrite is set", async () => {
+    const target = join(root, "out", "a.zip")
+    const { fetch } = fakeFetch({
+      "https://api.github.com/a": () => {
+        mkdirSync(join(root, "out"), { recursive: true })
+        writeFileSync(target, "theirs")
+        return new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "application/zip" } })
+      },
+    })
+    const input = rest({ method: "GET", path: "/a", download: { path: "out/a.zip" } })
+    await expect(callRest(input, restTarget(input, GITHUB_COM), deps(fetch))).rejects.toThrow(/^API_FILE_EXISTS: The file out\/a\.zip already exists\./)
+    expect(readFileSync(target, "utf8")).toBe("theirs")
+    expect(readdirSync(join(root, "out"))).toEqual(["a.zip"])
+    rmSync(target)
+    const replace = rest({ method: "GET", path: "/a", download: { path: "out/a.zip", overwrite: true } })
+    await callRest(replace, restTarget(replace, GITHUB_COM), deps(fetch))
+    expect([...readFileSync(target)]).toEqual([1, 2, 3])
+    expect(readdirSync(join(root, "out"))).toEqual(["a.zip"])
   })
 
   it("keeps files inside the project, also through a symbolic link", async () => {

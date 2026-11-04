@@ -8,7 +8,6 @@
 // runs read-only and every case must be a catalogued read.
 // Exit codes: 0 every case passed, 1 a case failed, 2 GITHUB_E2E_TOKEN is not set.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
@@ -23,7 +22,8 @@ if (!token) {
 const PLUGIN_ID = "github.platform"
 const CASE_TIMEOUT_MS = 60_000
 const REPO = realpathSync(fileURLToPath(new URL("../", import.meta.url)))
-const root = realpathSync(mkdtempSync(join(tmpdir(), "github-e2e-")))
+// Under the system's /tmp, never $TMPDIR, which can sit below $HOME where OpenCode would find .opencode folders.
+const root = realpathSync(mkdtempSync(join(realpathSync("/tmp"), "github-e2e-")))
 const home = join(root, "home")
 
 // A temporary profile: OpenCode reads its XDG roots once at import, so this runs before it loads.
@@ -72,7 +72,7 @@ function resolveArgs(value, values, missing) {
 }
 
 // Bun imports TypeScript directly.
-const { HIDDEN, KNOWN_TOOLS, toolKind } = await import(pathToFileURL(join(REPO, "src", "tools.ts")).href)
+const { FLAGGED, HIDDEN, KNOWN_TOOLS, toolKind } = await import(pathToFileURL(join(REPO, "src", "tools.ts")).href)
 const { DEFAULT_TOOLSETS } = await import(pathToFileURL(join(REPO, "src", "config.ts")).href)
 const file = JSON.parse(readFileSync(join(REPO, "test", "e2e", "cases.json"), "utf8"))
 
@@ -84,7 +84,7 @@ if (notReads.length > 0) {
 }
 const listed = new Set(file.cases.map((item) => item.tool))
 const uncovered = DEFAULT_TOOLSETS.flatMap((toolset) => KNOWN_TOOLS[toolset].read).filter(
-  (name, index, all) => all.indexOf(name) === index && !listed.has(name) && !HIDDEN.includes(name),
+  (name, index, all) => all.indexOf(name) === index && !listed.has(name) && !HIDDEN.includes(name) && !FLAGGED.includes(name),
 )
 
 const { Plugin } = await import("@opencode/plugin")

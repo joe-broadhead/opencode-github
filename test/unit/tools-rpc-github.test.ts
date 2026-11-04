@@ -22,7 +22,17 @@ const writes = Object.values(KNOWN_TOOLS).flatMap((toolset) => [...toolset.write
  * with 200 and records it, and the github server lists `listed` tools. Asserts and requests are recorded.
  */
 async function setUp(
-  input: { agents?: Record<string, Rule[]>; listed?: string[]; managed?: boolean; servers?: { name: string; status: { status: string } }[]; signedIn?: boolean } = {},
+  input: {
+    agents?: Record<string, Rule[]>
+    listed?: string[]
+    managed?: boolean
+    servers?: { name: string; status: { status: string } }[]
+    signedIn?: boolean
+    /** GitHub's answer per URL; anything else is 200. */
+    answers?: Record<string, () => Response>
+    /** Asserts refused as the tools RPC's hook refuses an ask: a Tool.Error with the request as its cause. */
+    refuse?: boolean
+  } = {},
 ) {
   const agents = input.agents ?? { build: BASE }
   const requests: { url: string; method: string }[] = []
@@ -41,7 +51,10 @@ async function setUp(
     },
     permission: {
       hook: async () => ({ dispose: async () => {} }),
-      assert: async (request: unknown) => void asserts.push(request),
+      assert: async (request: { action: string }) => {
+        asserts.push(request)
+        if (input.refuse) throw Object.assign(new Error("A script cannot answer an approval prompt."), { _tag: "Tool.Error", error: { request } })
+      },
     },
     session: {
       get: async ({ sessionID }: { sessionID: string }) => ({ id: sessionID, agent: sessionID.replace(/^ses_/, ""), location: LOCATION }),
@@ -51,7 +64,7 @@ async function setUp(
       list: async () =>
         (input.listed ?? []).map((name) => ({ id: `github_${name}`, name, description: name, input: { type: "object" }, execute: async () => ({ output: { name }, content: [{ type: "text", text: name }] }) })),
       transform: async (callback: (editor: unknown) => void) => {
-        callback({ add: () => {} })
+        callback({ add: () => {}, namespace: () => {} })
         return { dispose: async () => {} }
       },
     },
@@ -72,7 +85,7 @@ async function setUp(
     integrationID: () => "mcp_github",
     fetch: async (url, init) => {
       requests.push({ url, method: init.method ?? "GET" })
-      return Response.json({ full_name: "octo/repo" })
+      return input.answers?.[url]?.() ?? Response.json({ full_name: "octo/repo" })
     },
   })
   const spy = { ...api, run: (value: Parameters<typeof api.run>[0], call: Parameters<typeof api.run>[1]) => (runs.push(call as ToolCall), api.run(value, call)) }
@@ -90,18 +103,25 @@ describe("GitHub's tools RPC", () => {
 
   it("makes every known read of every toolset a method, and never ui_get, a write or an unknown tool", async () => {
     expect(KNOWN_READS).toEqual(allReadTools())
-    expect(KNOWN_READS).toHaveLength(60)
+    expect(KNOWN_READS).toHaveLength(61)
     expect(KNOWN_READS).toContain("check_dependency_vulnerabilities")
+    // QA GITHUB-8: github-mcp-server v2.1.0's issue artifact tools.
+    expect(KNOWN_READS).toContain("issue_artifact_read")
+    expect(writes).toContain("issue_artifact_write")
     const { contract } = await setUp({ listed: [...KNOWN_READS, ...writes, ...HIDDEN, "brand_new_tool"] })
     expect(Object.keys(contract.methods).sort()).toEqual(["describe", SCRIPT_API_METHOD, ...KNOWN_READS].sort())
     for (const excluded of [...writes, ...HIDDEN, "brand_new_tool"]) expect(contract.methods).not.toHaveProperty(excluded)
-    expect(writes).toHaveLength(36)
+    expect(writes).toHaveLength(37)
   })
 
   it("gives every code a next step in GitHub's own words", () => {
     expect(NEXT_STEPS.AUTH_REQUIRED).toBe("Run /connect and choose GitHub.")
     expect(NEXT_STEPS.NOT_REGISTERED).toContain("call the api method")
     expect(NEXT_STEPS.TOOL_UNAVAILABLE).toContain("toolsets option")
+    // QA LIVE-9: it names the toolsets that are off by default, so a script knows what to turn on.
+    expect(NEXT_STEPS.TOOL_UNAVAILABLE).toBe(
+      "Add the method's toolset to the plugin's toolsets option and run opencode reload (off by default: copilot_spaces, gists, github_support_docs_search, governance, notifications, projects, stargazers); describe shows which methods run now.",
+    )
   })
 
   it("maps the plugin's own errors to their code, what happened and the next step", () => {
@@ -154,6 +174,7 @@ describe("the api method", () => {
     ["two GraphQL operations", { graphql: { query: "query A { viewer { login } } query B { viewer { id } }" } }, "not a single query"],
     ["a download", { method: "GET", path: "/repos/octo/repo/zipball", download: { path: "repo.zip" } }, "scripts never write files"],
     ["an upload", { method: "POST", path: "/repos/octo/repo/releases/1/assets", upload: { path: "a.zip", contentType: "application/zip" } }, "upload sends a file"],
+    ["POST /markdown, a read with a body", { method: "POST", path: "/markdown", body: { text: "x" } }, "POST /markdown is not a GET or HEAD"],
   ])("refuses %s with SCRIPT_READ_ONLY before any request, even when the agent allows github_api", async (_name, input, what) => {
     const h = await setUp({ agents: { build: [...BASE, rule("github_api", "allow")] } })
     const result = await h.call(SCRIPT_API_METHOD, input)
@@ -161,6 +182,24 @@ describe("the api method", () => {
     expect(result.message).toContain(what)
     expect(h.requests).toEqual([])
     expect(h.asserts).toEqual([])
+  })
+
+  // QA GITHUB-1 follow-up: a script's read follows a redirect only through the same check, which no one can approve.
+  it("checks a script's redirect within the API, and refuses it when the rules ask; never follows one off the API", async () => {
+    const answers = {
+      "https://api.github.com/repos/Old/Name": () => new Response(null, { status: 301, headers: { location: "/repositories/10" } }),
+      "https://api.github.com/repos/o/r/actions/jobs/1/logs": () => new Response(null, { status: 302, headers: { location: "https://blob.example.net/l?sig=x" } }),
+    }
+    const refused = await setUp({ answers, refuse: true })
+    const result = await refused.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/Old/Name" })
+    expect(result).toMatchObject({ type: "failed", data: { code: "PERMISSION_DENIED" } })
+    expect(refused.asserts).toEqual([expect.objectContaining({ action: "github_api", resources: ["GET /repositories/10"] })])
+    expect(refused.requests.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name"])
+
+    const allowed = await setUp({ answers })
+    expect(await allowed.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/Old/Name" })).toMatchObject({ ok: true })
+    expect(allowed.requests.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name", "https://api.github.com/repositories/10"])
+    expect(await allowed.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/o/r/actions/jobs/1/logs" })).toMatchObject({ type: "failed", data: { code: "API_REDIRECT_OFF_HOST" } })
   })
 
   it("refuses a read with a body, and an input github_api would not take, as API_INPUT_INVALID", async () => {

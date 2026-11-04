@@ -78,11 +78,11 @@ describe(`defaults on OpenCode ${SDK_VERSION}`, () => {
   test("signed out, the RPC and /github-status say how to sign in and name the unguarded agent", async () => {
     await until("github needs sign-in", async () => (await githubServer(host))?.status.status === "needs_auth")
     const fromRpc = await status(host)
-    expect(fromRpc).toMatchObject({ state: "needs_auth", readOnly: true, unguardedAgents: ["reviewer"], permissionsBlock: defaultRules() })
+    expect(fromRpc).toMatchObject({ state: "sign_in_required", readOnly: true, unguardedAgents: ["reviewer"], permissionsBlock: defaultRules() })
     expect(fromRpc.account).toBeUndefined()
     expect(fromRpc.nextStep).toBe("Run /connect and choose GitHub.")
     const text = await statusCommand(host, await session(host))
-    expect(text).toStartWith("Connection: sign-in required\n")
+    expect(text).toStartWith("GitHub status\nConnection: sign-in required\nAccount: none\n")
     expect(text).toContain("Agents without default rules: reviewer\n")
     expect(text).toContain(`Put the rules below first in each one's own "permissions" list`)
     expect(text).toContain(formatRules(defaultRules()))
@@ -111,7 +111,7 @@ describe(`defaults on OpenCode ${SDK_VERSION}`, () => {
         state: "connected",
         account: PAT_LOGIN,
         tools: { visible: 3, unknown: ["github_brand_new_tool"], mode: "ask" },
-        host: { version: SDK_VERSION },
+        host: { version: SDK_VERSION, range: ">=2.2.3 <2.3.0", tested: true },
       })
     }
   })
@@ -363,7 +363,7 @@ describe(`GitHub Enterprise Server on OpenCode ${SDK_VERSION}`, () => {
     expect(integration.name).toBe("GitHub Enterprise")
     expect(integration.methods.map((method) => (method.type === "oauth" ? method.id : method.type))).toEqual(["github-token"])
     expect(await githubServer(host)).toBeUndefined()
-    expect(await status(host)).toMatchObject({ state: "needs_auth", enterprise: "ghe.example.com", nextStep: "Run /connect and choose GitHub Enterprise." })
+    expect(await status(host)).toMatchObject({ state: "sign_in_required", enterprise: "ghe.example.com", nextStep: "Run /connect and choose GitHub Enterprise." })
 
     const { data: started } = await host.client.integration.oauth.connect({ integrationID: id, methodID: "github-token", location: host.location })
     expect(started.url).toStartWith("https://ghe.example.com/settings/personal-access-tokens/new?")
@@ -476,7 +476,7 @@ describe("an untested OpenCode release", () => {
       expect(state?.status).toBe("failed")
       const error = state?.status === "failed" ? state.error : ""
       expect(error).toStartWith(
-        "GitHubPluginError: HOST_UNTESTED: OpenCode 2.3.0 is not a tested host for this plugin (tested: >=2.2.3 <2.3.0). Next step: Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true.",
+        "GitHubPluginError: HOST_UNTESTED: OpenCode 2.3.0 is outside the supported range >=2.2.3 <2.3.0. Next step: Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true.",
       )
       expect(await githubServer(host)).toBeUndefined()
     } finally {
@@ -488,10 +488,11 @@ describe("an untested OpenCode release", () => {
     const host = await startHost({ version: "2.3.0", options: { allowUntestedHost: true } })
     try {
       expect(await pluginState(host)).toEqual({ status: "active" })
-      expect((await status(host)).host.warning).toBe(
-        "OpenCode 2.3.0 is not a tested host for this plugin (tested: >=2.2.3 <2.3.0). It loaded because allowUntestedHost is set.",
-      )
-      expect(await statusCommand(host, await session(host))).toContain("OpenCode: 2.3.0 (untested: OpenCode 2.3.0 is not a tested host")
+      expect(await status(host)).toMatchObject({
+        host: { version: "2.3.0", range: ">=2.2.3 <2.3.0", tested: false },
+        hostWarning: "OpenCode 2.3.0 is outside the supported range >=2.2.3 <2.3.0. It loaded because allowUntestedHost is set.",
+      })
+      expect(await statusCommand(host, await session(host))).toContain("OpenCode: 2.3.0 (untested: OpenCode 2.3.0 is outside the supported range")
     } finally {
       await host.close()
     }

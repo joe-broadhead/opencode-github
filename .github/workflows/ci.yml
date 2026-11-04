@@ -21,7 +21,9 @@ jobs:
         # Linux x64, Linux arm64, macOS arm64 and macOS x64, pinned to image versions.
         os: [ubuntu-24.04, ubuntu-24.04-arm, macos-26, macos-26-intel]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    # The host, pack and stock stages install each tested OpenCode release (TESTED_HOSTS in src/host-version.ts:
+    # 2.2.3, 2.2.4 and 2.2.5) themselves, with scripts disabled.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

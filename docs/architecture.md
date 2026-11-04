@@ -16,7 +16,8 @@ Setup runs these steps in order and undoes them in reverse on cleanup, or when a
 
 1. `loadOptions` (`src/config.ts`) validates the options. Errors are `OPTIONS_INVALID`.
 2. `checkHost` (`src/host-version.ts`) compares `ctx.app.version` with `>=2.2.3 <2.3.0`. Errors are
-   `HOST_UNTESTED`, unless `allowUntestedHost` turns them into a status warning.
+   `HOST_UNTESTED`, unless `allowUntestedHost` turns them into a status warning. `TESTED_HOSTS` in the same file is
+   the one list of tested releases: the status's `host.tested`, and the host, pack and stock tests, use it.
 3. `registerPermissionDefaults` (`src/permissions.ts`) inserts the default rules into each agent.
 4. `registerToolFilter` (`src/tools.ts`) watches the `github` server's tools.
 5. `registerMcp` (`src/mcp.ts`) registers the MCP server. With `host`, `observeMcp` only records whether another
@@ -66,7 +67,7 @@ clears the report once the server connects again.
 ## Tool catalog
 
 `KNOWN_TOOLS` in `src/tools.ts` lists the known tools of each toolset, marked read or write, from
-github-mcp-server v2.0.3 and each tool's `readOnlyHint`; tools that only GitHub's hosted server has are classified by
+github-mcp-server v2.1.0 and each tool's `readOnlyHint`; tools that only GitHub's hosted server has are classified by
 what they do. `ctx.tool.transform` records the `github` server's tools that are not in the catalog, removes them when
 `unknownTools` is `"hide"`, and pins `get_me`, `issue_read` and `pull_request_read` in the direct tool list. GitHub's
 tools otherwise stay in Code Mode, the host default.
@@ -87,9 +88,11 @@ from `src/sign-in.ts`. The status reads the sign-in from that integration and na
 `github_api`, pinned in Code Mode). `src/api/classify.ts` decides read or write: REST by method, GraphQL by scanning
 the document's operations with a small tokenizer that skips strings, block strings and comments. Reads run; writes
 call `ctx.permission.assert` with `METHOD /path` as the resource and save pattern, and are refused while read-only.
+The resource writes the names GitHub reads without regard to case in lower case (`src/api/names.ts`).
 `src/api/request.ts` builds the URL on the configured API base (uploads on the uploads base), refuses anything that
-could leave it, sends the integration's active token, follows redirects by hand with `redirect: "manual"` and drops
-`Authorization` for any other origin, joins `Link` pages, caps the inline result, and streams downloads into the
+could leave it, sends the integration's active token, and handles redirects by hand with `redirect: "manual"`: never
+for a change, within the API for a read only after the same assert on the new path, and to storage hosts only for a
+download, without `Authorization`. It joins `Link` pages, caps the inline result, and streams downloads into the
 project with a SHA-256. The tool filter leaves `github_api` alone even though it shares the `github_` prefix.
 
 ## Permission defaults
@@ -108,8 +111,8 @@ rules keep one source of truth that the user can read and change. The plugin's o
 only turns an ask on one of the RPC's own script calls into a deny (see [Tools RPC](#tools-rpc)).
 
 Agents defined only in the user's config are created after plugins run and get no rules. `unguardedAgents` in
-`src/permissions.ts` finds agents with a base allow rule but no default block, and the status names them with the
-block to copy.
+`src/permissions.ts` finds agents without the default block whose own rules would let an unknown `github_` tool run
+without asking (the last matching rule wins), and the status names them with the block to copy.
 
 ## Status, RPC and the TUI view
 
@@ -153,7 +156,8 @@ A call is `{ sessionID, input }`. The shared module (`src/host/tools-rpc.ts`):
    (`PERMISSION_DENIED`);
 3. for an MCP method: refuses with `SERVER_CONFLICT` while the plugin does not own the `github` server (another server
    of that name, also with `host`); finds the tool's executor in `ctx.tool.list()`, or names the server's state
-   (`AUTH_REQUIRED` and so on, `NOT_REGISTERED` with `host`) or `TOOL_UNAVAILABLE` (a toolset that is off); calls
+   (`AUTH_REQUIRED` and so on, `NOT_REGISTERED` with `host`) or `TOOL_UNAVAILABLE` (a toolset that is off; `describe`
+   adds `unavailableDetail`'s `detail`, naming the toolset and the `toolsets` option); calls
    `execute(input, { sessionID, agent, messageID, id, signal, progress })` with a new call id, so OpenCode checks
    `github_<tool>` on `*` itself and sends its own credential; and returns `{ output?, text }`;
 4. for `api`: runs `scriptApi` (`src/api/script.ts`), which checks the input with `github_api`'s schema, refuses with
@@ -175,7 +179,7 @@ answers a bad envelope with `rpc.invalid_input`.
 
 The executor does not run `execute.before` and `execute.after` hooks; GitHub has none, so results are unchanged.
 `ctx.tool.list()` returning callable executors is not documented as an entry point: the embedded host test and the
-stock test (`test/stock`, stock `opencode serve` 2.2.3 and 2.2.4) check the whole path against the loopback fake.
+stock test (`test/stock`, stock `opencode serve` 2.2.3, 2.2.4 and 2.2.5) check the whole path against the loopback fake.
 
 ## Drift check
 

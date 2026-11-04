@@ -42,30 +42,38 @@ One command runs every local check, in this order. It must pass before every com
 | Unit tests | `npm test` | Vitest over `test/unit/`. |
 | Build | `npm run build` | esbuild bundles `dist/index.js` (server part) and `dist/tui.js` (TUI part, JSX compiled by Babel with `babel-preset-solid`) as two self-contained files, with the RPC contract (plain JSON Schema) inlined into each and zod only in `dist/index.js`, and fails if anything else lands in `dist/`, an output imports a module the host does not provide, or the root `NOTICE` no longer lists exactly the bundled packages' licences (`node scripts/build.mjs --notice` rewrites it). |
 | Forbidden APIs | `npm run lint` | Proves with its self-test that every rule fires, then scans `src/`, `test/`, `scripts/` and `dist/` for the APIs listed in [AGENTS.md](AGENTS.md). |
-| Pack and install | `npm run test:pack` | Packs the package, checks its file list and size, installs the tarball into a new project with scripts disabled, loads it in stock OpenCode 2.2.3 and 2.2.4 (plugin active, `/connect` lists GitHub with its sign-in methods, default rules, status RPC), and imports the server and RPC entries. |
+| Pack and install | `npm run test:pack` | Packs the package, checks its file list and size, installs the tarball into a new project with scripts disabled, loads it in each tested stock OpenCode release (plugin active, `/connect` lists GitHub with its sign-in methods, default rules, status RPC), and imports the server and RPC entries. |
 | TUI | `npm run test:tui` | Renders the built `dist/tui.js` with OpenTUI's test renderer under Bun. |
-| Host | `npm run test:host` | Loads the built plugin into an embedded OpenCode host from the public `@opencode/sdk` 2.2.3 under Bun, with GitHub replaced by a loopback fake. |
-| Stock | `npm run test:stock` | Runs stock `opencode serve` 2.2.3 and 2.2.4 with the built plugin and a test probe plugin (`test/stock/probe`) that points the `github` server at the loopback fake, and calls the tools RPC as a script: known reads, denies, refused asks, session rules, excluded tools, upstream errors and `api` refusals. |
+| Host | `npm run test:host` | Loads the built plugin into an embedded OpenCode host from the public `@opencode/sdk` under Bun, once per tested release, with GitHub replaced by a loopback fake. |
+| Stock | `npm run test:stock` | Runs each tested stock `opencode serve` release with the built plugin and a test probe plugin (`test/stock/probe`) that points the `github` server at the loopback fake, and calls the tools RPC as a script: known reads, denies, refused asks, session rules, excluded tools, upstream errors and `api` refusals. |
 
-The pack check and the stock test take the stock OpenCode binaries from `OPENCODE_BIN_2_2_3` and `OPENCODE_BIN_2_2_4`.
-When one is unset, each installs `@opencode/cli` at that version into a temporary folder, once per run.
+The tested releases are `TESTED_HOSTS` in `src/host-version.ts`: 2.2.3, 2.2.4 and 2.2.5. The host, pack and stock
+stages, and so CI, all run on that one list. The pack check and the stock test take the stock OpenCode binaries from
+`OPENCODE_BIN_2_2_3`, `OPENCODE_BIN_2_2_4` and `OPENCODE_BIN_2_2_5`. When one is unset, each installs `@opencode/cli`
+at that version into a temporary folder, once per run. The host tests (`scripts/host-tests.mjs`) run 2.2.3 on the
+lockfile's SDK, and each other release on `HOST_SDK_DIR_2_2_4` or `HOST_SDK_DIR_2_2_5`, a folder whose
+`node_modules` holds that `@opencode/sdk`; when one is unset, they install it into a temporary folder, once per run.
 
 The host tests, the stock test and the pack check run OpenCode in a temporary profile: `HOME`, the XDG folders, `TMPDIR` and
 `OPENCODE_TEST_HOME` all point inside a temporary folder, because Bun's `os.homedir()` ignores a changed `HOME`.
-Every request outside the loopback fake fails the test.
+That folder is under the system's `/tmp`, never under `$TMPDIR` or `$HOME`, because OpenCode searches upward for
+`.opencode` folders and `opencode.json` files; a test stops if one is above it. Each stock host listens on its own
+free port. Every request outside the loopback fake fails the test.
 
 ### Another OpenCode release
 
 The lockfile pins `@opencode/sdk` and `@opencode/plugin` at 2.2.3, the lowest supported release. To run the host
-tests on another 2.2.x release, install its SDK in a separate folder, outside the lockfile, and point
+tests on one other 2.2.x release only, install its SDK in a separate folder, outside the lockfile, and point
 `HOST_SDK_DIR` at it:
 
 ```sh
-dir=$(mktemp -d)
-(cd "$dir" && echo '{"private":true}' > package.json && npm install --ignore-scripts --no-audit --no-fund @opencode/sdk@2.2.4)
+dir=$(mktemp -d /tmp/github-sdk-XXXXXX)
+(cd "$dir" && echo '{"private":true}' > package.json && npm install --ignore-scripts --no-audit --no-fund @opencode/sdk@2.2.6)
 npm run build
-HOST_SDK_DIR="$dir" bun test test/host
+HOST_SDK_DIR="$dir" node scripts/host-tests.mjs
 ```
+
+To add a tested release, add it to `TESTED_HOSTS`, the README Requirements and the CHANGELOG.
 
 Do not add a newer release to `package.json` or the lockfile.
 
@@ -131,7 +139,7 @@ Versions follow semantic versioning on the plugin's contract: its options, the s
 `/github-status` command, the `/github` dialog, the status RPC method, the skill names and the default rules. Until
 the first major release, a breaking change raises the minor version.
 
-Each release supports one tested OpenCode line. `opencode.host` in `package.json` states it, and `TESTED_HOST_RANGE`
+Each release supports one OpenCode line. `opencode.host` in `package.json` states it, and `HOST_RANGE`
 in `src/host-version.ts` enforces it. Both must change together, and a unit test checks that they match. Write the
 range as `>=2.2.3 <2.3.0`, never `^2.2.3`, which would accept an untested 2.3.
 

@@ -10,7 +10,16 @@ describe("restKind", () => {
     ["PATCH", "write"],
     ["DELETE", "write"],
   ] as const)("%s is a %s", (method, kind) => {
-    expect(restKind(method)).toBe(kind)
+    expect(restKind(method, "/repos/o/r")).toBe(kind)
+  })
+
+  // QA GITHUB-5: rendering Markdown changes nothing; only these exact paths, and only with POST.
+  it("reads POST /markdown and /markdown/raw, and nothing near them", () => {
+    expect(restKind("POST", "/markdown")).toBe("read")
+    expect(restKind("POST", "/markdown/raw")).toBe("read")
+    for (const [method, path] of [["PUT", "/markdown"], ["DELETE", "/markdown/raw"], ["POST", "/markdown/"], ["POST", "/markdown/raw/x"], ["POST", "/Markdown"], ["POST", "/repos/o/r/markdown"]] as const) {
+      expect(restKind(method, path)).toBe("write")
+    }
   })
 })
 

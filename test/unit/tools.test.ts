@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { KNOWN_TOOLS, PINNED, TOOL_PREFIX, allReadTools, registerToolFilter, toolKind } from "../../src/tools.js"
+import { DEFAULT_TOOLSETS } from "../../src/config.js"
+import { KNOWN_TOOLS, PINNED, TOOL_PREFIX, allReadTools, registerToolFilter, toolKind, toolsetsOf, unavailableDetail } from "../../src/tools.js"
 
 type Ctx = Parameters<typeof registerToolFilter>[0]
 type Editor = Parameters<Parameters<Ctx["tool"]["transform"]>[0]>[0]
@@ -85,6 +86,41 @@ describe("the catalog", () => {
     expect(PINNED).toEqual(["get_me", "issue_read", "pull_request_read"])
     for (const name of PINNED) expect(toolKind(name)).toBe("read")
     expect(TOOL_PREFIX).toBe("github_")
+  })
+})
+
+describe("unavailableDetail", () => {
+  it("names each tool's toolsets from the catalog", () => {
+    expect(toolsetsOf("list_gists")).toEqual(["gists"])
+    expect(toolsetsOf("get_label")).toEqual(["issues", "labels"])
+    expect(toolsetsOf("brand_new_tool")).toEqual([])
+    for (const read of allReadTools()) expect(toolsetsOf(read).length, read).toBeGreaterThan(0)
+  })
+
+  it("says a read whose toolsets are all off is off, and which value of the toolsets option turns it on", () => {
+    expect(unavailableDetail("list_notifications", DEFAULT_TOOLSETS)).toBe(
+      'list_notifications is in the notifications toolset, which is off: add "notifications" to the plugin\'s toolsets option, then run opencode reload.',
+    )
+    expect(unavailableDetail("get_label", ["context"])).toBe(
+      'get_label is in the issues or labels toolset, which is off: add "issues" or "labels" to the plugin\'s toolsets option, then run opencode reload.',
+    )
+  })
+
+  it("says a read whose toolset is on, but which GitHub does not list, is on, and points at /github-status", () => {
+    expect(unavailableDetail("get_label", ["labels"])).toBe(
+      "get_label is in the issues or labels toolset, which the toolsets option turns on, but GitHub does not list it now: run /github-status.",
+    )
+  })
+
+  it("says a flagged read needs a feature flag the plugin does not send, whatever the toolsets", () => {
+    for (const toolsets of [DEFAULT_TOOLSETS, ["context"] as const])
+      expect(unavailableDetail("issue_artifact_read", toolsets)).toBe(
+        "issue_artifact_read is in the issues toolset, but GitHub lists it only behind a feature flag that this plugin does not turn on, whatever the toolsets option says.",
+      )
+  })
+
+  it("has no detail for a tool the catalog does not know", () => {
+    expect(unavailableDetail("brand_new_tool", DEFAULT_TOOLSETS)).toBeUndefined()
   })
 })
 

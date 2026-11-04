@@ -1,6 +1,6 @@
 {
   "$comment": [
-    "Arguments for npm run e2e: one case per catalogued read tool of the default toolsets, except the hidden ui_get.",
+    "Arguments for npm run e2e: one case per catalogued read tool of the default toolsets, except the hidden ui_get and the feature-flagged issue_artifact_read.",
     "A string that is exactly {name} becomes values.name with its type; {name} inside a longer string is replaced with its text.",
     "Set org and team to an organization and team the token can read (read:org), and writable to a repository the token can push to; listing collaborators needs push access.",
     "On the writable repository, set workflow, run and job to a workflow file name and a run and job ID, and the alert and finding numbers to ones that exist; security alerts need admin or security-manager access. Set discussion_owner, discussion_repo and discussion to a repository with discussions.",

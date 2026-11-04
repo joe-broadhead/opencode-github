@@ -17,7 +17,7 @@ import { SERVER_NAME } from "./rpc.js"
 import { registerSignInStatus } from "./sign-in-status.js"
 import { registerSkills } from "./skills.js"
 import { type StatusDeps, registerStatus } from "./status.js"
-import { registerToolFilter } from "./tools.js"
+import { registerToolFilter, unavailableDetail } from "./tools.js"
 
 type Registration = { dispose(): Promise<void> }
 
@@ -64,6 +64,7 @@ export default Plugin.define({
           readOnly: options.readOnly,
           endpoints: api,
           service: options.host ? ENTERPRISE_NAME : "GitHub",
+          enterprise: options.host !== undefined,
           deviceSignIn: options.clientId !== undefined,
           root: ctx.location.directory,
           integrationID: source.integrationID,
@@ -77,8 +78,16 @@ export default Plugin.define({
           ...source,
         }),
       )
-      // Scripts call the known reads and github_api's reads with no model, as a session and its agent.
-      const stopTools = await registerToolsRpc(ctx, { mcp: { server: SERVER_NAME, managed: () => managed() }, owned: [scriptApi(apiTool, api)] })
+      // Scripts call the known reads and github_api's reads with no model, as a session and its agent. A read GitHub
+      // does not list gets describe's detail: its toolset, and whether the toolsets option turns that on.
+      const stopTools = await registerToolsRpc(ctx, {
+        mcp: {
+          server: SERVER_NAME,
+          managed: () => managed(),
+          unavailableDetail: (method, code) => (code === "TOOL_UNAVAILABLE" ? unavailableDetail(method, options.toolsets) : undefined),
+        },
+        owned: [scriptApi(apiTool, api)],
+      })
       keep({ dispose: stopTools })
       keep(await registerSkills(ctx))
     } catch (error) {

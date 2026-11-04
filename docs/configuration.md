@@ -35,7 +35,7 @@ OPTIONS_INVALID: Invalid plugin option "toolset": this option does not exist. Ne
 | `unknownTools` | `"ask"` | `"ask"` keeps GitHub tools the plugin does not know visible, and they ask first. `"hide"` removes them. See [`unknownTools`](#unknowntools). |
 | `clientId` | none (token sign-in only) | A GitHub OAuth App for device sign-in; with it `/connect` also offers **Sign in with GitHub**. Letters, digits, `.`, `_` and `-`, up to 100 characters. See [`clientId` and `scopes`](#clientid-and-scopes). |
 | `scopes` | `["repo", "read:org"]` | Scopes that device sign-in asks for, each once. Tokens are not affected. |
-| `allowUntestedHost` | `false` | Load on an OpenCode release outside `>=2.2.3 <2.3.0`, with a warning in the status. See [`allowUntestedHost`](#allowuntestedhost). |
+| `allowUntestedHost` | `false` | Load on an OpenCode release outside the supported range `>=2.2.3 <2.3.0`, with a warning in the status. See [`allowUntestedHost`](#allowuntestedhost). |
 | `host` | none (github.com) | A GitHub Enterprise Server host name, such as `github.example.com`. See [`host`](#host-github-enterprise-server). |
 
 The MCP server name (`github`) and URL (`https://api.githubcopilot.com/mcp/`) are fixed. Changing an option keeps
@@ -71,7 +71,7 @@ from the agents' tools, and the default rules have no allow rule for it.
 | `git` (default) | `get_repository_tree` | none |
 | `github_support_docs_search` | `github_support_docs_search` | none |
 | `governance` | `custom_properties_read`, `repository_ruleset_read` | `create_repository_ruleset`, `custom_properties_write` |
-| `issues` (default) | `get_label`, `issue_read`, `list_issue_fields`, `list_issue_types`, `list_issues`, `search_issues` | `add_issue_comment`, `issue_write`, `sub_issue_write`, `update_issue_comment` |
+| `issues` (default) | `get_label`, `issue_artifact_read`, `issue_read`, `list_issue_fields`, `list_issue_types`, `list_issues`, `search_issues` | `add_issue_comment`, `issue_artifact_write`, `issue_write`, `sub_issue_write`, `update_issue_comment` |
 | `labels` (default) | `get_label`, `list_label` | `label_write` |
 | `notifications` | `get_notification_details`, `list_notifications` | `dismiss_notification`, `manage_notification_subscription`, `manage_repository_notification_subscription`, `mark_all_notifications_read` |
 | `orgs` (default) | `search_orgs` | none |
@@ -83,7 +83,8 @@ from the agents' tools, and the default rules have no allow rule for it.
 | `stargazers` | `list_starred_repositories` | `star_repository`, `unstar_repository` |
 | `users` (default) | `search_users` | none |
 
-The catalog follows github-mcp-server v2.0.3. Some toolsets, such as `copilot`, `copilot_spaces` and
+The catalog follows github-mcp-server v2.1.0. GitHub offers `issue_artifact_read` and `issue_artifact_write` only
+behind a feature flag the plugin does not turn on, so they do not appear today. Some toolsets, such as `copilot`, `copilot_spaces` and
 `github_support_docs_search`, exist only on GitHub's hosted server, as does `check_dependency_vulnerabilities`, which
 looks up a list of packages in the GitHub Advisory Database.
 
@@ -157,7 +158,9 @@ whole project.
 
 OpenCode creates agents that exist only in your config after plugins run, so they do not get the default rules.
 They run GitHub tools, including writes, without asking. `/github-status` and the `/github` dialog list them under
-"Agents without default rules".
+"Agents without default rules", and the next step names them. An agent whose own rules already ask for or deny
+GitHub's tools, such as one that ends with `{ "action": "*", "resource": "*", "effect": "ask" }`, needs no fix and is
+not listed.
 
 To fix an agent, put the default block **first** in **that agent's own** `permissions` list, followed by your
 top-level rules for `github_` tools, so they keep winning:
@@ -200,13 +203,17 @@ MCP tools and use it for what they cannot do: auto-merge, release create and ass
 rulesets, Actions variables, artifact download and any GraphQL. Its input is one of:
 
 - REST: `{ method, path, query?, body?, accept?, paginate?, maxPages?, maxItems?, download?, upload? }`.
-  - `path` is relative to the API, such as `/repos/OWNER/REPO/releases`. A full URL, `//`, `.` or `..` segments, and
-    `/graphql` are refused.
+  - `path` is relative to the API, such as `/repos/OWNER/REPO/releases`. These are refused with `API_PATH_INVALID`:
+    a full URL, `//`, a `.` or `..` segment however it is percent-encoded (`%2e`, `.%2e`, `%252e` and so on), and a
+    percent-encoded letter, digit or other character a path can hold as itself (`%6F` for `o`). `/graphql` is refused
+    with `API_GRAPHQL_PATH`. The path that rules and the prompt see is exactly the path sent to GitHub.
   - `accept` is `json` (the default), `diff`, `patch`, `raw` or `octet-stream`.
   - `paginate` (GET only) follows GitHub's `Link` header and joins the pages, up to `maxPages` (default 10) and
     `maxItems` (default 1000).
   - `download: { path, overwrite? }` (GET only) saves the response to a file inside the project and returns its
-    path, size and SHA-256.
+    path, size and SHA-256. A file that exists is refused before the prompt, and one that appears during the download
+    is kept, unless `overwrite` is `true`. Downloads stop at 2 GiB (2147483648 bytes) with `API_DOWNLOAD_TOO_LARGE`,
+    and the partial file is removed.
   - `upload: { path, contentType }` (POST only) sends a file inside the project to the uploads host, for release
     assets, for example `{ "method": "POST", "path": "/repos/OWNER/REPO/releases/1/assets", "query": { "name": "app.zip" }, "upload": { "path": "dist/app.zip", "contentType": "application/zip" } }`.
 - GraphQL: `{ graphql: { query, variables? } }`.
@@ -215,23 +222,37 @@ The output has `ok`, `status`, `data` (JSON, or text for diff, patch and raw), t
 `truncated` and a `nextStep` when there is one. Results over 100,000 bytes are cut, whole list items first. Responses
 are untrusted GitHub content.
 
-**Reads and writes.** GET and HEAD read. A GraphQL document reads only when it holds exactly one operation and that
+**Reads and writes.** GET and HEAD read, and so do `POST /markdown` and `POST /markdown/raw`, which only render
+Markdown; every other POST writes. A GraphQL document reads only when it holds exactly one operation and that
 operation is a query; the plugin scans the document itself, skipping strings and comments. Everything else is a
 write: it asks first, as `github_api` on `METHOD /path` (`POST /graphql` for GraphQL), and with `readOnly: true` it is
-refused with `READ_ONLY`. Saving a download asks as `download <file>`, also while read-only. Reads never ask.
+refused with `READ_ONLY`. In that path, the names GitHub reads without regard to case are in lower case (see Rules). Saving a download asks as `download <file>`, also while read-only. Reads never ask.
 
 **Hosts and the token.** Requests go only to `https://api.github.com`, and uploads to `https://uploads.github.com`; with
-[`host`](#host-github-enterprise-server), to the server's own API. Redirects are followed by the plugin: to another host, such as the storage
-that serves logs, artifacts and release assets, without the `Authorization` header. The token never appears in
-output, errors or logs. A 401 marks the account in `/connect` as needing a new sign-in.
+[`host`](#host-github-enterprise-server), to the server's own API. The plugin handles redirects itself:
 
-**Rules.** Rules for `github_api` match `METHOD /path`, and `*` matches any text, slashes included:
+- A change (any method but GET and HEAD, GraphQL and uploads included) never follows one. It fails with
+  `API_REDIRECTED`, which names the new path, so you can call again with that path and have it checked there.
+- A GET or HEAD follows a redirect within the API only after `github_api`'s permission check passes for the new
+  `METHOD /path`, as if it had been called with it; with the default rules that asks. A script's `api` read gets the
+  same check, and an ask is refused. A read redirected outside the API fails with `API_REDIRECT_OFF_HOST`.
+- A download follows a redirect within the API the same way, and, as before, one to the storage that serves logs,
+  artifacts and release assets, without the `Authorization` header. To read logs, download them.
+
+The token never appears in output, errors or logs. A 401 marks the account in `/connect` as needing a new sign-in.
+
+**Rules.** Rules for `github_api` match `METHOD /path`, and `*` matches any text, slashes included. GitHub reads
+some names without regard to case, so the path a rule is checked against has them in lower case: owner, repository,
+organisation, user, enterprise and team names (`/repos/{owner}/{repo}`, `/orgs/{org}`, `/users/{user}`,
+`/orgs/{org}/teams/{team}`, members and collaborators), and environment, label, secret and variable names. **Write
+those names in lower case.** A rule such as `DELETE /repos/Owner/prod/*` never matches, and the status lists it under
+"Rules that never match". Branch names, file paths and everything else keep their case.
 
 ```json
 {
   "permissions": [
-    { "action": "github_api", "resource": "POST /repos/OWNER/*", "effect": "allow" },
-    { "action": "github_api", "resource": "PUT /repos/OWNER/REPO/pulls/*/merge", "effect": "allow" },
+    { "action": "github_api", "resource": "POST /repos/my-org/*", "effect": "allow" },
+    { "action": "github_api", "resource": "PUT /repos/my-org/site/pulls/*/merge", "effect": "allow" },
     { "action": "github_api", "resource": "DELETE *", "effect": "deny" }
   ]
 }
@@ -320,17 +341,19 @@ GHE.com (data residency) is not supported yet; `host` refuses `*.ghe.com`.
 
 ## `allowUntestedHost`
 
-The plugin is tested on OpenCode `>=2.2.3 <2.3.0`. On any other release, including prereleases and development
-builds, it refuses to load:
+The plugin supports OpenCode `>=2.2.3 <2.3.0` and is tested on 2.2.3, 2.2.4 and 2.2.5. On a later 2.2 release it
+loads and works; the status shows `OpenCode: 2.2.6 (untested; supported range >=2.2.3 <2.3.0)`, and the status RPC
+`host.tested: false`. GitHub does not use the `host_untested` state: its state stays the connection's. Outside the
+range, including prereleases and development builds, it refuses to load:
 
 ```text
-HOST_UNTESTED: OpenCode 2.3.0 is not a tested host for this plugin (tested: >=2.2.3 <2.3.0). Next step: Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true.
+HOST_UNTESTED: OpenCode 2.3.0 is outside the supported range >=2.2.3 <2.3.0. Next step: Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true.
 ```
 
 With `allowUntestedHost: true`, it loads and the status shows this warning:
 
 ```text
-OpenCode 2.3.0 is not a tested host for this plugin (tested: >=2.2.3 <2.3.0). It loaded because allowUntestedHost is set.
+OpenCode 2.3.0 is outside the supported range >=2.2.3 <2.3.0. It loaded because allowUntestedHost is set.
 ```
 
 ## Errors
@@ -362,14 +385,17 @@ passed through unchanged.
 | `READ_ONLY` | A `github_api` call would change GitHub, and `readOnly` is `true`. | Set the plugin option readOnly: false to allow changes; each one asks first. |
 | `AUTH_REQUIRED` | `github_api` has no GitHub sign-in to use. | Run /connect and choose GitHub (GitHub Enterprise with `host`). |
 | `API_INPUT_INVALID` | The `github_api` input does not fit, for example `download` with a method other than GET. | Fix the github_api input and call it again. |
-| `API_PATH_INVALID` | The path is not a relative API path. | Pass a relative API path such as /repos/OWNER/REPO/pulls. |
+| `API_PATH_INVALID` | The path is not a relative API path, has a `.` or `..` segment (also percent-encoded), or percent-encodes a character it can hold as itself. | Pass a relative API path such as /repos/OWNER/REPO/pulls. |
 | `API_GRAPHQL_PATH` | `/graphql` was called through method and path. | Pass { graphql: { query, variables } } instead. |
 | `API_FILE_OUTSIDE_PROJECT` | A download or upload file is outside the project. | Use a path inside the project folder. |
 | `API_FILE_EXISTS` | The download file already exists. | Choose another path, or pass download.overwrite: true. |
 | `API_UPLOAD_TOO_LARGE` | The upload file is over 100 MiB. | Upload files up to 104857600 bytes. |
+| `API_DOWNLOAD_TOO_LARGE` | The download is over 2 GiB; the partial file is removed. | Narrow the request, or download it outside OpenCode. |
 | `API_UNREACHABLE` | The API host could not be reached. | Check your network, then try again. |
 | `API_REDIRECT_LOOP` | GitHub redirected more than 5 times. | Try again later. |
 | `API_REDIRECT_INSECURE` | GitHub redirected to a non-HTTPS address. | Try again later. |
+| `API_REDIRECTED` | GitHub redirected a change, which is never followed. The message names the new path. | Call github_api again with path <the new path>, so the change is checked for that path. |
+| `API_REDIRECT_OFF_HOST` | GitHub redirected a read outside its API. | Pass download: { path } to save the response; a download follows GitHub's storage redirects, without the token. |
 | `SCRIPT_READ_ONLY` | A script's `api` call could change GitHub, or would download or upload a file. | Call api with GET, HEAD or a single GraphQL query; make changes from an OpenCode session, where they ask first. |
 
 A script's calls through the tools RPC, `github.platform.tools`, have more codes for sessions, permissions and the

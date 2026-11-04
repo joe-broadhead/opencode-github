@@ -1,13 +1,16 @@
 // Sends one github_api call. Requests go only to the configured API base (uploads to the
-// uploads base); the token goes only to those origins. Redirects are followed by hand, and
-// a redirect to any other origin (logs, artifacts and release assets live in blob storage)
-// is followed without the Authorization header. Results are capped for inline display.
+// uploads base); the token goes only to those origins. Redirects are handled by hand: a change
+// (any method but GET and HEAD) never follows one; a read follows one on the API host only after
+// github_api's permission check passes for the new path, and refuses one to another host; a
+// download also follows GitHub's redirects to its storage hosts (logs, artifacts and release
+// assets), without the Authorization header. Results are capped for inline display.
 import { createHash } from "node:crypto"
-import { mkdir, open, readFile, realpath, rename, rm, stat } from "node:fs/promises"
+import { link, mkdir, open, readFile, realpath, rename, rm, stat } from "node:fs/promises"
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import type { Endpoints } from "../config.js"
 import { GitHubPluginError } from "../errors.js"
 import { permissionName } from "../token-permissions.js"
+import { permissionPath } from "./names.js"
 import { ACCEPT, type ApiOutput, type GraphqlInput, type RestInput } from "./contract.js"
 
 export type Fetch = (url: string, init: RequestInit) => Promise<Response>
@@ -19,6 +22,8 @@ export const MAX_INLINE_BYTES = 100_000
 const MAX_READ_BYTES = 10 * 1024 * 1024
 /** Largest file upload accepts. */
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+/** Largest file download saves; a bigger response is stopped and its partial file removed. */
+export const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024
 const MAX_REDIRECTS = 5
 const DEFAULT_MAX_PAGES = 10
 const DEFAULT_MAX_ITEMS = 1000
@@ -36,33 +41,91 @@ export type CallDeps = {
   readonly signal?: AbortSignal
   /** The project folder; download and upload files must be inside it. */
   readonly root: string
+  /** The download cap; MAX_DOWNLOAD_BYTES unless a test sets a smaller one. */
+  readonly maxDownloadBytes?: number
+  /**
+   * github_api's permission check for a read's redirect on the API host, on its new `METHOD /path` resource. It
+   * throws when the rules refuse, and then the redirect is not followed.
+   */
+  readonly checkRedirect: (resource: string) => Promise<void>
 }
 
-/** A REST call's target: the URL and the `METHOD /path` that permissions see. */
+/** How a request may follow redirects: never for a change; for a read, on the API host after a check; a download also to storage hosts. */
+type Follow = "never" | "api" | "storage"
+
+/**
+ * A REST call's target: the URL, and the `METHOD /path` that permissions see. `path` is exactly the path sent; the
+ * resource has its case-insensitive name segments in lower case (permissionPath).
+ */
 export type RestTarget = { readonly url: URL; readonly resource: string; readonly path: string }
+
+/** Characters a path segment holds as themselves (RFC 3986 pchar); percent-encoding one only hides it. */
+const PLAIN = /^[A-Za-z0-9\-._~!$&'()*+,;=:@]$/
+/** Characters the URL parser would percent-encode in a path, encoded here first so nothing changes after the check. */
+const URL_ENCODED = /[^!-~]|["<>`{}^]/gu
+
+/** A path with every percent-encoding decoded, as often as it decodes (double encoding too). */
+function decodedFully(path: string): string | undefined {
+  let current = path
+  for (let round = 0; round < 8; round++) {
+    const next = current.replace(/%[0-9A-Fa-f]{2}/g, (escape) => String.fromCharCode(Number.parseInt(escape.slice(1), 16)))
+    if (next === current) return current
+    current = next
+  }
+  return undefined
+}
 
 /**
  * Builds the URL for a relative path on the API base (or the uploads base), and refuses
- * anything that could leave it: full URLs, `//`, `..`, backslashes and control characters.
+ * anything that could leave it or that the URL parser or GitHub would read as another path:
+ * full URLs, `//`, `.` and `..` segments however they are encoded, an encoded plain character,
+ * backslashes and control characters. The resource permissions see is the path that is sent.
  */
 export function restTarget(input: Pick<RestInput, "method" | "path" | "query" | "upload">, endpoints: Endpoints): RestTarget {
-  const [rawPath = "", rawQuery] = input.path.split("?", 2) as [string, string | undefined]
+  const split = input.path.indexOf("?")
+  const rawPath = split === -1 ? input.path : input.path.slice(0, split)
+  const rawQuery = split === -1 ? "" : input.path.slice(split + 1)
   const invalid = (why: string) =>
     new GitHubPluginError("API_PATH_INVALID", `The path ${JSON.stringify(input.path.slice(0, 200))} ${why}.`, "Pass a relative API path such as /repos/OWNER/REPO/pulls.")
   if (!rawPath.startsWith("/") || rawPath.startsWith("//")) throw invalid("must start with a single /")
   if (/[\s\\#%]|[\u0000-\u001f\u007f]/.test(rawPath.replace(/%[0-9A-Fa-f]{2}/g, ""))) throw invalid("has characters a path cannot have")
-  if (rawPath.split("/").some((segment) => segment === ".." || segment === "." || /^%2e%2e$/i.test(segment))) throw invalid("has a . or .. segment")
-  if (/^\/graphql\/?$/i.test(rawPath)) {
+  // A . or .. segment, also encoded (%2e, .%2e, %2E., %252e…) or behind an encoded / or \, is refused.
+  const decoded = decodedFully(rawPath)
+  if (decoded === undefined || decoded.split(/[/\\]/).some((segment) => segment === "." || segment === "..")) throw invalid("has a . or .. segment")
+  let path: string
+  try {
+    path = rawPath
+      .replace(/%[0-9A-Fa-f]{2}/g, (escape) => {
+        const char = String.fromCharCode(Number.parseInt(escape.slice(1), 16))
+        if (PLAIN.test(char)) throw invalid(`percent-encodes ${JSON.stringify(char)}; write it as itself`)
+        return escape.toUpperCase()
+      })
+      .replace(URL_ENCODED, (char) => encodeURIComponent(char))
+  } catch (error) {
+    if (error instanceof GitHubPluginError) throw error
+    throw invalid("has characters a path cannot have")
+  }
+  if (/^\/graphql\/?$/i.test(path)) {
     throw new GitHubPluginError("API_GRAPHQL_PATH", "GraphQL calls do not go through method and path.", "Pass { graphql: { query, variables } } instead.")
   }
   const base = new URL(input.upload ? endpoints.uploads : endpoints.api)
-  const url = new URL(`${base.href.replace(/\/$/, "")}${rawPath}`)
-  if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname.replace(/\/$/, ""))) throw invalid("leaves the API host")
-  for (const [key, value] of new URLSearchParams(rawQuery ?? "")) url.searchParams.append(key, value)
+  const basePath = base.pathname.replace(/\/$/, "")
+  const url = new URL(`${base.origin}${basePath}${path}`)
+  // The URL parser must send exactly the checked path; anything it would rewrite is refused.
+  if (url.origin !== base.origin || url.pathname !== `${basePath}${path}`) throw invalid("is not sent as written")
+  for (const [key, value] of new URLSearchParams(rawQuery)) url.searchParams.append(key, value)
   for (const [key, value] of Object.entries(input.query ?? {})) {
     for (const item of Array.isArray(value) ? value : [value]) url.searchParams.append(key, String(item))
   }
-  return { url, path: rawPath, resource: `${input.method} ${rawPath}` }
+  return { url, path, resource: `${input.method} ${permissionPath(path)}` }
+}
+
+/** A redirect's target as a REST target on the API base, or undefined when it leaves the API host or base path. */
+function apiTarget(next: URL, method: RestInput["method"], endpoints: Endpoints): RestTarget | undefined {
+  const base = new URL(endpoints.api)
+  const basePath = base.pathname.replace(/\/$/, "")
+  if (next.origin !== base.origin || !(next.pathname === basePath || next.pathname.startsWith(`${basePath}/`))) return undefined
+  return restTarget({ method, path: `${next.pathname.slice(basePath.length) || "/"}${next.search}` }, endpoints)
 }
 
 /** Resolves a download or upload path inside the project, following symbolic links. */
@@ -98,17 +161,16 @@ export async function callRest(input: RestInput, target: RestTarget, deps: CallD
   }
 
   if (input.download) {
-    const file = await projectPath(deps.root, input.download.path)
-    if (!input.download.overwrite && (await stat(file.absolute).then(() => true, () => false))) {
-      throw new GitHubPluginError("API_FILE_EXISTS", `The file ${file.relative} already exists.`, "Choose another path, or pass download.overwrite: true.")
-    }
-    const response = await send(target.url, { method: input.method, headers, body }, deps)
+    const overwrite = input.download.overwrite === true
+    const file = await downloadTarget(deps.root, input.download.path, overwrite)
+    const response = await send(target.url, { method: input.method, headers, body }, deps, { follow: "storage", what: target.resource })
     if (!response.ok) return finish(response, await readBody(response, input.method), deps)
-    const saved = await save(response, file)
+    const saved = await save(response, file, { overwrite, maxBytes: deps.maxDownloadBytes ?? MAX_DOWNLOAD_BYTES })
     return { ...base(response), download: saved, truncated: false }
   }
 
-  const response = await send(target.url, { method: input.method, headers, body }, deps)
+  const follow: Follow = input.method === "GET" || input.method === "HEAD" ? "api" : "never"
+  const response = await send(target.url, { method: input.method, headers, body }, deps, { follow, what: target.resource })
   const first = await readBody(response, input.method)
   if (!input.paginate || input.method !== "GET" || !response.ok) return finish(response, first, deps)
 
@@ -120,7 +182,7 @@ export async function callRest(input: RestInput, target: RestTarget, deps: CallD
   let last = response
   let next = nextLink(response, deps.endpoints)
   while (next && pages < maxPages && itemCount(data) < maxItems) {
-    const page = await send(next, { method: "GET", headers }, deps)
+    const page = await send(next, { method: "GET", headers }, deps, { follow: "api", what: target.resource })
     const read = await readBody(page, "GET")
     if (!page.ok) return finish(page, read, deps)
     const joined = join_(data, read.data)
@@ -137,19 +199,28 @@ export async function callRest(input: RestInput, target: RestTarget, deps: CallD
 
 export async function callGraphql(input: GraphqlInput, deps: CallDeps): Promise<ApiOutput> {
   const body = JSON.stringify({ query: input.graphql.query, ...(input.graphql.variables ? { variables: input.graphql.variables } : {}) })
-  const response = await send(new URL(deps.endpoints.graphql), { method: "POST", headers: { Accept: ACCEPT.json, "Content-Type": "application/json" }, body }, deps)
+  const response = await send(new URL(deps.endpoints.graphql), { method: "POST", headers: { Accept: ACCEPT.json, "Content-Type": "application/json" }, body }, deps, {
+    follow: "never",
+    what: "POST /graphql",
+  })
   const output = finish(response, await readBody(response, "POST"), deps)
   const errors = (output.data as { errors?: unknown } | undefined)?.errors
   return Array.isArray(errors) && errors.length > 0 ? { ...output, ok: false } : output
 }
 
-/** One request with redirects followed by hand; Authorization goes only to the API and uploads origins. */
-async function send(url: URL, init: { method: string; headers: Record<string, string>; body?: BodyInit | undefined }, deps: CallDeps): Promise<Response> {
+/**
+ * One request with redirects handled by hand (see the top of the file); Authorization goes only to the API and
+ * uploads origins. `what` names the request, `METHOD /path`, in errors.
+ */
+async function send(
+  url: URL,
+  init: { method: string; headers: Record<string, string>; body?: BodyInit | undefined },
+  deps: CallDeps,
+  policy: { follow: Follow; what: string },
+): Promise<Response> {
   const trusted = new Set([new URL(deps.endpoints.api).origin, new URL(deps.endpoints.uploads).origin, new URL(deps.endpoints.graphql).origin])
   let current = url
-  let method = init.method
-  let body = init.body
-  let headers = { ...init.headers }
+  const { method, body, headers } = init
   for (let hop = 0; ; hop++) {
     const auth: Record<string, string> = trusted.has(current.origin)
       ? { Authorization: `Bearer ${deps.token}`, "X-GitHub-Api-Version": API_VERSION }
@@ -169,18 +240,50 @@ async function send(url: URL, init: { method: string; headers: Record<string, st
     }
     const location = response.headers.get("location")
     if (!REDIRECTS.has(response.status) || !location) return response
-    if (hop >= MAX_REDIRECTS) throw new GitHubPluginError("API_REDIRECT_LOOP", `GitHub redirected more than ${MAX_REDIRECTS} times.`, "Try again later.")
-    const next = new URL(location, current)
-    if (next.protocol !== "https:") throw new GitHubPluginError("API_REDIRECT_INSECURE", "GitHub redirected to a non-HTTPS address.", "Try again later.")
     await response.body?.cancel().catch(() => undefined)
-    if (response.status === 303 || ((response.status === 301 || response.status === 302) && method !== "GET" && method !== "HEAD")) {
-      method = "GET"
-      body = undefined
-      const { "Content-Type": _dropped, ...rest } = headers
-      headers = rest
+    const next = new URL(location, current)
+    if (policy.follow === "never") throw redirected(policy.what, next, quietly(() => apiTarget(next, method as RestInput["method"], deps.endpoints)))
+    const onApi = next.protocol === "https:" ? apiTarget(next, method as RestInput["method"], deps.endpoints) : undefined
+    if (hop >= MAX_REDIRECTS) throw new GitHubPluginError("API_REDIRECT_LOOP", `GitHub redirected more than ${MAX_REDIRECTS} times.`, "Try again later.")
+    if (next.protocol !== "https:") throw new GitHubPluginError("API_REDIRECT_INSECURE", "GitHub redirected to a non-HTTPS address.", "Try again later.")
+    if (onApi) {
+      // The same check the request would get for the new path, before anything is sent there.
+      await deps.checkRedirect(onApi.resource)
+      current = onApi.url
+    } else if (policy.follow === "storage") current = next
+    else {
+      throw new GitHubPluginError(
+        "API_REDIRECT_OFF_HOST",
+        `GitHub redirected ${policy.what} outside its API, to ${next.host}, and a read follows redirects only within the API.`,
+        "Pass download: { path } to save the response; a download follows GitHub's storage redirects, without the token.",
+      )
     }
-    current = next
   }
+}
+
+const quietly = <T>(make: () => T): T | undefined => {
+  try {
+    return make()
+  } catch {
+    return undefined
+  }
+}
+
+/** A change that GitHub redirected: not followed, so it can be sent again to the new path and checked there. */
+function redirected(what: string, next: URL, onApi: RestTarget | undefined): GitHubPluginError {
+  if (!onApi) {
+    return new GitHubPluginError(
+      "API_REDIRECTED",
+      `GitHub answered ${what} with a redirect outside its API, to ${next.host}, and a change never follows a redirect.`,
+      "Check the path; github_api sends changes only to GitHub's API.",
+    )
+  }
+  const path = `${onApi.path}${onApi.url.search}`
+  return new GitHubPluginError(
+    "API_REDIRECTED",
+    `GitHub answered ${what} with a redirect to ${path}, and a change never follows a redirect.`,
+    `Call github_api again with path ${path}, so the change is checked for that path.`,
+  )
 }
 
 type Body = { data?: unknown; contentType?: string; truncated: boolean; binary?: number }
@@ -231,7 +334,33 @@ async function readCapped(response: Response, limit: number): Promise<{ bytes: U
   return { bytes, truncated }
 }
 
-async function save(response: Response, file: { absolute: string; relative: string }): Promise<{ path: string; bytes: number; sha256: string }> {
+const fileExists = (file: { relative: string }) =>
+  new GitHubPluginError("API_FILE_EXISTS", `The file ${file.relative} already exists.`, "Choose another path, or pass download.overwrite: true.")
+
+/** The download file inside the project; refused when it exists and overwrite is off. */
+export async function downloadTarget(root: string, path: string, overwrite: boolean): Promise<{ absolute: string; relative: string }> {
+  const file = await projectPath(root, path)
+  if (!overwrite && (await stat(file.absolute).then(() => true, () => false))) throw fileExists(file)
+  return file
+}
+
+const tooLarge = (limit: number) =>
+  new GitHubPluginError("API_DOWNLOAD_TOO_LARGE", `The download is over ${limit} bytes.`, "Narrow the request, or download it outside OpenCode.")
+
+/**
+ * Streams the body to a temporary file beside the target, then publishes it: with a hard link
+ * when overwrite is off, so a file that appeared meanwhile is never replaced, else with rename.
+ */
+async function save(
+  response: Response,
+  file: { absolute: string; relative: string },
+  options: { overwrite: boolean; maxBytes: number },
+): Promise<{ path: string; bytes: number; sha256: string }> {
+  const declared = Number(response.headers.get("content-length"))
+  if (Number.isFinite(declared) && declared > options.maxBytes) {
+    await response.body?.cancel().catch(() => undefined)
+    throw tooLarge(options.maxBytes)
+  }
   await mkdir(dirname(file.absolute), { recursive: true })
   const temporary = join(dirname(file.absolute), `.${basename(file.absolute)}.${process.pid}.${Date.now()}.part`)
   const hash = createHash("sha256")
@@ -240,13 +369,20 @@ async function save(response: Response, file: { absolute: string; relative: stri
   try {
     if (response.body) {
       for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
-        hash.update(chunk)
         bytes += chunk.byteLength
+        if (bytes > options.maxBytes) throw tooLarge(options.maxBytes)
+        hash.update(chunk)
         await handle.write(chunk)
       }
     }
     await handle.close()
-    await rename(temporary, file.absolute)
+    if (options.overwrite) await rename(temporary, file.absolute)
+    else {
+      await link(temporary, file.absolute).catch((error: NodeJS.ErrnoException) => {
+        throw error.code === "EEXIST" ? fileExists(file) : error
+      })
+      await rm(temporary, { force: true })
+    }
   } catch (error) {
     await handle.close().catch(() => undefined)
     await rm(temporary, { force: true })
