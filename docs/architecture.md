@@ -16,7 +16,8 @@ Setup runs these steps in order and undoes them in reverse on cleanup, or when a
 
 1. `loadOptions` (`src/config.ts`) validates the options. Errors are `OPTIONS_INVALID`.
 2. `checkHost` (`src/host-version.ts`) compares `ctx.app.version` with `>=2.2.3 <2.3.0`. Errors are
-   `HOST_UNTESTED`, unless `allowUntestedHost` turns them into a status warning.
+   `HOST_UNTESTED`, unless `allowUntestedHost` turns them into a status warning. `TESTED_HOSTS` in the same file is
+   the one list of tested releases: the status's `host.tested`, and the host, pack and stock tests, use it.
 3. `registerPermissionDefaults` (`src/permissions.ts`) inserts the default rules into each agent.
 4. `registerToolFilter` (`src/tools.ts`) watches the `github` server's tools.
 5. `registerMcp` (`src/mcp.ts`) registers the MCP server. With `host`, `observeMcp` only records whether another
@@ -108,8 +109,8 @@ rules keep one source of truth that the user can read and change. The plugin's o
 only turns an ask on one of the RPC's own script calls into a deny (see [Tools RPC](#tools-rpc)).
 
 Agents defined only in the user's config are created after plugins run and get no rules. `unguardedAgents` in
-`src/permissions.ts` finds agents with a base allow rule but no default block, and the status names them with the
-block to copy.
+`src/permissions.ts` finds agents without the default block whose own rules would let an unknown `github_` tool run
+without asking (the last matching rule wins), and the status names them with the block to copy.
 
 ## Status, RPC and the TUI view
 

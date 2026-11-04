@@ -94,7 +94,8 @@ describe("insertDefaults", () => {
 })
 
 describe("unguardedAgents", () => {
-  it("names agents with a base allow rule but no default block", () => {
+  // QA LIVE-1: "custom" already asks for every GitHub tool, so it needs no fix.
+  it("names agents without the default block whose rules would run an unknown GitHub tool without asking", () => {
     const defaults = defaultRules()
     const agents = [
       { id: "build", permissions: insertDefaults([BASE, ENV], defaults) },
@@ -102,7 +103,7 @@ describe("unguardedAgents", () => {
       { id: "title", permissions: [{ action: "*", resource: "*", effect: "deny" } as Rule] },
       { id: "custom", permissions: [BASE, { action: "github_*", resource: "*", effect: "ask" } as Rule] },
     ]
-    expect(unguardedAgents(agents)).toEqual(["reviewer", "custom"])
+    expect(unguardedAgents(agents)).toEqual(["reviewer"])
   })
 
   it("accepts the per-agent fix: the block in the agent's own rules, after the top-level ones", () => {

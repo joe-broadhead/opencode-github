@@ -23,6 +23,8 @@ const HOST_PROVIDED = ["@opencode/plugin", "@opencode/plugin/*", "@opentui/*", "
 const allowed = (path) =>
   path.startsWith("node:") || HOST_PROVIDED.some((name) => (name.endsWith("/*") ? path.startsWith(name.slice(0, -1)) : path === name))
 
+// The plugin's version, for src/version.ts; no source file repeats it.
+const VERSION = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version
 const presets = [["babel-preset-solid", { moduleName: "@opentui/solid", generate: "universal" }], "@babel/preset-typescript"]
 
 /** Compiles .tsx with Babel's Solid preset as esbuild loads it; esbuild handles plain .ts itself. */
@@ -49,6 +51,7 @@ async function bundle(entry, outfile, plugins = []) {
     target: "es2022",
     external: HOST_PROVIDED,
     plugins,
+    define: { __PLUGIN_VERSION__: JSON.stringify(VERSION) },
     legalComments: "inline",
     metafile: true,
     logLevel: "warning",

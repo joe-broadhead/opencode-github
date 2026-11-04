@@ -121,6 +121,28 @@ A refusal or failure is the RPC error `failed`, with a message `CODE: what happe
 OpenCode itself answers `rpc.invalid_input` for a body that is not the envelope above, `rpc.method_not_found` for a
 method that does not exist, such as `issue_write`, and `rpc.unavailable` when the plugin is not loaded.
 
+## Status
+
+The status RPC, `github.platform`, returns what `/github-status` shows:
+
+```sh
+opencode api post /api/rpc/github.platform/status -d '{"input":{}}'
+```
+
+These fields have the same names and meanings in every plugin of this family:
+
+| Field | Value |
+| --- | --- |
+| `version` | The plugin's version. |
+| `host` | `{ version, range, tested }`: the OpenCode release, the supported range `>=2.2.3 <2.3.0`, and whether this release is one the plugin is tested on (2.2.3, 2.2.4 or 2.2.5). |
+| `state` | `connected`, `sign_in_required`, `connecting`, `failed`, `disabled`, `not_configured` or `conflict`. |
+| `unguardedAgents` | The agents without default rules, always present; `[]` when there are none. |
+| `nextStep` | The Next step row; `Nothing to do.` when nothing is needed. |
+
+GitHub's own fields sit beside them: `account`, `readOnly`, `toolsets`, `tools` (`visible`, `unknown`, `mode`),
+`permissionsBlock` (the rules to copy, while agents are listed), `hostWarning` (outside the range, with
+`allowUntestedHost`) and `enterprise` (with `host`).
+
 ## What scripts cannot do
 
 - Change anything on GitHub: GitHub's write tools are never methods, and `api` refuses writes.

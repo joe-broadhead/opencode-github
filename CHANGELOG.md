@@ -12,6 +12,26 @@ All notable changes to this project are documented here. The format follows [Kee
   wrong path. It now refuses a `.` or `..` segment however it is encoded (double encoding too) and a percent-encoded
   character a path can hold as itself, such as `%6F` for `o`, with `API_PATH_INVALID`, before any prompt or request.
   The path that rules and the prompt see is exactly the path sent, on GitHub.com and with `host`, for uploads too.
+- Status listed agents whose own rules already ask for or deny GitHub's tools, such as agents that end with
+  `* * ask`, as agents without default rules. It now lists an agent only when its rules would let a GitHub tool run
+  without asking.
+- Status said "Nothing to do." while it listed agents without default rules. The next step now names them and the
+  fix.
+- `/github-status` and the dialog left out the Account and Agents without default rules rows when they were empty,
+  and `/github-status` had no title line. Every row is now shown, with `none` where it is empty, under
+  "GitHub status".
+
+### Changed
+
+- OpenCode 2.2.5 is a tested release. The status calls 2.2.3, 2.2.4 and 2.2.5 tested, and a later 2.2 release
+  "untested; supported range >=2.2.3 <2.3.0". `HOST_UNTESTED` and the `allowUntestedHost` warning now say "outside
+  the supported range".
+- The status RPC (`github.platform`) has the fields every plugin of this family shares
+  ([Scripting](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/scripting.md#status)):
+  - new `version`, the plugin's version;
+  - `host` is `{ version, range, tested }`; `host.warning` is now `hostWarning`;
+  - `state` values: `needs_auth` is now `sign_in_required`, `pending` is now `connecting`, and `not_registered` is
+    now `not_configured`.
 
 ## [0.0.1] - 2026-11-03
 

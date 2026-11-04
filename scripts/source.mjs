@@ -1,7 +1,7 @@
 // Loads a TypeScript module from src/ for a maintainer script. dist/ holds only the bundled
 // entries, so scripts that need internals (the tool catalog, the options, the default
 // rules) bundle the one module they need with esbuild and import the result.
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
@@ -20,6 +20,7 @@ export async function loadSource(path) {
     platform: "node",
     target: "es2022",
     external: ["@opencode/plugin", "@opencode/plugin/*"],
+    define: { __PLUGIN_VERSION__: JSON.stringify(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version) },
     logLevel: "warning",
   })
   // Next to package.json, so the host packages left external resolve from node_modules.

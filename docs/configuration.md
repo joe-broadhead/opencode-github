@@ -35,7 +35,7 @@ OPTIONS_INVALID: Invalid plugin option "toolset": this option does not exist. Ne
 | `unknownTools` | `"ask"` | `"ask"` keeps GitHub tools the plugin does not know visible, and they ask first. `"hide"` removes them. See [`unknownTools`](#unknowntools). |
 | `clientId` | none (token sign-in only) | A GitHub OAuth App for device sign-in; with it `/connect` also offers **Sign in with GitHub**. Letters, digits, `.`, `_` and `-`, up to 100 characters. See [`clientId` and `scopes`](#clientid-and-scopes). |
 | `scopes` | `["repo", "read:org"]` | Scopes that device sign-in asks for, each once. Tokens are not affected. |
-| `allowUntestedHost` | `false` | Load on an OpenCode release outside `>=2.2.3 <2.3.0`, with a warning in the status. See [`allowUntestedHost`](#allowuntestedhost). |
+| `allowUntestedHost` | `false` | Load on an OpenCode release outside the supported range `>=2.2.3 <2.3.0`, with a warning in the status. See [`allowUntestedHost`](#allowuntestedhost). |
 | `host` | none (github.com) | A GitHub Enterprise Server host name, such as `github.example.com`. See [`host`](#host-github-enterprise-server). |
 
 The MCP server name (`github`) and URL (`https://api.githubcopilot.com/mcp/`) are fixed. Changing an option keeps
@@ -157,7 +157,9 @@ whole project.
 
 OpenCode creates agents that exist only in your config after plugins run, so they do not get the default rules.
 They run GitHub tools, including writes, without asking. `/github-status` and the `/github` dialog list them under
-"Agents without default rules".
+"Agents without default rules", and the next step names them. An agent whose own rules already ask for or deny
+GitHub's tools, such as one that ends with `{ "action": "*", "resource": "*", "effect": "ask" }`, needs no fix and is
+not listed.
 
 To fix an agent, put the default block **first** in **that agent's own** `permissions` list, followed by your
 top-level rules for `github_` tools, so they keep winning:
@@ -322,17 +324,19 @@ GHE.com (data residency) is not supported yet; `host` refuses `*.ghe.com`.
 
 ## `allowUntestedHost`
 
-The plugin is tested on OpenCode `>=2.2.3 <2.3.0`. On any other release, including prereleases and development
-builds, it refuses to load:
+The plugin supports OpenCode `>=2.2.3 <2.3.0` and is tested on 2.2.3, 2.2.4 and 2.2.5. On a later 2.2 release it
+loads and works; the status shows `OpenCode: 2.2.6 (untested; supported range >=2.2.3 <2.3.0)`, and the status RPC
+`host.tested: false`. GitHub does not use the `host_untested` state: its state stays the connection's. Outside the
+range, including prereleases and development builds, it refuses to load:
 
 ```text
-HOST_UNTESTED: OpenCode 2.3.0 is not a tested host for this plugin (tested: >=2.2.3 <2.3.0). Next step: Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true.
+HOST_UNTESTED: OpenCode 2.3.0 is outside the supported range >=2.2.3 <2.3.0. Next step: Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true.
 ```
 
 With `allowUntestedHost: true`, it loads and the status shows this warning:
 
 ```text
-OpenCode 2.3.0 is not a tested host for this plugin (tested: >=2.2.3 <2.3.0). It loaded because allowUntestedHost is set.
+OpenCode 2.3.0 is outside the supported range >=2.2.3 <2.3.0. It loaded because allowUntestedHost is set.
 ```
 
 ## Errors
