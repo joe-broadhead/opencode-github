@@ -51,8 +51,9 @@ When you add a rule here, add it to the scan and its self-test too.
   method per known read (`allReadTools()`, through OpenCode's own executors from `ctx.tool.list()`, never an MCP client
   of the plugin's), and `api` (`src/api/script.ts`): `github_api`'s own spec, refusing writes, GraphQL that is not one
   query, `download` and `upload` with `SCRIPT_READ_ONLY` before any request. Writes, `ui_get` and unknown tools are
-  never methods. A script runs as a session and its agent; its one permission hook only turns its own script calls'
-  asks into denies. `src/host/tools-rpc.ts` is a copy of a module shared by several plugins: change only its block
+  never methods. `describe` gives a read GitHub does not list a `detail` naming its toolset and the `toolsets` option
+  (`unavailableDetail` in `src/tools.ts`). A script runs as a session and its agent; its one permission hook only turns
+  its own script calls' asks into denies. `src/host/tools-rpc.ts` is a copy of a module shared by several plugins: change only its block
   between the `PLUGIN-SPECIFIC` markers here, and the rest in the shared copy first.
 - Agents defined only in the user's config get no rules. Status names them and gives the fix: the block **first** in
   **that agent's own** `permissions` list, followed by the user's top-level rules for `github_` tools. Never recommend the
