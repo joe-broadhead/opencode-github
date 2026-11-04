@@ -25,8 +25,14 @@ import type { Plugin } from "@opencode/plugin"
 import { Rpc } from "@opencode/plugin/rpc"
 
 // >>> PLUGIN-SPECIFIC >>>
+import { DEFAULT_TOOLSETS } from "../config.js"
 import { GitHubPluginError } from "../errors.js"
-import { allReadTools } from "../tools.js"
+import { KNOWN_TOOLS, allReadTools } from "../tools.js"
+
+/** Toolsets with read methods that are off unless the toolsets option names them (QA LIVE-9). */
+const OFF_BY_DEFAULT = Object.entries(KNOWN_TOOLS)
+  .filter(([toolset, tools]) => !(DEFAULT_TOOLSETS as readonly string[]).includes(toolset) && tools.read.length > 0)
+  .map(([toolset]) => toolset)
 
 /** The plugin's id. The RPC id is `<PLUGIN_ID>.tools`. */
 export const PLUGIN_ID = "github.platform"
@@ -55,7 +61,7 @@ export const NEXT_STEPS: NextSteps = {
   CONNECTION_FAILED: "Run /github-status and follow its next step.",
   DISABLED: "Turn the github server back on in /mcps.",
   NOT_REGISTERED: "Run /github-status and follow its next step; with the host option (GitHub Enterprise Server) there is no MCP server, so call the api method instead.",
-  TOOL_UNAVAILABLE: "Call describe to see which methods are available, and add the method's toolset to the plugin's toolsets option if it is off.",
+  TOOL_UNAVAILABLE: `Add the method's toolset to the plugin's toolsets option and run opencode reload (off by default: ${OFF_BY_DEFAULT.join(", ")}); describe shows which methods run now.`,
   UPSTREAM_ERROR: "Check the input against the method's schema from describe, and run /github-status if it keeps failing.",
   CANCELLED: "Call the method again if you still need the result.",
 }

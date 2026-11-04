@@ -67,7 +67,7 @@ clears the report once the server connects again.
 ## Tool catalog
 
 `KNOWN_TOOLS` in `src/tools.ts` lists the known tools of each toolset, marked read or write, from
-github-mcp-server v2.0.3 and each tool's `readOnlyHint`; tools that only GitHub's hosted server has are classified by
+github-mcp-server v2.1.0 and each tool's `readOnlyHint`; tools that only GitHub's hosted server has are classified by
 what they do. `ctx.tool.transform` records the `github` server's tools that are not in the catalog, removes them when
 `unknownTools` is `"hide"`, and pins `get_me`, `issue_read` and `pull_request_read` in the direct tool list. GitHub's
 tools otherwise stay in Code Mode, the host default.

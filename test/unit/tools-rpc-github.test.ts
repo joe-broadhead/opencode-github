@@ -90,18 +90,25 @@ describe("GitHub's tools RPC", () => {
 
   it("makes every known read of every toolset a method, and never ui_get, a write or an unknown tool", async () => {
     expect(KNOWN_READS).toEqual(allReadTools())
-    expect(KNOWN_READS).toHaveLength(60)
+    expect(KNOWN_READS).toHaveLength(61)
     expect(KNOWN_READS).toContain("check_dependency_vulnerabilities")
+    // QA GITHUB-8: github-mcp-server v2.1.0's issue artifact tools.
+    expect(KNOWN_READS).toContain("issue_artifact_read")
+    expect(writes).toContain("issue_artifact_write")
     const { contract } = await setUp({ listed: [...KNOWN_READS, ...writes, ...HIDDEN, "brand_new_tool"] })
     expect(Object.keys(contract.methods).sort()).toEqual(["describe", SCRIPT_API_METHOD, ...KNOWN_READS].sort())
     for (const excluded of [...writes, ...HIDDEN, "brand_new_tool"]) expect(contract.methods).not.toHaveProperty(excluded)
-    expect(writes).toHaveLength(36)
+    expect(writes).toHaveLength(37)
   })
 
   it("gives every code a next step in GitHub's own words", () => {
     expect(NEXT_STEPS.AUTH_REQUIRED).toBe("Run /connect and choose GitHub.")
     expect(NEXT_STEPS.NOT_REGISTERED).toContain("call the api method")
     expect(NEXT_STEPS.TOOL_UNAVAILABLE).toContain("toolsets option")
+    // QA LIVE-9: it names the toolsets that are off by default, so a script knows what to turn on.
+    expect(NEXT_STEPS.TOOL_UNAVAILABLE).toBe(
+      "Add the method's toolset to the plugin's toolsets option and run opencode reload (off by default: copilot_spaces, gists, github_support_docs_search, governance, notifications, projects, stargazers); describe shows which methods run now.",
+    )
   })
 
   it("maps the plugin's own errors to their code, what happened and the next step", () => {

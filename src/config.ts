@@ -29,7 +29,7 @@ export function endpoints(options: Pick<Options, "host">): Endpoints {
   return { web, api: `${web}/api/v3`, graphql: `${web}/api/graphql`, uploads: `${web}/api/uploads` }
 }
 
-/** GitHub's documented toolsets, including the ones only the remote server offers (v2.0.3). */
+/** GitHub's documented toolsets, including the ones only the remote server offers (v2.1.0). */
 export const TOOLSETS = [
   "context",
   "actions",

@@ -18,7 +18,10 @@ never sees the GitHub token for these calls. Only the known reads are methods: G
 never methods, even with an allow rule.
 
 A method runs only while GitHub's server lists its tool. A toolset that is off in the plugin's `toolsets` option leaves
-its methods unavailable (`TOOL_UNAVAILABLE`); `describe` shows which ones can run now. With the
+its methods unavailable: `describe` shows them with `available: false` and `reason: "TOOL_UNAVAILABLE"`, and a call
+fails with that code. By default that is the reads of `copilot_spaces`, `gists`, `github_support_docs_search`,
+`governance`, `notifications`, `projects` and `stargazers`; the [toolsets table](configuration.md#toolsets) names each
+method's toolset. Add it to `toolsets` and run `opencode reload`. With the
 [`host`](configuration.md#host-github-enterprise-server) option (GitHub Enterprise Server) there is no MCP server, so
 only `api` runs.
 
