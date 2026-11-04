@@ -17,6 +17,12 @@ All notable changes to this project are documented here. The format follows [Kee
   without asking.
 - Status said "Nothing to do." while it listed agents without default rules. The next step now names them and the
   fix.
+- `github_api` downloads had no size limit. A download now stops at 2 GiB with `API_DOWNLOAD_TOO_LARGE`, checked
+  against `Content-Length` and while it streams, and the partial file is removed.
+- A `github_api` download without `overwrite` could replace a file created while it ran. It now keeps that file and
+  fails with `API_FILE_EXISTS`.
+- A download to a file that already exists asked for approval first and only then failed. It is now refused before
+  the prompt.
 - `/github-status` and the dialog left out the Account and Agents without default rules rows when they were empty,
   and `/github-status` had no title line. Every row is now shown, with `none` where it is empty, under
   "GitHub status".

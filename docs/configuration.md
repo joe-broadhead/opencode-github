@@ -210,7 +210,9 @@ rulesets, Actions variables, artifact download and any GraphQL. Its input is one
   - `paginate` (GET only) follows GitHub's `Link` header and joins the pages, up to `maxPages` (default 10) and
     `maxItems` (default 1000).
   - `download: { path, overwrite? }` (GET only) saves the response to a file inside the project and returns its
-    path, size and SHA-256.
+    path, size and SHA-256. A file that exists is refused before the prompt, and one that appears during the download
+    is kept, unless `overwrite` is `true`. Downloads stop at 2 GiB (2147483648 bytes) with `API_DOWNLOAD_TOO_LARGE`,
+    and the partial file is removed.
   - `upload: { path, contentType }` (POST only) sends a file inside the project to the uploads host, for release
     assets, for example `{ "method": "POST", "path": "/repos/OWNER/REPO/releases/1/assets", "query": { "name": "app.zip" }, "upload": { "path": "dist/app.zip", "contentType": "application/zip" } }`.
 - GraphQL: `{ graphql: { query, variables? } }`.
@@ -373,6 +375,7 @@ passed through unchanged.
 | `API_FILE_OUTSIDE_PROJECT` | A download or upload file is outside the project. | Use a path inside the project folder. |
 | `API_FILE_EXISTS` | The download file already exists. | Choose another path, or pass download.overwrite: true. |
 | `API_UPLOAD_TOO_LARGE` | The upload file is over 100 MiB. | Upload files up to 104857600 bytes. |
+| `API_DOWNLOAD_TOO_LARGE` | The download is over 2 GiB; the partial file is removed. | Narrow the request, or download it outside OpenCode. |
 | `API_UNREACHABLE` | The API host could not be reached. | Check your network, then try again. |
 | `API_REDIRECT_LOOP` | GitHub redirected more than 5 times. | Try again later. |
 | `API_REDIRECT_INSECURE` | GitHub redirected to a non-HTTPS address. | Try again later. |

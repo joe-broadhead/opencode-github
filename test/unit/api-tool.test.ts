@@ -1,4 +1,4 @@
-import { mkdtempSync, realpathSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -137,6 +137,18 @@ describe("github_api", () => {
     const api = setUp({ readOnly: true })
     await api.run({ method: "GET", path: "/repos/o/r/zipball", download: { path: "out/r.zip" } })
     expect(api.asserts).toEqual([expect.objectContaining({ action: "github_api", resources: ["download out/r.zip"], save: ["download out/r.zip"] })])
+  })
+
+  // QA GITHUB-6: the user is never asked to approve a download that cannot be saved.
+  it("refuses a download to an existing file before asking", async () => {
+    const api = setUp()
+    mkdirSync(join(root, "out"))
+    writeFileSync(join(root, "out", "r.zip"), "old")
+    expect(await message(api.run({ method: "GET", path: "/repos/o/r/zipball", download: { path: "out/r.zip" } }))).toMatch(/^API_FILE_EXISTS: /)
+    expect(api.asserts).toEqual([])
+    expect(api.requests).toEqual([])
+    await api.run({ method: "GET", path: "/repos/o/r/zipball", download: { path: "out/r.zip", overwrite: true } })
+    expect(api.asserts).toEqual([expect.objectContaining({ resources: ["download out/r.zip"] })])
   })
 
   it("refuses bad input with a coded error and sends nothing", async () => {
