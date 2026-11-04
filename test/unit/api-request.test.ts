@@ -325,6 +325,28 @@ describe("callRest", () => {
     expect(seen).toHaveLength(1)
   })
 
+  // GITHUB-R15: on GitHub Enterprise Server the API shares its origin with the web, so a page must stay under the API base path.
+  it("stops paginating at a Link outside the GitHub Enterprise Server API base path", async () => {
+    const { fetch, seen } = fakeFetch({
+      "https://ghe.example.com/api/v3/user/repos": () => json([1, 2], { headers: { link: '<https://ghe.example.com/admin/users?page=2>; rel="next"' } }),
+      "https://ghe.example.com/api/v3/orgs": () => json([1], { headers: { link: '<https://ghe.example.com/api/v3x/orgs?page=2>; rel="next"' } }),
+      "https://ghe.example.com/api/v3/teams": () => json([1], { headers: { link: '<https://ghe.example.com/api/v3/teams?page=2>; rel="next"' } }),
+      "https://ghe.example.com/api/v3/teams?page=2": () => json([2]),
+    })
+    for (const path of ["/user/repos", "/orgs"]) {
+      const input = rest({ method: "GET", path, paginate: true })
+      expect((await callRest(input, restTarget(input, GHES), deps(fetch, GHES))).pagination).toMatchObject({ pages: 1, more: false })
+    }
+    const inside = rest({ method: "GET", path: "/teams", paginate: true })
+    expect(await callRest(inside, restTarget(inside, GHES), deps(fetch, GHES))).toMatchObject({ data: [1, 2], pagination: { pages: 2 } })
+    expect(seen.map((request) => request.url)).toEqual([
+      "https://ghe.example.com/api/v3/user/repos",
+      "https://ghe.example.com/api/v3/orgs",
+      "https://ghe.example.com/api/v3/teams",
+      "https://ghe.example.com/api/v3/teams?page=2",
+    ])
+  })
+
   it("cuts a large result to whole items, with a next step", async () => {
     const items = Array.from({ length: 2000 }, (_, index) => ({ id: index, body: "x".repeat(100) }))
     const { fetch } = fakeFetch({ "https://api.github.com/big": () => json(items) })

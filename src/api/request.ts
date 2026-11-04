@@ -120,11 +120,17 @@ export function restTarget(input: Pick<RestInput, "method" | "path" | "query" | 
   return { url, path, resource: `${input.method} ${permissionPath(path)}` }
 }
 
-/** A redirect's target as a REST target on the API base, or undefined when it leaves the API host or base path. */
-function apiTarget(next: URL, method: RestInput["method"], endpoints: Endpoints): RestTarget | undefined {
+/** Whether a URL is on the API origin and under its base path (on GitHub Enterprise Server the web shares the origin). */
+function onApiBase(url: URL, endpoints: Endpoints): boolean {
   const base = new URL(endpoints.api)
   const basePath = base.pathname.replace(/\/$/, "")
-  if (next.origin !== base.origin || !(next.pathname === basePath || next.pathname.startsWith(`${basePath}/`))) return undefined
+  return url.origin === base.origin && (url.pathname === basePath || url.pathname.startsWith(`${basePath}/`))
+}
+
+/** A redirect's target as a REST target on the API base, or undefined when it leaves the API host or base path. */
+function apiTarget(next: URL, method: RestInput["method"], endpoints: Endpoints): RestTarget | undefined {
+  if (!onApiBase(next, endpoints)) return undefined
+  const basePath = new URL(endpoints.api).pathname.replace(/\/$/, "")
   return restTarget({ method, path: `${next.pathname.slice(basePath.length) || "/"}${next.search}` }, endpoints)
 }
 
@@ -471,9 +477,9 @@ function nextLink(response: Response, endpoints: Endpoints): URL | undefined {
   const link = response.headers.get("link")
   const match = link && /<([^>]+)>\s*;\s*rel="next"/.exec(link)
   if (!match) return undefined
-  const url = new URL(match[1]!)
-  // Only pages on the API host; anything else ends the pagination.
-  return url.origin === new URL(endpoints.api).origin ? url : undefined
+  const url = URL.parse(match[1]!)
+  // Only pages under the API base; anything else ends the pagination.
+  return url && onApiBase(url, endpoints) ? url : undefined
 }
 
 /** The list inside a page: the page itself, or the only array field of a list object. */
