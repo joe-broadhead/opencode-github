@@ -10,7 +10,7 @@ an OpenCode client.
 | --- | --- | --- |
 | One per known read of GitHub's MCP server, named as the tool: `get_me`, `issue_read`, `pull_request_read`, `get_file_contents`, `search_code`, `list_dependabot_alerts` and the others in the [toolsets table](configuration.md#toolsets) | `github_<method>`, for example `github_issue_read` | allow |
 | `api` | `github_api`, for reads only: REST `GET` or `HEAD`, or one GraphQL query | runs: reads assert nothing |
-| `describe` | none: lists the methods, their permission actions, whether each can run now, and each one's input as JSON Schema | |
+| `describe` | none: lists the methods, their permission actions, whether each can run now (`available`, and when not, the code in `reason` and for `TOOL_UNAVAILABLE` a `detail`), and each one's input as JSON Schema | |
 
 Each MCP method runs GitHub's own tool with the same input, through OpenCode's own connection and sign-in. The plugin
 never sees the GitHub token for these calls. Only the known reads are methods: GitHub's writes (such as
@@ -18,8 +18,8 @@ never sees the GitHub token for these calls. Only the known reads are methods: G
 never methods, even with an allow rule.
 
 A method runs only while GitHub's server lists its tool. A toolset that is off in the plugin's `toolsets` option leaves
-its methods unavailable: `describe` shows them with `available: false` and `reason: "TOOL_UNAVAILABLE"`, and a call
-fails with that code. By default that is the reads of `copilot_spaces`, `gists`, `github_support_docs_search`,
+its methods unavailable: `describe` shows them with `available: false`, `reason: "TOOL_UNAVAILABLE"` and a `detail`
+that names the method's toolset and what to add to `toolsets`, and a call fails with that code. By default that is the reads of `copilot_spaces`, `gists`, `github_support_docs_search`,
 `governance`, `notifications`, `projects` and `stargazers`; the [toolsets table](configuration.md#toolsets) names each
 method's toolset. Add it to `toolsets` and run `opencode reload`. With the
 [`host`](configuration.md#host-github-enterprise-server) option (GitHub Enterprise Server) there is no MCP server, so
@@ -122,7 +122,7 @@ A refusal or failure is the RPC error `failed`, with a message `CODE: what happe
 | `PERMISSION_DENIED` | The agent's or the session's rules deny the tool, or ask for an approval. |
 | `SERVER_CONFLICT` | Your config or another plugin defines its own MCP server named github, which this plugin does not manage (`conflict` in `/github-status`). |
 | `AUTH_REQUIRED`, `CONNECTING`, `CONNECTION_FAILED`, `DISABLED`, `NOT_REGISTERED` | The github server needs a sign-in, is still connecting, could not connect, is disabled, or is not registered, as with the `host` option. `/github-status` gives the details. `api` gives `AUTH_REQUIRED` when there is no GitHub sign-in. |
-| `TOOL_UNAVAILABLE` | The server is connected, but GitHub does not list the tool, for example because its toolset is off. |
+| `TOOL_UNAVAILABLE` | The server is connected, but GitHub does not list the tool, for example because its toolset is off. `describe`'s `detail` for the method names its toolset, and says whether the `toolsets` option turns it on. |
 | `UPSTREAM_ERROR` | GitHub's MCP server answered with an error, such as a missing permission or an invalid input. The message holds the first line of GitHub's text, at most 300 characters, with tokens and URL query strings removed. |
 | `CANCELLED` | The request was cancelled. |
 | `SCRIPT_READ_ONLY` | An `api` call could change GitHub, or would download or upload a file. |

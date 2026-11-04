@@ -131,6 +131,30 @@ export function allReadTools(): string[] {
   return [...reads].filter((name) => !hidden.has(name)).sort()
 }
 
+/** The toolsets a known tool (without the prefix) belongs to, in catalog order; most have one. */
+export function toolsetsOf(name: string): Toolset[] {
+  return (Object.entries(KNOWN_TOOLS) as [Toolset, { readonly read: readonly string[]; readonly write: readonly string[] }][])
+    .filter(([, tools]) => tools.read.includes(name) || tools.write.includes(name))
+    .map(([toolset]) => toolset)
+}
+
+const quoted = (toolsets: readonly string[]) => toolsets.map((toolset) => `"${toolset}"`).join(" or ")
+
+/**
+ * Why a known read that GitHub does not list now cannot run, for the tools RPC's describe (`detail` beside
+ * TOOL_UNAVAILABLE): the toolset it is in, and whether the plugin's toolsets option turns that on.
+ */
+export function unavailableDetail(method: string, enabled: readonly Toolset[]): string | undefined {
+  const toolsets = toolsetsOf(method)
+  if (toolsets.length === 0) return undefined
+  const names = toolsets.join(" or ")
+  if ((FLAGGED as readonly string[]).includes(method))
+    return `${method} is in the ${names} toolset, but GitHub lists it only behind a feature flag that this plugin does not turn on, whatever the toolsets option says.`
+  if (!toolsets.some((toolset) => enabled.includes(toolset)))
+    return `${method} is in the ${names} toolset, which is off: add ${quoted(toolsets)} to the plugin's toolsets option, then run opencode reload.`
+  return `${method} is in the ${names} toolset, which the toolsets option turns on, but GitHub does not list it now: run /github-status.`
+}
+
 /** Whether a GitHub MCP tool name (without the prefix) is a known read or write. */
 export function toolKind(name: string): "read" | "write" | undefined {
   if (reads.has(name)) return "read"

@@ -156,7 +156,8 @@ A call is `{ sessionID, input }`. The shared module (`src/host/tools-rpc.ts`):
    (`PERMISSION_DENIED`);
 3. for an MCP method: refuses with `SERVER_CONFLICT` while the plugin does not own the `github` server (another server
    of that name, also with `host`); finds the tool's executor in `ctx.tool.list()`, or names the server's state
-   (`AUTH_REQUIRED` and so on, `NOT_REGISTERED` with `host`) or `TOOL_UNAVAILABLE` (a toolset that is off); calls
+   (`AUTH_REQUIRED` and so on, `NOT_REGISTERED` with `host`) or `TOOL_UNAVAILABLE` (a toolset that is off; `describe`
+   adds `unavailableDetail`'s `detail`, naming the toolset and the `toolsets` option); calls
    `execute(input, { sessionID, agent, messageID, id, signal, progress })` with a new call id, so OpenCode checks
    `github_<tool>` on `*` itself and sends its own credential; and returns `{ output?, text }`;
 4. for `api`: runs `scriptApi` (`src/api/script.ts`), which checks the input with `github_api`'s schema, refuses with

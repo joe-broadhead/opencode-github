@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- The tools RPC's `describe` gives each method GitHub does not list a `detail` beside `reason: "TOOL_UNAVAILABLE"`: the method's toolset, and either what to add to the `toolsets` option (`list_gists is in the gists toolset, which is off: add "gists" to the plugin's toolsets option, then run opencode reload.`), or that the toolset is on and GitHub does not list it now, or the feature flag that hides `issue_artifact_read`.
+
 ## [0.0.3] - 2026-11-04
 
 ### Added

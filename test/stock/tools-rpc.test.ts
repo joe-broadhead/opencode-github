@@ -71,7 +71,18 @@ for (const version of STOCK_VERSIONS)
       expect(value.methods.map((method: { name: string }) => method.name)).toEqual([...KNOWN_READS, SCRIPT_API_METHOD])
       const byName = new Map(value.methods.map((method: { name: string }) => [method.name, method]))
       for (const name of READS) expect(byName.get(name)).toMatchObject({ kind: "mcp", tool: `github_${name}`, action: `github_${name}`, available: true, input: FAKE_INPUT })
-      expect(byName.get("list_issues")).toMatchObject({ available: false, reason: "TOOL_UNAVAILABLE" })
+      // QA LIVE-9: describe says why: the toolset, and whether the toolsets option turns it on (issues is on by default).
+      expect(byName.get("list_issues")).toMatchObject({
+        available: false,
+        reason: "TOOL_UNAVAILABLE",
+        detail: "list_issues is in the issues toolset, which the toolsets option turns on, but GitHub does not list it now: run /github-status.",
+      })
+      expect(byName.get("list_gists")).toMatchObject({
+        available: false,
+        reason: "TOOL_UNAVAILABLE",
+        detail: 'list_gists is in the gists toolset, which is off: add "gists" to the plugin\'s toolsets option, then run opencode reload.',
+      })
+      for (const name of READS) expect(byName.get(name)).not.toHaveProperty("detail")
       // The probe's server has no sign-in of its own, so github_api has none.
       expect(byName.get(SCRIPT_API_METHOD)).toMatchObject({ kind: "plugin", action: "github_api", available: false, reason: "AUTH_REQUIRED" })
     })
