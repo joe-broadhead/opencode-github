@@ -99,7 +99,10 @@ opencode api post /api/rpc/github.platform.tools/api -d '{"input":{
 ```
 
 The result is `github_api`'s output: `{ ok, status, data, contentType?, truncated, rateLimit?, pagination?, trust }`.
-A REST error status, such as 404, is a result with `ok: false`, not an RPC error, as for the model.
+A REST error status, such as 404, is a result with `ok: false`, not an RPC error, as for the model. A redirect within
+the API is followed only after `github_api`'s permission check passes for the new path, as for the model; no one can
+answer an ask, so with the default rules it is refused with `PERMISSION_DENIED`. A redirect outside the API is
+`API_REDIRECT_OFF_HOST`.
 
 Anything else is refused with `SCRIPT_READ_ONLY` before any request: every other method (also `POST /markdown`, which
 the model may call as a read), a GraphQL document that is not one query, `download` (a file write) and `upload`. This
@@ -123,7 +126,7 @@ A refusal or failure is the RPC error `failed`, with a message `CODE: what happe
 | `UPSTREAM_ERROR` | GitHub's MCP server answered with an error, such as a missing permission or an invalid input. The message holds the first line of GitHub's text, at most 300 characters, with tokens and URL query strings removed. |
 | `CANCELLED` | The request was cancelled. |
 | `SCRIPT_READ_ONLY` | An `api` call could change GitHub, or would download or upload a file. |
-| `API_INPUT_INVALID`, `API_PATH_INVALID`, `API_GRAPHQL_PATH`, `API_UNREACHABLE`, `API_REDIRECT_LOOP`, `API_REDIRECT_INSECURE` | `github_api`'s own errors, listed in [Errors](configuration.md#errors). |
+| `API_INPUT_INVALID`, `API_PATH_INVALID`, `API_GRAPHQL_PATH`, `API_UNREACHABLE`, `API_REDIRECT_LOOP`, `API_REDIRECT_INSECURE`, `API_REDIRECT_OFF_HOST` | `github_api`'s own errors, listed in [Errors](configuration.md#errors). |
 
 OpenCode itself answers `rpc.invalid_input` for a body that is not the envelope above, `rpc.method_not_found` for a
 method that does not exist, such as `issue_write`, and `rpc.unavailable` when the plugin is not loaded.
@@ -147,7 +150,8 @@ These fields have the same names and meanings in every plugin of this family:
 | `nextStep` | The Next step row; `Nothing to do.` when nothing is needed. |
 
 GitHub's own fields sit beside them: `account`, `readOnly`, `toolsets`, `tools` (`visible`, `unknown`, `mode`),
-`permissionsBlock` (the rules to copy, while agents are listed), `hostWarning` (outside the range, with
+`permissionsBlock` (the rules to copy, while agents are listed), `unmatchedRules` (`github_api` rule resources with an
+upper-case owner or repo name, which never match), `hostWarning` (outside the range, with
 `allowUntestedHost`) and `enterprise` (with `host`).
 
 ## What scripts cannot do

@@ -5,6 +5,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { permissionPath } from "../../src/api/names.js"
 import { describeCall, registerApiTool } from "../../src/api/tool.js"
 import { type Endpoints, GITHUB_COM } from "../../src/config.js"
 
@@ -38,6 +39,8 @@ function randomPath(next: () => number): string {
   const segments = Array.from({ length: 1 + Math.floor(next() * 7) }, () =>
     Array.from({ length: 1 + Math.floor(next() * 3) }, () => PIECES[Math.floor(next() * PIECES.length)]!).join(""),
   )
+  // A third start as /repos/<owner>/<repo>, whose names GitHub reads without regard to case.
+  if (next() < 0.33) segments.unshift("repos", ["Owner", "OWNER", "owner", "Ow%2Bner"][Math.floor(next() * 4)]!, ["Prod", "prod", "PROD"][Math.floor(next() * 3)]!)
   return `/${segments.join("/")}`
 }
 
@@ -83,6 +86,7 @@ describe("github_api checks the path it sends", () => {
       const next = random(name === "host" ? 2 : 1)
       let refused = 0
       let checked = 0
+      let cased = 0
       for (let round = 0; round < 3000; round++) {
         const api = await setUp(endpoints)
         const path = randomPath(next)
@@ -100,7 +104,15 @@ describe("github_api checks the path it sends", () => {
         const url = new URL(api.sent[0]!)
         const base = new URL(upload ? endpoints.uploads : endpoints.api)
         expect(url.origin, path).toBe(base.origin)
-        expect(api.asserted, path).toEqual([`${method} ${url.pathname.slice(base.pathname.replace(/\/$/, "").length)}`])
+        const sent = url.pathname.slice(base.pathname.replace(/\/$/, "").length)
+        expect(api.asserted, path).toEqual([`${method} ${permissionPath(sent)}`])
+        // Only case differs between the resource and the path sent, and owner and repo are always in lower case.
+        expect(api.asserted[0]!.toLowerCase(), path).toBe(`${method} ${sent}`.toLowerCase())
+        if (sent.startsWith("/repos/")) {
+          const [, , owner, repo] = api.asserted[0]!.slice(method.length + 1).split("/")
+          expect([owner, repo].map((name) => name?.replace(/%[0-9A-F]{2}/g, "")), path).toEqual([owner, repo].map((name) => name?.replace(/%[0-9A-F]{2}/g, "").toLowerCase()))
+          cased++
+        }
         // No dot segment reaches GitHub, at any depth of encoding.
         let decoded = url.pathname
         for (let depth = 0; depth < 4; depth++) decoded = decoded.replace(/%([0-9A-Fa-f]{2})/g, (_escape, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)))
@@ -111,6 +123,7 @@ describe("github_api checks the path it sends", () => {
       // Both outcomes happen often enough for the property to mean something.
       expect(refused).toBeGreaterThan(300)
       expect(checked).toBeGreaterThan(300)
+      expect(cased).toBeGreaterThan(100)
     })
   }
 

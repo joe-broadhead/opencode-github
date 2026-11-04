@@ -165,6 +165,28 @@ describe("computeStatus", () => {
     expect(formatStatus(one).match(/Next step: .*/g)).toEqual([`Next step: ${one.nextStep}`])
   })
 
+  // QA GITHUB-1 follow-up: github_api checks owner and repo names in lower case, so a rule in another case never matches.
+  it("warns about a github_api rule with an upper-case owner or repo, in a row and the next step", async () => {
+    const rule = (action: string, resource: string, effect: Rule["effect"] = "deny") => ({ action, resource, effect }) as Rule
+    const guarded = insertDefaults([BASE], defaultRules())
+    const agents = [
+      { id: "build", permissions: [...guarded, rule("github_api", "DELETE /repos/Owner/prod/*"), rule("github_api", "PUT /repos/owner/repo/pulls/*/merge", "allow")] },
+      { id: "plan", permissions: [...guarded, rule("github_api", "DELETE /repos/Owner/prod/*"), rule("github_*", "POST /orgs/Acme/*", "ask"), rule("bash", "/repos/Owner/x")] },
+    ]
+    const status = await computeStatus(fakeCtx({ server: "connected", label: "octocat", agents }).ctx, deps())
+    expect(status.unmatchedRules).toEqual(["DELETE /repos/Owner/prod/*", "POST /orgs/Acme/*"])
+    expect(status.nextStep).toBe(
+      'Write the github_api rule "DELETE /repos/Owner/prod/*" (and 1 more) with lower-case owner and repo names, as "DELETE /repos/owner/prod/*": as written it never matches.',
+    )
+    expect(formatStatus(status)).toContain("\nHost: github.com\nRules that never match: DELETE /repos/Owner/prod/*; POST /orgs/Acme/*\nTools:")
+    expect(isStatus(status)).toBe(true)
+    // A connection problem still comes first; lower-case rules give no row.
+    expect((await computeStatus(fakeCtx({ server: "needs_auth", agents }).ctx, deps())).nextStep).toBe("Run /connect and choose GitHub.")
+    const clean = await computeStatus(fakeCtx({ server: "connected", label: "octocat", agents: [agents[0]!].map((agent) => ({ ...agent, permissions: agent.permissions.slice(0, -2) })) }).ctx, deps())
+    expect("unmatchedRules" in clean).toBe(false)
+    expect(formatStatus(clean)).not.toContain("Rules that never match")
+  })
+
   it("names agents without the default rules and includes the block for them", async () => {
     const agents = [
       { id: "build", permissions: insertDefaults([BASE], defaultRules()) },

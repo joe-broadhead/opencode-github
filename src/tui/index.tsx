@@ -71,7 +71,7 @@ function StatusDialog(props: {
   const ready = () => (props.view.state === "ready" ? props.view.status : undefined)
   const rowColor = (row: StatusRow, status: Status) => {
     if (row.label === "Connection") return tone(TONES[status.state])
-    if ((row.label === "Agents without default rules" && status.unguardedAgents.length > 0) || (row.label === "OpenCode" && !status.host.tested)) return tone("warning")
+    if (row.label === "Rules that never match" || (row.label === "Agents without default rules" && status.unguardedAgents.length > 0) || (row.label === "OpenCode" && !status.host.tested)) return tone("warning")
     return colors().text.base
   }
   return (

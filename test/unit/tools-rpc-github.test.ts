@@ -22,7 +22,17 @@ const writes = Object.values(KNOWN_TOOLS).flatMap((toolset) => [...toolset.write
  * with 200 and records it, and the github server lists `listed` tools. Asserts and requests are recorded.
  */
 async function setUp(
-  input: { agents?: Record<string, Rule[]>; listed?: string[]; managed?: boolean; servers?: { name: string; status: { status: string } }[]; signedIn?: boolean } = {},
+  input: {
+    agents?: Record<string, Rule[]>
+    listed?: string[]
+    managed?: boolean
+    servers?: { name: string; status: { status: string } }[]
+    signedIn?: boolean
+    /** GitHub's answer per URL; anything else is 200. */
+    answers?: Record<string, () => Response>
+    /** Asserts refused as the tools RPC's hook refuses an ask: a Tool.Error with the request as its cause. */
+    refuse?: boolean
+  } = {},
 ) {
   const agents = input.agents ?? { build: BASE }
   const requests: { url: string; method: string }[] = []
@@ -41,7 +51,10 @@ async function setUp(
     },
     permission: {
       hook: async () => ({ dispose: async () => {} }),
-      assert: async (request: unknown) => void asserts.push(request),
+      assert: async (request: { action: string }) => {
+        asserts.push(request)
+        if (input.refuse) throw Object.assign(new Error("A script cannot answer an approval prompt."), { _tag: "Tool.Error", error: { request } })
+      },
     },
     session: {
       get: async ({ sessionID }: { sessionID: string }) => ({ id: sessionID, agent: sessionID.replace(/^ses_/, ""), location: LOCATION }),
@@ -72,7 +85,7 @@ async function setUp(
     integrationID: () => "mcp_github",
     fetch: async (url, init) => {
       requests.push({ url, method: init.method ?? "GET" })
-      return Response.json({ full_name: "octo/repo" })
+      return input.answers?.[url]?.() ?? Response.json({ full_name: "octo/repo" })
     },
   })
   const spy = { ...api, run: (value: Parameters<typeof api.run>[0], call: Parameters<typeof api.run>[1]) => (runs.push(call as ToolCall), api.run(value, call)) }
@@ -169,6 +182,24 @@ describe("the api method", () => {
     expect(result.message).toContain(what)
     expect(h.requests).toEqual([])
     expect(h.asserts).toEqual([])
+  })
+
+  // QA GITHUB-1 follow-up: a script's read follows a redirect only through the same check, which no one can approve.
+  it("checks a script's redirect within the API, and refuses it when the rules ask; never follows one off the API", async () => {
+    const answers = {
+      "https://api.github.com/repos/Old/Name": () => new Response(null, { status: 301, headers: { location: "/repositories/10" } }),
+      "https://api.github.com/repos/o/r/actions/jobs/1/logs": () => new Response(null, { status: 302, headers: { location: "https://blob.example.net/l?sig=x" } }),
+    }
+    const refused = await setUp({ answers, refuse: true })
+    const result = await refused.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/Old/Name" })
+    expect(result).toMatchObject({ type: "failed", data: { code: "PERMISSION_DENIED" } })
+    expect(refused.asserts).toEqual([expect.objectContaining({ action: "github_api", resources: ["GET /repositories/10"] })])
+    expect(refused.requests.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name"])
+
+    const allowed = await setUp({ answers })
+    expect(await allowed.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/Old/Name" })).toMatchObject({ ok: true })
+    expect(allowed.requests.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name", "https://api.github.com/repositories/10"])
+    expect(await allowed.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/o/r/actions/jobs/1/logs" })).toMatchObject({ type: "failed", data: { code: "API_REDIRECT_OFF_HOST" } })
   })
 
   it("refuses a read with a body, and an input github_api would not take, as API_INPUT_INVALID", async () => {

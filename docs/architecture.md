@@ -88,9 +88,11 @@ from `src/sign-in.ts`. The status reads the sign-in from that integration and na
 `github_api`, pinned in Code Mode). `src/api/classify.ts` decides read or write: REST by method, GraphQL by scanning
 the document's operations with a small tokenizer that skips strings, block strings and comments. Reads run; writes
 call `ctx.permission.assert` with `METHOD /path` as the resource and save pattern, and are refused while read-only.
+The resource writes the names GitHub reads without regard to case in lower case (`src/api/names.ts`).
 `src/api/request.ts` builds the URL on the configured API base (uploads on the uploads base), refuses anything that
-could leave it, sends the integration's active token, follows redirects by hand with `redirect: "manual"` and drops
-`Authorization` for any other origin, joins `Link` pages, caps the inline result, and streams downloads into the
+could leave it, sends the integration's active token, and handles redirects by hand with `redirect: "manual"`: never
+for a change, within the API for a read only after the same assert on the new path, and to storage hosts only for a
+download, without `Authorization`. It joins `Link` pages, caps the inline result, and streams downloads into the
 project with a SHA-256. The tool filter leaves `github_api` alone even though it shares the `github_` prefix.
 
 ## Permission defaults

@@ -12,6 +12,14 @@ All notable changes to this project are documented here. The format follows [Kee
   wrong path. It now refuses a `.` or `..` segment however it is encoded (double encoding too) and a percent-encoded
   character a path can hold as itself, such as `%6F` for `o`, with `API_PATH_INVALID`, before any prompt or request.
   The path that rules and the prompt see is exactly the path sent, on GitHub.com and with `host`, for uploads too.
+- **Security:** `github_api` rules could be dodged by case and by redirects. GitHub reads owner and repository names
+  (and organisation, user, team, environment, label, secret and variable names) without regard to case, so a deny on
+  `/repos/owner/prod/*` did not stop `/repos/Owner/Prod/…`. The permission resource now has those names in lower
+  case; write rules that way. The status lists rules with an upper-case owner or repo name, which never match, under
+  "Rules that never match". And a redirect could take a call to a path no rule had checked: a change now never
+  follows one (`API_REDIRECTED`, naming the new path), a read follows one within the API only after the permission
+  check passes for the new path, and a read redirected outside the API fails with `API_REDIRECT_OFF_HOST`. Downloads
+  still follow GitHub's storage redirects without the token. The tools RPC's `api` method does the same.
 - Status listed agents whose own rules already ask for or deny GitHub's tools, such as agents that end with
   `* * ask`, as agents without default rules. It now lists an agent only when its rules would let a GitHub tool run
   without asking.
@@ -27,7 +35,9 @@ All notable changes to this project are documented here. The format follows [Kee
   default location, your home directory; the docs now say how to target a project. They also say that `opencode api`
   exits with status 1 on an RPC error, and that a tool with no structured content returns its text as `output`.
 - The README says to run `opencode reload` after install, how to update, and orders Uninstall as sign out, remove,
-  data folders (none) and copied rules.
+  data folders (none) and copied rules. Its sign-out step is `opencode auth logout GitHub <login>`: without the
+  account's label the command needs an interactive terminal, and a token left behind after removing the plugin no
+  longer shows in `opencode auth list`.
 - `/github-status` and the dialog left out the Account and Agents without default rules rows when they were empty,
   and `/github-status` had no title line. Every row is now shown, with `none` where it is empty, under
   "GitHub status".
