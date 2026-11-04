@@ -4,23 +4,26 @@
 // recording proxy that refuses every request; loopback is direct. A start checks the binary's version and that every
 // `opencode debug paths` entry stays inside the root.
 //
-// The binaries come from OPENCODE_BIN_2_2_3 and OPENCODE_BIN_2_2_4. When one is unset, the unmodified npm release is
-// installed with scripts disabled, once per version and test run, into its own temp folder.
+// The binaries come from OPENCODE_BIN_2_2_3, OPENCODE_BIN_2_2_4 and OPENCODE_BIN_2_2_5 (one per TESTED_HOSTS entry).
+// When one is unset, the unmodified npm release is installed with scripts disabled, once per version and test run, into
+// its own temp folder. Temp folders sit under /tmp (scratchDir), and each host gets its own free port.
 import { spawn, spawnSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { createServer } from "node:net"
-import { arch, platform, tmpdir } from "node:os"
+import { arch, platform } from "node:os"
 import { join, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { OpenCode, type OpenCodeClient } from "@opencode/client"
+import { TESTED_HOSTS } from "../../src/host-version.js"
+import { scratchDir } from "../host/scratch.js"
 
 export const REPO = realpathSync(fileURLToPath(new URL("../..", import.meta.url)))
 const PROBE = join(REPO, "test", "stock", "probe")
 const PLUGIN_ID = "github.platform"
 
-/** The stock OpenCode releases the plugin is tested on. */
-export const STOCK_VERSIONS = ["2.2.3", "2.2.4"] as const
+/** The stock OpenCode releases the plugin is tested on: the one list in src/host-version.ts. */
+export const STOCK_VERSIONS = TESTED_HOSTS
 
 /** How long a stock host may take to start, or a condition to hold; much longer than usual on a busy machine. */
 const READY_MS = 180_000
@@ -46,7 +49,7 @@ function stockBinary(version: string): Promise<string> {
 
 async function install(version: string): Promise<string> {
   // Its own package.json, and npm's cwd set to it: npm walks up from a folder that has none.
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), `github-stock-opencode-${version}-`)))
+  const dir = scratchDir(`github-stock-opencode-${version}-`)
   installed.push(dir)
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "github-stock-opencode", private: true }))
   const native = `@opencode/cli-${platform()}-${arch()}`
@@ -117,7 +120,7 @@ export interface StockHost {
 
 export async function startStock(version: string, input: StockInput): Promise<StockHost> {
   const binary = await stockBinary(version)
-  const root = realpathSync(mkdtempSync(join(tmpdir(), `github-stock-${version}-`)))
+  const root = scratchDir(`github-stock-${version}-`)
   const home = join(root, "home")
   const project = join(root, "project")
   const profile = {

@@ -82,5 +82,6 @@ When you add a rule here, add it to the scan and its self-test too.
 - No tokens, client secrets, personal data or machine-local paths in the repository.
 - Tests use narrow `Pick<Plugin.Context, …>` fakes. Host tests use the public `@opencode/sdk`, and the stock test
   (`test/stock`) stock `opencode serve` binaries; both isolate `HOME`, the XDG folders, `TMPDIR` and
-  `OPENCODE_TEST_HOME` inside a temporary folder.
+  `OPENCODE_TEST_HOME` inside a temporary folder under the system's `/tmp` (`test/host/scratch.ts`), never under
+  `$TMPDIR` or `$HOME`, and each stock host gets its own free port. Never touch the owner's real OpenCode.
 - Run `npm run check` before every commit. Commit messages use `type(scope): summary`.

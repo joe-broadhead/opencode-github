@@ -8,7 +8,6 @@
 // runs read-only and every case must be a catalogued read.
 // Exit codes: 0 every case passed, 1 a case failed, 2 GITHUB_E2E_TOKEN is not set.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
@@ -23,7 +22,8 @@ if (!token) {
 const PLUGIN_ID = "github.platform"
 const CASE_TIMEOUT_MS = 60_000
 const REPO = realpathSync(fileURLToPath(new URL("../", import.meta.url)))
-const root = realpathSync(mkdtempSync(join(tmpdir(), "github-e2e-")))
+// Under the system's /tmp, never $TMPDIR, which can sit below $HOME where OpenCode would find .opencode folders.
+const root = realpathSync(mkdtempSync(join(realpathSync("/tmp"), "github-e2e-")))
 const home = join(root, "home")
 
 // A temporary profile: OpenCode reads its XDG roots once at import, so this runs before it loads.
