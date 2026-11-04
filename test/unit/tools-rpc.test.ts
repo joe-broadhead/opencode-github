@@ -39,6 +39,14 @@ const MCP = KNOWN_READS.length > 0
 const mcpTest = (name: string, body: () => unknown): void => {
   if (MCP) test(name, body as () => Promise<void>)
 }
+/** Registers a block made only of MCP tests, or nothing: vitest fails a suite with no tests. */
+const mcpDescribe = (name: string, body: () => void): void => {
+  if (MCP) describe(name, body)
+}
+/** A prefix check that bun:test and vitest both run (toStartWith is bun's alone). */
+const expectStartsWith = (actual: string, prefix: string): void => {
+  expect(actual.slice(0, prefix.length)).toBe(prefix)
+}
 
 /** A Tool.Error as OpenCode's executor rejects with it: a permission refusal carries a cause, an upstream failure none. */
 const toolError = (message: string, cause?: unknown) => Object.assign(new Error(message), { _tag: "Tool.Error", ...(cause === undefined ? {} : { error: cause }) })
@@ -224,7 +232,7 @@ describe("the contract", () => {
   })
 })
 
-describe("describe", () => {
+mcpDescribe("describe", () => {
   mcpTest("lists each known read with its live JSON Schema, its permission action and whether it is available", async () => {
     const h = await setup({ tools: { [ID]: echo } })
     const description = await h.handlers.describe!({}, rpcContext())
@@ -252,7 +260,7 @@ describe("describe", () => {
   })
 })
 
-describe("a script's call", () => {
+mcpDescribe("a script's call", () => {
   mcpTest("runs the host executor as the session's agent, with a call id of its own, and returns {output, text}", async () => {
     const h = await setup()
     const output = await call(h, READ, { query: "hello" })
@@ -277,7 +285,7 @@ describe("a script's call", () => {
   })
 })
 
-describe("sessions", () => {
+mcpDescribe("sessions", () => {
   mcpTest("refuses an unknown session with SESSION_UNKNOWN, also for a 404, before any tool runs", async () => {
     refusedWith(await call(await setup(), READ, {}, "ses_missing"), "SESSION_UNKNOWN")
     const h = await setup({ lookup: async () => Promise.reject(Object.assign(new Error("Not Found"), { status: 404 })) })
@@ -300,7 +308,7 @@ describe("sessions", () => {
   })
 })
 
-describe("permissions", () => {
+mcpDescribe("permissions", () => {
   mcpTest("refuses a tool the agent's rules hide from the model, before the executor runs", async () => {
     const h = await setup({ agents: { build: [rule("*", "allow"), rule(`${SERVER}_*`, "deny")] } })
     const refused = await call(h, READ)
@@ -336,14 +344,14 @@ describe("permissions", () => {
     const h = await setup({ tools: { [ID]: async () => Promise.reject(toolError(`Permission denied: ${SERVER}_other`, cause)) } })
     const refused = await call(h, READ)
     refusedWith(refused, "PERMISSION_DENIED")
-    expect(refused.message).toStartWith(`PERMISSION_DENIED: ${ID} needs ${SERVER}_other, which was refused for this session's agent: `)
+    expectStartsWith(refused.message, `PERMISSION_DENIED: ${ID} needs ${SERVER}_other, which was refused for this session's agent: `)
     expect(refused.data.next).toBe(`Add an allow rule for ${SERVER}_other to the session's agent or to the session, or use a session whose agent allows it.`)
   })
 
   mcpTest("keeps the plugin's next step when the refused request is the method's own", async () => {
     const h = await setup({ agents: { build: [rule("*", "allow"), rule(ID, "ask")] } })
     const refused = await call(h, READ)
-    expect(refused.message).toStartWith(`PERMISSION_DENIED: ${ID} was refused for this session's agent: `)
+    expectStartsWith(refused.message, `PERMISSION_DENIED: ${ID} was refused for this session's agent: `)
     expect(refused.data.next).toBe(NEXT_STEPS.PERMISSION_DENIED)
   })
 
@@ -391,7 +399,7 @@ describe("permissions", () => {
   })
 })
 
-describe("server and tool state", () => {
+mcpDescribe("server and tool state", () => {
   mcpTest("refuses with SERVER_CONFLICT while the server name belongs to a server the plugin does not manage", async () => {
     const h = await setup({ managed: false })
     refusedWith(await call(h, READ), "SERVER_CONFLICT")
@@ -417,7 +425,7 @@ describe("server and tool state", () => {
   })
 })
 
-describe("upstream failures", () => {
+mcpDescribe("upstream failures", () => {
   mcpTest("an upstream error (a Tool.Error without a cause) is UPSTREAM_ERROR with its first line, redacted and cut to 300 characters", async () => {
     const text = `Bad request for https://files.example.com/a.pdf?X-Amz-Signature=abc123def456&X-Amz-Credential=zzz with Bearer tvly-secretkey123456 ${"x ".repeat(200)}\nsecond line with more detail`
     const h = await setup({ tools: { [ID]: async () => Promise.reject(toolError(text)) } })
@@ -537,11 +545,11 @@ describe("plugin-owned methods", () => {
     })
     const refused = await call(h, "owned_read", {})
     refusedWith(refused, "PERMISSION_DENIED")
-    expect(refused.message).toStartWith("PERMISSION_DENIED: plugin_owned_read needs plugin_download, which was refused for this session's agent: A script cannot answer")
+    expectStartsWith(refused.message, "PERMISSION_DENIED: plugin_owned_read needs plugin_download, which was refused for this session's agent: A script cannot answer")
     expect(refused.data.next).toBe("Add an allow rule for plugin_download to the session's agent or to the session, or use a session whose agent allows it.")
     // The next call starts clean: its own refusal names its own action.
     const again = await call(h, "owned_read", {})
-    expect(again.message).toStartWith("PERMISSION_DENIED: plugin_owned_read was refused")
+    expectStartsWith(again.message, "PERMISSION_DENIED: plugin_owned_read was refused")
     expect(again.data.next).toBe(NEXT_STEPS.PERMISSION_DENIED)
   })
 
