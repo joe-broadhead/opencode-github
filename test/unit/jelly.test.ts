@@ -13,8 +13,11 @@ import { API_TOOL_NAME, HIDDEN, KNOWN_TOOLS, TOOL_PREFIX } from "../../src/tools
  */
 
 type Tool = { name: string; permission: string; effect: string; readOnly: boolean }
-const jelly = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).jelly as {
+const manifest = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { files: string[]; jelly: unknown }
+const jelly = manifest.jelly as {
   title: string
+  summary: string
+  icon: string
   tools: Tool[]
   skills: string[]
   rpc: unknown[]
@@ -58,11 +61,32 @@ describe("the jelly declaration", () => {
     ])
   })
 
-  it("declares no RPC methods, views or contributions, and no keys a released Jelly does not read", () => {
+  it("declares no RPC methods, views or contributions, and no keys Jelly's declaration schema does not have", () => {
     expect(jelly.rpc).toEqual([])
     expect(jelly.views).toEqual([])
     expect(jelly.contributes).toEqual({ homeFeeds: [], homeWidgets: [], workKinds: [], settings: [] })
-    expect(Object.keys(jelly).sort()).toEqual(["contributes", "rpc", "signIns", "skills", "title", "tools", "views"])
+    expect(Object.keys(jelly).sort()).toEqual(["contributes", "icon", "rpc", "signIns", "skills", "summary", "title", "tools", "views"])
+  })
+
+  it("has a one-line summary of 1 to 120 characters", () => {
+    expect(jelly.summary).toBe(jelly.summary.trim())
+    expect(jelly.summary.length).toBeGreaterThan(0)
+    expect(jelly.summary.length).toBeLessThanOrEqual(120)
+    expect(jelly.summary).not.toContain("\n")
+  })
+
+  // Jelly keeps an icon only if its cleaner passes it (hey-jelly's plugin-icon.ts); this checks the same vocabulary
+  // without importing Jelly. The cleaner refuses <title> (hey-jelly #33).
+  it("ships a small SVG icon, drawn only with elements Jelly's cleaner keeps, and no title", () => {
+    const ELEMENTS = ["svg", "g", "path", "circle", "ellipse", "rect", "line", "polyline", "polygon", "defs", "linearGradient", "radialGradient", "stop", "clipPath", "mask"]
+    expect(jelly.icon).toBe("assets/icon.svg")
+    expect(manifest.files.filter((entry) => entry.startsWith("assets"))).toEqual([jelly.icon])
+    const svg = readFileSync(new URL(`../../${jelly.icon}`, import.meta.url), "utf8")
+    expect(svg.length).toBeLessThan(2048)
+    expect(svg.trim()).toMatch(/^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 48 48"[ >]/)
+    expect(svg).not.toMatch(/<title|<\?xml|<!|&|<script|<style|href=/i)
+    const names = [...svg.matchAll(/<\/?([A-Za-z][A-Za-z0-9]*)/g)].map((match) => match[1])
+    expect(names.filter((name) => !ELEMENTS.includes(name!))).toEqual([])
   })
 
   it("names every skill the package ships", () => {

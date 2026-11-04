@@ -23,8 +23,9 @@ const root = fileURLToPath(new URL("../", import.meta.url))
 const NAME = "@joe-broadhead/opencode-github"
 const PLUGIN_ID = "github.platform"
 const MAX_PACKED_BYTES = 200_000
-const ALLOWED = /^(package\.json|README\.md|LICENSE|NOTICE|CHANGELOG\.md|dist\/(index|tui)\.js|skills\/[a-z0-9-]+\/SKILL\.md)$/
-const REQUIRED = ["dist/index.js", "dist/tui.js", "NOTICE"]
+// The one asset is Jelly's icon.
+const ALLOWED = /^(package\.json|README\.md|LICENSE|NOTICE|CHANGELOG\.md|assets\/icon\.svg|dist\/(index|tui)\.js|skills\/[a-z0-9-]+\/SKILL\.md)$/
+const REQUIRED = ["dist/index.js", "dist/tui.js", "NOTICE", "assets/icon.svg"]
 const SKILLS = ["github-code-research", "github-issue-triage", "github-pr-review"]
 // A relative static import, dynamic import or require in a shipped entry. Each entry must be
 // self-contained, so an in-place update never pairs a new entry with a stale sibling module.
