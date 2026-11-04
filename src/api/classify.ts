@@ -1,12 +1,18 @@
-// Read or write, for github_api. REST: GET and HEAD read; every other method writes.
+// Read or write, for github_api. REST: GET and HEAD read, and so do the POST endpoints in
+// POST_READS, which only render text; every other request writes.
 // GraphQL: a document reads only when it holds exactly one operation and that operation
 // is a query. Anything else, including a document this scanner cannot follow, writes, so
 // it asks first.
 
 export type Kind = "read" | "write"
 
-export function restKind(method: string): Kind {
-  return method === "GET" || method === "HEAD" ? "read" : "write"
+/** POST endpoints that change nothing: GitHub renders the Markdown it is sent. Exact paths only. */
+export const POST_READS: readonly string[] = ["/markdown", "/markdown/raw"]
+
+/** `path` is the canonical path restTarget sends, without the query. */
+export function restKind(method: string, path: string): Kind {
+  if (method === "GET" || method === "HEAD") return "read"
+  return method === "POST" && POST_READS.includes(path) ? "read" : "write"
 }
 
 export type GraphqlOperation = { readonly type: "query" | "mutation" | "subscription"; readonly fields: readonly string[] }

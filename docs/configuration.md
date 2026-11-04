@@ -221,7 +221,8 @@ The output has `ok`, `status`, `data` (JSON, or text for diff, patch and raw), t
 `truncated` and a `nextStep` when there is one. Results over 100,000 bytes are cut, whole list items first. Responses
 are untrusted GitHub content.
 
-**Reads and writes.** GET and HEAD read. A GraphQL document reads only when it holds exactly one operation and that
+**Reads and writes.** GET and HEAD read, and so do `POST /markdown` and `POST /markdown/raw`, which only render
+Markdown; every other POST writes. A GraphQL document reads only when it holds exactly one operation and that
 operation is a query; the plugin scans the document itself, skipping strings and comments. Everything else is a
 write: it asks first, as `github_api` on `METHOD /path` (`POST /graphql` for GraphQL), and with `readOnly: true` it is
 refused with `READ_ONLY`. Saving a download asks as `download <file>`, also while read-only. Reads never ask.

@@ -12,7 +12,7 @@ export const ACCEPT = {
 const Scalar = z.union([z.string(), z.number(), z.boolean()])
 
 export const RestInput = z.strictObject({
-  method: z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]),
+  method: z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]).describe("HTTP method. GET and HEAD read; others change GitHub and ask first, except POST /markdown and /markdown/raw."),
   path: z
     .string()
     .min(2)
@@ -25,11 +25,17 @@ export const RestInput = z.strictObject({
   maxPages: z.number().int().min(1).max(100).optional().describe("With paginate: most pages to fetch; default 10."),
   maxItems: z.number().int().min(1).max(10_000).optional().describe("With paginate: most items to keep; default 1000."),
   download: z
-    .strictObject({ path: z.string().min(1), overwrite: z.boolean().optional() })
+    .strictObject({
+      path: z.string().min(1).describe("File path relative to the project folder; it must stay inside it."),
+      overwrite: z.boolean().optional().describe("Replace an existing file; off by default."),
+    })
     .optional()
     .describe("GET only: save the response to this file inside the project, for artifacts, logs and release assets."),
   upload: z
-    .strictObject({ path: z.string().min(1), contentType: z.string().regex(/^[\w.+-]+\/[\w.+-]+$/) })
+    .strictObject({
+      path: z.string().min(1).describe("Project file to send as the body."),
+      contentType: z.string().regex(/^[\w.+-]+\/[\w.+-]+$/).describe("MIME type of the file, such as application/zip."),
+    })
     .optional()
     .describe("POST only: send this file inside the project as the body, to the uploads host, for release assets."),
 })
@@ -37,15 +43,15 @@ export const RestInput = z.strictObject({
 export const GraphqlInput = z.strictObject({
   graphql: z.strictObject({
     query: z.string().min(1).max(100_000).describe("One GraphQL document. A single query reads; anything else writes."),
-    variables: z.record(z.string(), z.unknown()).optional(),
-  }),
+    variables: z.record(z.string(), z.unknown()).optional().describe("Values for the document's $variables."),
+  }).describe("A GraphQL request, instead of method and path."),
 })
 
 export const ApiInput = z.union([RestInput, GraphqlInput])
 
 /** What a script may send: a REST GET or HEAD without a body or a file, or one GraphQL document. */
 const ScriptRestInput = z.strictObject({
-  method: z.enum(["GET", "HEAD"]),
+  method: z.enum(["GET", "HEAD"]).describe("GET or HEAD."),
   ...RestInput.pick({ path: true, query: true, accept: true, paginate: true, maxPages: true, maxItems: true }).shape,
 })
 export const ScriptApiInput = z.union([ScriptRestInput, GraphqlInput])

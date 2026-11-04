@@ -29,6 +29,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- `POST /markdown` and `POST /markdown/raw` through `github_api` are reads: they only render Markdown, so they run
+  without a prompt and also while read-only. Every other POST is still a write.
+- Code Mode shows a description for the `github` namespace, and every `github_api` input field has one.
 - OpenCode 2.2.5 is a tested release. The status calls 2.2.3, 2.2.4 and 2.2.5 tested, and a later 2.2 release
   "untested; supported range >=2.2.3 <2.3.0". `HOST_UNTESTED` and the `allowUntestedHost` warning now say "outside
   the supported range".
