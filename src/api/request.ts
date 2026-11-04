@@ -38,31 +38,68 @@ export type CallDeps = {
   readonly root: string
 }
 
-/** A REST call's target: the URL and the `METHOD /path` that permissions see. */
+/** A REST call's target: the URL and the `METHOD /path` that permissions see. `path` is exactly the path sent. */
 export type RestTarget = { readonly url: URL; readonly resource: string; readonly path: string }
+
+/** Characters a path segment holds as themselves (RFC 3986 pchar); percent-encoding one only hides it. */
+const PLAIN = /^[A-Za-z0-9\-._~!$&'()*+,;=:@]$/
+/** Characters the URL parser would percent-encode in a path, encoded here first so nothing changes after the check. */
+const URL_ENCODED = /[^!-~]|["<>`{}^]/gu
+
+/** A path with every percent-encoding decoded, as often as it decodes (double encoding too). */
+function decodedFully(path: string): string | undefined {
+  let current = path
+  for (let round = 0; round < 8; round++) {
+    const next = current.replace(/%[0-9A-Fa-f]{2}/g, (escape) => String.fromCharCode(Number.parseInt(escape.slice(1), 16)))
+    if (next === current) return current
+    current = next
+  }
+  return undefined
+}
 
 /**
  * Builds the URL for a relative path on the API base (or the uploads base), and refuses
- * anything that could leave it: full URLs, `//`, `..`, backslashes and control characters.
+ * anything that could leave it or that the URL parser or GitHub would read as another path:
+ * full URLs, `//`, `.` and `..` segments however they are encoded, an encoded plain character,
+ * backslashes and control characters. The resource permissions see is the path that is sent.
  */
 export function restTarget(input: Pick<RestInput, "method" | "path" | "query" | "upload">, endpoints: Endpoints): RestTarget {
-  const [rawPath = "", rawQuery] = input.path.split("?", 2) as [string, string | undefined]
+  const split = input.path.indexOf("?")
+  const rawPath = split === -1 ? input.path : input.path.slice(0, split)
+  const rawQuery = split === -1 ? "" : input.path.slice(split + 1)
   const invalid = (why: string) =>
     new GitHubPluginError("API_PATH_INVALID", `The path ${JSON.stringify(input.path.slice(0, 200))} ${why}.`, "Pass a relative API path such as /repos/OWNER/REPO/pulls.")
   if (!rawPath.startsWith("/") || rawPath.startsWith("//")) throw invalid("must start with a single /")
   if (/[\s\\#%]|[\u0000-\u001f\u007f]/.test(rawPath.replace(/%[0-9A-Fa-f]{2}/g, ""))) throw invalid("has characters a path cannot have")
-  if (rawPath.split("/").some((segment) => segment === ".." || segment === "." || /^%2e%2e$/i.test(segment))) throw invalid("has a . or .. segment")
-  if (/^\/graphql\/?$/i.test(rawPath)) {
+  // A . or .. segment, also encoded (%2e, .%2e, %2E., %252e…) or behind an encoded / or \, is refused.
+  const decoded = decodedFully(rawPath)
+  if (decoded === undefined || decoded.split(/[/\\]/).some((segment) => segment === "." || segment === "..")) throw invalid("has a . or .. segment")
+  let path: string
+  try {
+    path = rawPath
+      .replace(/%[0-9A-Fa-f]{2}/g, (escape) => {
+        const char = String.fromCharCode(Number.parseInt(escape.slice(1), 16))
+        if (PLAIN.test(char)) throw invalid(`percent-encodes ${JSON.stringify(char)}; write it as itself`)
+        return escape.toUpperCase()
+      })
+      .replace(URL_ENCODED, (char) => encodeURIComponent(char))
+  } catch (error) {
+    if (error instanceof GitHubPluginError) throw error
+    throw invalid("has characters a path cannot have")
+  }
+  if (/^\/graphql\/?$/i.test(path)) {
     throw new GitHubPluginError("API_GRAPHQL_PATH", "GraphQL calls do not go through method and path.", "Pass { graphql: { query, variables } } instead.")
   }
   const base = new URL(input.upload ? endpoints.uploads : endpoints.api)
-  const url = new URL(`${base.href.replace(/\/$/, "")}${rawPath}`)
-  if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname.replace(/\/$/, ""))) throw invalid("leaves the API host")
-  for (const [key, value] of new URLSearchParams(rawQuery ?? "")) url.searchParams.append(key, value)
+  const basePath = base.pathname.replace(/\/$/, "")
+  const url = new URL(`${base.origin}${basePath}${path}`)
+  // The URL parser must send exactly the checked path; anything it would rewrite is refused.
+  if (url.origin !== base.origin || url.pathname !== `${basePath}${path}`) throw invalid("is not sent as written")
+  for (const [key, value] of new URLSearchParams(rawQuery)) url.searchParams.append(key, value)
   for (const [key, value] of Object.entries(input.query ?? {})) {
     for (const item of Array.isArray(value) ? value : [value]) url.searchParams.append(key, String(item))
   }
-  return { url, path: rawPath, resource: `${input.method} ${rawPath}` }
+  return { url, path, resource: `${input.method} ${path}` }
 }
 
 /** Resolves a download or upload path inside the project, following symbolic links. */
