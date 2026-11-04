@@ -200,8 +200,10 @@ MCP tools and use it for what they cannot do: auto-merge, release create and ass
 rulesets, Actions variables, artifact download and any GraphQL. Its input is one of:
 
 - REST: `{ method, path, query?, body?, accept?, paginate?, maxPages?, maxItems?, download?, upload? }`.
-  - `path` is relative to the API, such as `/repos/OWNER/REPO/releases`. A full URL, `//`, `.` or `..` segments, and
-    `/graphql` are refused.
+  - `path` is relative to the API, such as `/repos/OWNER/REPO/releases`. These are refused with `API_PATH_INVALID`:
+    a full URL, `//`, a `.` or `..` segment however it is percent-encoded (`%2e`, `.%2e`, `%252e` and so on), and a
+    percent-encoded letter, digit or other character a path can hold as itself (`%6F` for `o`). `/graphql` is refused
+    with `API_GRAPHQL_PATH`. The path that rules and the prompt see is exactly the path sent to GitHub.
   - `accept` is `json` (the default), `diff`, `patch`, `raw` or `octet-stream`.
   - `paginate` (GET only) follows GitHub's `Link` header and joins the pages, up to `maxPages` (default 10) and
     `maxItems` (default 1000).
@@ -362,7 +364,7 @@ passed through unchanged.
 | `READ_ONLY` | A `github_api` call would change GitHub, and `readOnly` is `true`. | Set the plugin option readOnly: false to allow changes; each one asks first. |
 | `AUTH_REQUIRED` | `github_api` has no GitHub sign-in to use. | Run /connect and choose GitHub (GitHub Enterprise with `host`). |
 | `API_INPUT_INVALID` | The `github_api` input does not fit, for example `download` with a method other than GET. | Fix the github_api input and call it again. |
-| `API_PATH_INVALID` | The path is not a relative API path. | Pass a relative API path such as /repos/OWNER/REPO/pulls. |
+| `API_PATH_INVALID` | The path is not a relative API path, has a `.` or `..` segment (also percent-encoded), or percent-encodes a character it can hold as itself. | Pass a relative API path such as /repos/OWNER/REPO/pulls. |
 | `API_GRAPHQL_PATH` | `/graphql` was called through method and path. | Pass { graphql: { query, variables } } instead. |
 | `API_FILE_OUTSIDE_PROJECT` | A download or upload file is outside the project. | Use a path inside the project folder. |
 | `API_FILE_EXISTS` | The download file already exists. | Choose another path, or pass download.overwrite: true. |

@@ -71,6 +71,61 @@ describe("restTarget pins requests to the API host", () => {
     expect(() => restTarget(rest({ method: "GET", path }), GITHUB_COM)).toThrow(/^API_PATH_INVALID: /)
   })
 
+  // QA GITHUB-1: the URL parser reads all of these as dot segments, so the path sent was not the path checked.
+  const DOT_BYPASSES = [
+    "/repos/OWNER/REPO/pulls/1/.%2e/.%2e/.%2e/.%2e/OTHER/PROD/pulls/9/merge",
+    "/repos/OWNER/x/%2E./%2e./.%2E/user/repos",
+    "/repos/OWNER/x/.%2e/.%2e/OTHER/y/hooks",
+    "/repos/OWNER/x/%2e/OTHER",
+    "/repos/OWNER/x/%2E",
+    "/repos/OWNER/x/%2e%2E/y",
+    "/repos/OWNER/x/%2E%2e",
+    "/repos/OWNER/x/%252e%252e/y",
+    "/repos/OWNER/x/%25252E%25252E/y",
+    "/repos/OWNER/x/.%252e/y",
+    "/repos/OWNER/x/..%2fOTHER/y",
+    "/repos/OWNER/x/%2e%2e%5cOTHER",
+    "/repos/OWNER/x/a%2f..%2f..",
+    "/repos/OWNER/x/.",
+    "/repos/OWNER/x/../y",
+  ]
+  it.each(DOT_BYPASSES.flatMap((path) => ["github.com", "host"].flatMap((on) => ["api", "uploads"].map((base) => [path, on, base] as const))))(
+    "refuses the dot segment in %s (%s, %s base)",
+    (path, on, base) => {
+      const upload = base === "uploads" ? { upload: { path: "a.zip", contentType: "application/zip" } } : {}
+      const input = rest({ method: base === "uploads" ? "POST" : "PUT", path, ...upload })
+      expect(() => restTarget(input, on === "host" ? GHES : GITHUB_COM)).toThrow(/^API_PATH_INVALID: .* has a \. or \.\. segment\./)
+    },
+  )
+
+  it("refuses an encoded plain character, which GitHub would read as itself", () => {
+    for (const path of ["/repos/OWNER/pr%6Fd/hooks", "/repos/OWNER/x/%2D", "/repos/o/r/branches/release%2B1", "/user%40x", "/graphq%6C"]) {
+      expect(() => restTarget(rest({ method: "DELETE", path }), GITHUB_COM)).toThrow(/^API_PATH_INVALID: .* percent-encodes /)
+    }
+  })
+
+  it("sends exactly the path it names: encodings in upper case, the URL parser's own encodings done first", () => {
+    for (const [path, sent] of [
+      ["/repos/o/r/environments/a%2fb", "/repos/o/r/environments/a%2Fb"],
+      ["/repos/o/r/branches/caf%c3%a9", "/repos/o/r/branches/caf%C3%A9"],
+      ["/repos/o/r/branches/café", "/repos/o/r/branches/caf%C3%A9"],
+      ["/repos/o/r/contents/a^b{c}", "/repos/o/r/contents/a%5Eb%7Bc%7D"],
+      ["/repos/o/r/contents/.github/x...y", "/repos/o/r/contents/.github/x...y"],
+      ["/repos/o/r/git/refs/heads/a!$&'()*+,;=:@~", "/repos/o/r/git/refs/heads/a!$&'()*+,;=:@~"],
+    ] as const) {
+      for (const endpoints of [GITHUB_COM, GHES]) {
+        const target = restTarget(rest({ method: "PUT", path }), endpoints)
+        expect(target.resource).toBe(`PUT ${sent}`)
+        expect(target.path).toBe(sent)
+        expect(target.url.pathname).toBe(`${new URL(endpoints.api).pathname.replace(/\/$/, "")}${sent}`)
+      }
+    }
+  })
+
+  it("keeps every ? after the first in the query", () => {
+    expect(restTarget(rest({ method: "GET", path: "/search/code?q=a?b" }), GITHUB_COM).url.href).toBe("https://api.github.com/search/code?q=a%3Fb")
+  })
+
   it("refuses /graphql through method and path", () => {
     expect(() => restTarget(rest({ method: "POST", path: "/graphql" }), GITHUB_COM)).toThrow(/^API_GRAPHQL_PATH: .* Next step: Pass \{ graphql/)
   })

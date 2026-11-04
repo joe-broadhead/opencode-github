@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Security:** `github_api` checked its permission rules against the path as written, but sent the request to the
+  path after the URL parser removed percent-encoded dot segments such as `.%2e`, `%2e.` and `%2e`. A write could
+  therefore reach another repository or endpoint than the one an allow or deny rule named, and the prompt showed the
+  wrong path. It now refuses a `.` or `..` segment however it is encoded (double encoding too) and a percent-encoded
+  character a path can hold as itself, such as `%6F` for `o`, with `API_PATH_INVALID`, before any prompt or request.
+  The path that rules and the prompt see is exactly the path sent, on GitHub.com and with `host`, for uploads too.
+
 ## [0.0.1] - 2026-11-03
 
 ### Added
