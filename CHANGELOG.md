@@ -32,6 +32,10 @@ All notable changes to this project are documented here. The format follows [Kee
 - `POST /markdown` and `POST /markdown/raw` through `github_api` are reads: they only render Markdown, so they run
   without a prompt and also while read-only. Every other POST is still a write.
 - Code Mode shows a description for the `github` namespace, and every `github_api` input field has one.
+- `issue_artifact_read` (a read) and `issue_artifact_write` (a write), which github-mcp-server v2.1.0 adds to the
+  `issues` toolset behind a feature flag the plugin does not turn on, are known tools.
+- A script's `TOOL_UNAVAILABLE` next step names the toolsets that are off by default, and says to add the method's
+  toolset to `toolsets` and run `opencode reload`.
 - OpenCode 2.2.5 is a tested release. The status calls 2.2.3, 2.2.4 and 2.2.5 tested, and a later 2.2 release
   "untested; supported range >=2.2.3 <2.3.0". `HOST_UNTESTED` and the `allowUntestedHost` warning now say "outside
   the supported range".

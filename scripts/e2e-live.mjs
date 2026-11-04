@@ -72,7 +72,7 @@ function resolveArgs(value, values, missing) {
 }
 
 // Bun imports TypeScript directly.
-const { HIDDEN, KNOWN_TOOLS, toolKind } = await import(pathToFileURL(join(REPO, "src", "tools.ts")).href)
+const { FLAGGED, HIDDEN, KNOWN_TOOLS, toolKind } = await import(pathToFileURL(join(REPO, "src", "tools.ts")).href)
 const { DEFAULT_TOOLSETS } = await import(pathToFileURL(join(REPO, "src", "config.ts")).href)
 const file = JSON.parse(readFileSync(join(REPO, "test", "e2e", "cases.json"), "utf8"))
 
@@ -84,7 +84,7 @@ if (notReads.length > 0) {
 }
 const listed = new Set(file.cases.map((item) => item.tool))
 const uncovered = DEFAULT_TOOLSETS.flatMap((toolset) => KNOWN_TOOLS[toolset].read).filter(
-  (name, index, all) => all.indexOf(name) === index && !listed.has(name) && !HIDDEN.includes(name),
+  (name, index, all) => all.indexOf(name) === index && !listed.has(name) && !HIDDEN.includes(name) && !FLAGGED.includes(name),
 )
 
 const { Plugin } = await import("@opencode/plugin")

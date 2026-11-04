@@ -1,7 +1,8 @@
 // The known GitHub MCP tools, per toolset, marked read or write. Seeded from the tool
-// list in the README of github/github-mcp-server v2.0.3
-// (b98d115bbb080e9555466a96656ec4df605aea21), with each tool's readOnlyHint from its
-// tool snapshot at that commit. The remote-only tools in copilot, copilot_spaces and
+// list in the README of github/github-mcp-server v2.1.0
+// (4bcdcdf8d7beee98c9448e73e257308280924cc4), with each tool's readOnlyHint from its
+// tool snapshot at that commit. issue_artifact_read and issue_artifact_write are behind the
+// issue_artifacts feature flag, which is off unless X-MCP-Features names it; the plugin sends none. The remote-only tools in copilot, copilot_spaces and
 // github_support_docs_search have no snapshot there and are classified by what they do, as is
 // check_dependency_vulnerabilities, which the hosted server added to dependabot later (it looks
 // up packages in the GitHub Advisory Database and changes nothing).
@@ -31,8 +32,8 @@ export const KNOWN_TOOLS = {
     write: ["create_repository_ruleset", "custom_properties_write"],
   },
   issues: {
-    read: ["get_label", "issue_read", "list_issue_fields", "list_issue_types", "list_issues", "search_issues"],
-    write: ["add_issue_comment", "issue_write", "sub_issue_write", "update_issue_comment"],
+    read: ["get_label", "issue_artifact_read", "issue_read", "list_issue_fields", "list_issue_types", "list_issues", "search_issues"],
+    write: ["add_issue_comment", "issue_artifact_write", "issue_write", "sub_issue_write", "update_issue_comment"],
   },
   labels: { read: ["get_label", "list_label"], write: ["label_write"] },
   notifications: {
@@ -105,6 +106,12 @@ export const KNOWN_TOOLS = {
  * filter removes it.
  */
 export const HIDDEN = ["ui_get"] as const
+
+/**
+ * Catalogued tools GitHub offers only behind an X-MCP-Features flag. The plugin sends none, so GitHub does not list
+ * them today: the live e2e cases and the drift check leave them out.
+ */
+export const FLAGGED = ["issue_artifact_read", "issue_artifact_write"] as const
 
 /** MCP tool names are `<server>_<tool>`; this is the prefix for the github server. */
 export const TOOL_PREFIX = `${SERVER_NAME}_`

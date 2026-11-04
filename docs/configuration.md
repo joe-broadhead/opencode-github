@@ -71,7 +71,7 @@ from the agents' tools, and the default rules have no allow rule for it.
 | `git` (default) | `get_repository_tree` | none |
 | `github_support_docs_search` | `github_support_docs_search` | none |
 | `governance` | `custom_properties_read`, `repository_ruleset_read` | `create_repository_ruleset`, `custom_properties_write` |
-| `issues` (default) | `get_label`, `issue_read`, `list_issue_fields`, `list_issue_types`, `list_issues`, `search_issues` | `add_issue_comment`, `issue_write`, `sub_issue_write`, `update_issue_comment` |
+| `issues` (default) | `get_label`, `issue_artifact_read`, `issue_read`, `list_issue_fields`, `list_issue_types`, `list_issues`, `search_issues` | `add_issue_comment`, `issue_artifact_write`, `issue_write`, `sub_issue_write`, `update_issue_comment` |
 | `labels` (default) | `get_label`, `list_label` | `label_write` |
 | `notifications` | `get_notification_details`, `list_notifications` | `dismiss_notification`, `manage_notification_subscription`, `manage_repository_notification_subscription`, `mark_all_notifications_read` |
 | `orgs` (default) | `search_orgs` | none |
@@ -83,7 +83,8 @@ from the agents' tools, and the default rules have no allow rule for it.
 | `stargazers` | `list_starred_repositories` | `star_repository`, `unstar_repository` |
 | `users` (default) | `search_users` | none |
 
-The catalog follows github-mcp-server v2.0.3. Some toolsets, such as `copilot`, `copilot_spaces` and
+The catalog follows github-mcp-server v2.1.0. GitHub offers `issue_artifact_read` and `issue_artifact_write` only
+behind a feature flag the plugin does not turn on, so they do not appear today. Some toolsets, such as `copilot`, `copilot_spaces` and
 `github_support_docs_search`, exist only on GitHub's hosted server, as does `check_dependency_vulnerabilities`, which
 looks up a list of packages in the GitHub Advisory Database.
 
