@@ -27,6 +27,7 @@
   },
   "files": [
     "dist",
+    "assets/icon.svg",
     "skills",
     "README.md",
     "LICENSE",
@@ -69,6 +70,8 @@
   },
   "jelly": {
     "title": "GitHub",
+    "summary": "Repositories, issues, pull requests and Actions, read-only unless you choose.",
+    "icon": "assets/icon.svg",
     "tools": [
       {
         "name": "github.actions_get",
