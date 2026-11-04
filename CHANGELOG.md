@@ -41,6 +41,10 @@ All notable changes to this project are documented here. The format follows [Kee
   `issues` toolset behind a feature flag the plugin does not turn on, are known tools.
 - A script's `TOOL_UNAVAILABLE` next step names the toolsets that are off by default, and says to add the method's
   toolset to `toolsets` and run `opencode reload`.
+- The tools RPC's shared module is updated: `describe` given any input but nothing or `{}` answers
+  `describe takes no input`, an envelope that is not an object gets a plain message, a permission refusal names the
+  action that was refused, and a server that reconnects during a call gives `CONNECTING` instead of
+  `CONNECTION_FAILED`.
 - OpenCode 2.2.5 is a tested release. The status calls 2.2.3, 2.2.4 and 2.2.5 tested, and a later 2.2 release
   "untested; supported range >=2.2.3 <2.3.0". `HOST_UNTESTED` and the `allowUntestedHost` warning now say "outside
   the supported range".
