@@ -59,7 +59,7 @@ describe("isStatus and the JSON Schema", () => {
 
   it("states the same fields and required fields in its JSON Schema", () => {
     expect(Object.keys(STATUS_SCHEMA.properties).sort()).toEqual(
-      ["account", "enterprise", "host", "hostWarning", "nextStep", "permissionsBlock", "readOnly", "state", "tools", "toolsets", "unguardedAgents", "version"],
+      ["account", "enterprise", "host", "hostWarning", "nextStep", "permissionsBlock", "readOnly", "state", "tools", "toolsets", "unguardedAgents", "unmatchedRules", "version"],
     )
     expect([...STATUS_SCHEMA.required].sort()).toEqual(["host", "nextStep", "readOnly", "state", "tools", "toolsets", "unguardedAgents", "version"])
     expect(STATUS_SCHEMA.additionalProperties).toBe(false)

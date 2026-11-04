@@ -18,7 +18,7 @@ beforeEach(() => {
 })
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
-function setUp(input: { readOnly?: boolean; signedIn?: boolean; decline?: boolean; status?: number } = {}) {
+function setUp(input: { readOnly?: boolean; signedIn?: boolean; decline?: boolean | ((resource: string) => boolean); status?: number; answers?: Record<string, () => Response> } = {}) {
   const asserts: Array<Record<string, unknown>> = []
   const statuses: unknown[] = []
   const requests: Array<{ url: string; method: string }> = []
@@ -35,7 +35,8 @@ function setUp(input: { readOnly?: boolean; signedIn?: boolean; decline?: boolea
     permission: {
       assert: async (request: Record<string, unknown>) => {
         asserts.push(request)
-        if (input.decline) throw new Error("declined")
+        const resource = (request.resources as string[])[0]!
+        if (typeof input.decline === "function" ? input.decline(resource) : input.decline) throw new Error("declined")
       },
     },
     integration: {
@@ -58,6 +59,8 @@ function setUp(input: { readOnly?: boolean; signedIn?: boolean; decline?: boolea
     integrationID: () => ID,
     fetch: async (url, init) => {
       requests.push({ url, method: init.method ?? "GET" })
+      const answer = input.answers?.[url]
+      if (answer) return answer()
       const status = input.status ?? 200
       return new Response(JSON.stringify(status === 401 ? { message: "Bad credentials" } : { ok: 1 }), { status, headers: { "content-type": "application/json" } })
     },
@@ -154,6 +157,34 @@ describe("github_api", () => {
     const api = setUp()
     await api.run({ graphql: { query: "mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"x\"}) { clientMutationId } }" } })
     expect(api.asserts[0]).toMatchObject({ resources: ["POST /graphql"], metadata: { graphql: [{ type: "mutation", fields: ["enablePullRequestAutoMerge"] }] } })
+  })
+
+  // QA GITHUB-1 follow-up: rules see owner and repo in lower case; the request keeps the case it was given.
+  it("asks for a write with owner and repo in lower case, and sends the path as written", async () => {
+    const api = setUp()
+    await api.run({ method: "DELETE", path: "/repos/Owner/Prod/hooks/1" })
+    expect(api.asserts[0]).toMatchObject({ resources: ["DELETE /repos/owner/prod/hooks/1"], save: ["DELETE /repos/owner/prod/hooks/1"], metadata: { path: "/repos/Owner/Prod/hooks/1" } })
+    expect(api.requests).toEqual([{ url: "https://api.github.com/repos/Owner/Prod/hooks/1", method: "DELETE" }])
+  })
+
+  it("asks before following a read's redirect to another API path, and stops when that is declined", async () => {
+    const answers = { "https://api.github.com/repos/Old/Name": () => new Response(null, { status: 301, headers: { location: "https://api.github.com/repositories/10" } }) }
+    const declined = setUp({ answers, decline: (resource) => resource === "GET /repositories/10" })
+    expect(await message(declined.run({ method: "GET", path: "/repos/Old/Name" }))).toBe("declined")
+    expect(declined.asserts).toEqual([expect.objectContaining({ action: "github_api", resources: ["GET /repositories/10"], metadata: expect.objectContaining({ redirectedFrom: "GET /repos/old/name" }) })])
+    expect(declined.requests.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name"])
+
+    const allowed = setUp({ answers, readOnly: true })
+    expect((await allowed.run({ method: "GET", path: "/repos/Old/Name" })).output).toMatchObject({ ok: true })
+    expect(allowed.requests.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name", "https://api.github.com/repositories/10"])
+  })
+
+  it("never follows a write's redirect: one ask, one request, and an error naming the new path", async () => {
+    const answers = { "https://api.github.com/repos/Old/Name/pulls/1/merge": () => new Response(null, { status: 307, headers: { location: "/repositories/10/pulls/1/merge" } }) }
+    const api = setUp({ answers })
+    expect(await message(api.run({ method: "PUT", path: "/repos/Old/Name/pulls/1/merge" }))).toMatch(/^API_REDIRECTED: .* Next step: Call github_api again with path \/repositories\/10\/pulls\/1\/merge, /)
+    expect(api.asserts.map((request) => (request.resources as string[])[0])).toEqual(["PUT /repos/old/name/pulls/1/merge"])
+    expect(api.requests).toHaveLength(1)
   })
 
   it("sends nothing when the user declines", async () => {

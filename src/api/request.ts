@@ -1,13 +1,16 @@
 // Sends one github_api call. Requests go only to the configured API base (uploads to the
-// uploads base); the token goes only to those origins. Redirects are followed by hand, and
-// a redirect to any other origin (logs, artifacts and release assets live in blob storage)
-// is followed without the Authorization header. Results are capped for inline display.
+// uploads base); the token goes only to those origins. Redirects are handled by hand: a change
+// (any method but GET and HEAD) never follows one; a read follows one on the API host only after
+// github_api's permission check passes for the new path, and refuses one to another host; a
+// download also follows GitHub's redirects to its storage hosts (logs, artifacts and release
+// assets), without the Authorization header. Results are capped for inline display.
 import { createHash } from "node:crypto"
 import { link, mkdir, open, readFile, realpath, rename, rm, stat } from "node:fs/promises"
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import type { Endpoints } from "../config.js"
 import { GitHubPluginError } from "../errors.js"
 import { permissionName } from "../token-permissions.js"
+import { permissionPath } from "./names.js"
 import { ACCEPT, type ApiOutput, type GraphqlInput, type RestInput } from "./contract.js"
 
 export type Fetch = (url: string, init: RequestInit) => Promise<Response>
@@ -40,9 +43,20 @@ export type CallDeps = {
   readonly root: string
   /** The download cap; MAX_DOWNLOAD_BYTES unless a test sets a smaller one. */
   readonly maxDownloadBytes?: number
+  /**
+   * github_api's permission check for a read's redirect on the API host, on its new `METHOD /path` resource. It
+   * throws when the rules refuse, and then the redirect is not followed.
+   */
+  readonly checkRedirect: (resource: string) => Promise<void>
 }
 
-/** A REST call's target: the URL and the `METHOD /path` that permissions see. `path` is exactly the path sent. */
+/** How a request may follow redirects: never for a change; for a read, on the API host after a check; a download also to storage hosts. */
+type Follow = "never" | "api" | "storage"
+
+/**
+ * A REST call's target: the URL, and the `METHOD /path` that permissions see. `path` is exactly the path sent; the
+ * resource has its case-insensitive name segments in lower case (permissionPath).
+ */
 export type RestTarget = { readonly url: URL; readonly resource: string; readonly path: string }
 
 /** Characters a path segment holds as themselves (RFC 3986 pchar); percent-encoding one only hides it. */
@@ -103,7 +117,15 @@ export function restTarget(input: Pick<RestInput, "method" | "path" | "query" | 
   for (const [key, value] of Object.entries(input.query ?? {})) {
     for (const item of Array.isArray(value) ? value : [value]) url.searchParams.append(key, String(item))
   }
-  return { url, path, resource: `${input.method} ${path}` }
+  return { url, path, resource: `${input.method} ${permissionPath(path)}` }
+}
+
+/** A redirect's target as a REST target on the API base, or undefined when it leaves the API host or base path. */
+function apiTarget(next: URL, method: RestInput["method"], endpoints: Endpoints): RestTarget | undefined {
+  const base = new URL(endpoints.api)
+  const basePath = base.pathname.replace(/\/$/, "")
+  if (next.origin !== base.origin || !(next.pathname === basePath || next.pathname.startsWith(`${basePath}/`))) return undefined
+  return restTarget({ method, path: `${next.pathname.slice(basePath.length) || "/"}${next.search}` }, endpoints)
 }
 
 /** Resolves a download or upload path inside the project, following symbolic links. */
@@ -141,13 +163,14 @@ export async function callRest(input: RestInput, target: RestTarget, deps: CallD
   if (input.download) {
     const overwrite = input.download.overwrite === true
     const file = await downloadTarget(deps.root, input.download.path, overwrite)
-    const response = await send(target.url, { method: input.method, headers, body }, deps)
+    const response = await send(target.url, { method: input.method, headers, body }, deps, { follow: "storage", what: target.resource })
     if (!response.ok) return finish(response, await readBody(response, input.method), deps)
     const saved = await save(response, file, { overwrite, maxBytes: deps.maxDownloadBytes ?? MAX_DOWNLOAD_BYTES })
     return { ...base(response), download: saved, truncated: false }
   }
 
-  const response = await send(target.url, { method: input.method, headers, body }, deps)
+  const follow: Follow = input.method === "GET" || input.method === "HEAD" ? "api" : "never"
+  const response = await send(target.url, { method: input.method, headers, body }, deps, { follow, what: target.resource })
   const first = await readBody(response, input.method)
   if (!input.paginate || input.method !== "GET" || !response.ok) return finish(response, first, deps)
 
@@ -159,7 +182,7 @@ export async function callRest(input: RestInput, target: RestTarget, deps: CallD
   let last = response
   let next = nextLink(response, deps.endpoints)
   while (next && pages < maxPages && itemCount(data) < maxItems) {
-    const page = await send(next, { method: "GET", headers }, deps)
+    const page = await send(next, { method: "GET", headers }, deps, { follow: "api", what: target.resource })
     const read = await readBody(page, "GET")
     if (!page.ok) return finish(page, read, deps)
     const joined = join_(data, read.data)
@@ -176,19 +199,28 @@ export async function callRest(input: RestInput, target: RestTarget, deps: CallD
 
 export async function callGraphql(input: GraphqlInput, deps: CallDeps): Promise<ApiOutput> {
   const body = JSON.stringify({ query: input.graphql.query, ...(input.graphql.variables ? { variables: input.graphql.variables } : {}) })
-  const response = await send(new URL(deps.endpoints.graphql), { method: "POST", headers: { Accept: ACCEPT.json, "Content-Type": "application/json" }, body }, deps)
+  const response = await send(new URL(deps.endpoints.graphql), { method: "POST", headers: { Accept: ACCEPT.json, "Content-Type": "application/json" }, body }, deps, {
+    follow: "never",
+    what: "POST /graphql",
+  })
   const output = finish(response, await readBody(response, "POST"), deps)
   const errors = (output.data as { errors?: unknown } | undefined)?.errors
   return Array.isArray(errors) && errors.length > 0 ? { ...output, ok: false } : output
 }
 
-/** One request with redirects followed by hand; Authorization goes only to the API and uploads origins. */
-async function send(url: URL, init: { method: string; headers: Record<string, string>; body?: BodyInit | undefined }, deps: CallDeps): Promise<Response> {
+/**
+ * One request with redirects handled by hand (see the top of the file); Authorization goes only to the API and
+ * uploads origins. `what` names the request, `METHOD /path`, in errors.
+ */
+async function send(
+  url: URL,
+  init: { method: string; headers: Record<string, string>; body?: BodyInit | undefined },
+  deps: CallDeps,
+  policy: { follow: Follow; what: string },
+): Promise<Response> {
   const trusted = new Set([new URL(deps.endpoints.api).origin, new URL(deps.endpoints.uploads).origin, new URL(deps.endpoints.graphql).origin])
   let current = url
-  let method = init.method
-  let body = init.body
-  let headers = { ...init.headers }
+  const { method, body, headers } = init
   for (let hop = 0; ; hop++) {
     const auth: Record<string, string> = trusted.has(current.origin)
       ? { Authorization: `Bearer ${deps.token}`, "X-GitHub-Api-Version": API_VERSION }
@@ -208,18 +240,50 @@ async function send(url: URL, init: { method: string; headers: Record<string, st
     }
     const location = response.headers.get("location")
     if (!REDIRECTS.has(response.status) || !location) return response
-    if (hop >= MAX_REDIRECTS) throw new GitHubPluginError("API_REDIRECT_LOOP", `GitHub redirected more than ${MAX_REDIRECTS} times.`, "Try again later.")
-    const next = new URL(location, current)
-    if (next.protocol !== "https:") throw new GitHubPluginError("API_REDIRECT_INSECURE", "GitHub redirected to a non-HTTPS address.", "Try again later.")
     await response.body?.cancel().catch(() => undefined)
-    if (response.status === 303 || ((response.status === 301 || response.status === 302) && method !== "GET" && method !== "HEAD")) {
-      method = "GET"
-      body = undefined
-      const { "Content-Type": _dropped, ...rest } = headers
-      headers = rest
+    const next = new URL(location, current)
+    if (policy.follow === "never") throw redirected(policy.what, next, quietly(() => apiTarget(next, method as RestInput["method"], deps.endpoints)))
+    const onApi = next.protocol === "https:" ? apiTarget(next, method as RestInput["method"], deps.endpoints) : undefined
+    if (hop >= MAX_REDIRECTS) throw new GitHubPluginError("API_REDIRECT_LOOP", `GitHub redirected more than ${MAX_REDIRECTS} times.`, "Try again later.")
+    if (next.protocol !== "https:") throw new GitHubPluginError("API_REDIRECT_INSECURE", "GitHub redirected to a non-HTTPS address.", "Try again later.")
+    if (onApi) {
+      // The same check the request would get for the new path, before anything is sent there.
+      await deps.checkRedirect(onApi.resource)
+      current = onApi.url
+    } else if (policy.follow === "storage") current = next
+    else {
+      throw new GitHubPluginError(
+        "API_REDIRECT_OFF_HOST",
+        `GitHub redirected ${policy.what} outside its API, to ${next.host}, and a read follows redirects only within the API.`,
+        "Pass download: { path } to save the response; a download follows GitHub's storage redirects, without the token.",
+      )
     }
-    current = next
   }
+}
+
+const quietly = <T>(make: () => T): T | undefined => {
+  try {
+    return make()
+  } catch {
+    return undefined
+  }
+}
+
+/** A change that GitHub redirected: not followed, so it can be sent again to the new path and checked there. */
+function redirected(what: string, next: URL, onApi: RestTarget | undefined): GitHubPluginError {
+  if (!onApi) {
+    return new GitHubPluginError(
+      "API_REDIRECTED",
+      `GitHub answered ${what} with a redirect outside its API, to ${next.host}, and a change never follows a redirect.`,
+      "Check the path; github_api sends changes only to GitHub's API.",
+    )
+  }
+  const path = `${onApi.path}${onApi.url.search}`
+  return new GitHubPluginError(
+    "API_REDIRECTED",
+    `GitHub answered ${what} with a redirect to ${path}, and a change never follows a redirect.`,
+    `Call github_api again with path ${path}, so the change is checked for that path.`,
+  )
 }
 
 type Body = { data?: unknown; contentType?: string; truncated: boolean; binary?: number }

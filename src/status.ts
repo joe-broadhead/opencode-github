@@ -4,7 +4,9 @@ import type { Plugin } from "@opencode/plugin"
 import type { Options } from "./config.js"
 import { GitHubPluginError } from "./errors.js"
 import { HOST_RANGE, TESTED_HOSTS, isTestedHost } from "./host-version.js"
-import { defaultRules, unguardedAgents } from "./permissions.js"
+import { lowerResource, neverMatches } from "./api/names.js"
+import { API_ACTION } from "./api/tool.js"
+import { type Rule, defaultRules, matches, unguardedAgents } from "./permissions.js"
 import { GithubRpc, NOTHING_TO_DO, SERVER_NAME, type Status, formatStatus } from "./rpc.js"
 import { PLUGIN_VERSION } from "./version.js"
 
@@ -46,6 +48,7 @@ export async function computeStatus(ctx: StatusContext, deps: StatusDeps): Promi
     account = server?.integrationID && state !== "conflict" ? await accountOf(ctx, server.integrationID) : undefined
   }
   const unguarded = unguardedAgents(agents.data)
+  const unmatched = unmatchedRules(agents.data)
   const tools = deps.tools()
   const tested = isTestedHost(deps.hostVersion)
   return {
@@ -56,12 +59,29 @@ export async function computeStatus(ctx: StatusContext, deps: StatusDeps): Promi
     toolsets: [...deps.options.toolsets],
     tools: { visible: tools.visible, unknown: [...tools.unknown], mode: deps.options.unknownTools },
     unguardedAgents: unguarded,
+    ...(unmatched.length > 0 ? { unmatchedRules: unmatched } : {}),
     ...(unguarded.length > 0 ? { permissionsBlock: defaultRules() } : {}),
     host: { version: deps.hostVersion, range: HOST_RANGE, tested },
     ...(deps.hostWarning ? { hostWarning: deps.hostWarning } : {}),
     ...(deps.enterprise ? { enterprise: deps.enterprise } : {}),
-    nextStep: (deps.enterprise ? enterpriseStep(state) : connectionStep(state)) ?? agentStep(unguarded) ?? hostStep(tested) ?? NOTHING_TO_DO,
+    nextStep: (deps.enterprise ? enterpriseStep(state) : connectionStep(state)) ?? ruleStep(unmatched) ?? agentStep(unguarded) ?? hostStep(tested) ?? NOTHING_TO_DO,
   }
+}
+
+/**
+ * github_api rule resources, in any agent's rules (which hold the top-level rules too), whose owner, repo or other
+ * name is not in lower case. github_api checks those names in lower case, so such a rule never matches.
+ */
+function unmatchedRules(agents: readonly { readonly permissions: readonly Rule[] }[]): string[] {
+  const found = agents.flatMap((agent) => agent.permissions.filter((rule) => matches(rule.action, API_ACTION) && neverMatches(rule.resource)).map((rule) => rule.resource))
+  return [...new Set(found)]
+}
+
+function ruleStep(unmatched: readonly string[]): string | undefined {
+  const first = unmatched[0]
+  if (first === undefined) return undefined
+  const more = unmatched.length > 1 ? ` (and ${unmatched.length - 1} more)` : ""
+  return `Write the github_api rule "${first}"${more} with lower-case owner and repo names, as "${lowerResource(first)}": as written it never matches.`
 }
 
 /** Agent names in a next step: at most this many, then a count. */

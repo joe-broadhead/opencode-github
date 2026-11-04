@@ -45,7 +45,7 @@ export function unguardedAgents(agents: readonly { readonly id: string; readonly
 }
 
 /** OpenCode's wildcards: `*` matches any run of characters and `?` one character, over the whole text. */
-const matches = (pattern: string, value: string) =>
+export const matches = (pattern: string, value: string) =>
   new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`).test(value)
 
 /** The effect of `rules` for an MCP tool call (resource `*`): the last matching rule wins, and no match asks. */

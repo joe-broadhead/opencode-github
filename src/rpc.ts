@@ -30,6 +30,8 @@ export type Status = {
   readonly tools: { readonly visible: number; readonly unknown: readonly string[]; readonly mode: (typeof UNKNOWN_TOOL_MODES)[number] }
   /** Agents whose own rules let GitHub tools run without asking, because they lack the default rules (defined only in the user's config). */
   readonly unguardedAgents: readonly string[]
+  /** github_api rule resources with an owner, repo or other name not in lower case: they never match. Present only when there are any. */
+  readonly unmatchedRules?: readonly string[]
   /** The default rules to add to those agents; present only when there are any. */
   readonly permissionsBlock?: readonly Rule[]
   /** The OpenCode release, the supported range, and whether this release is a tested one. */
@@ -57,6 +59,7 @@ export const STATUS_SCHEMA = object(
     toolsets: texts,
     tools: object({ visible: { type: "integer", minimum: 0 }, unknown: texts, mode: { enum: UNKNOWN_TOOL_MODES } }, ["visible", "unknown", "mode"]),
     unguardedAgents: texts,
+    unmatchedRules: texts,
     permissionsBlock: { type: "array", items: rule },
     host: object({ version: text, range: text, tested: { type: "boolean" } }, ["version", "range", "tested"]),
     hostWarning: text,
@@ -104,6 +107,7 @@ export function isStatus(value: unknown): value is Status {
     isTexts(tools.unknown) &&
     (UNKNOWN_TOOL_MODES as readonly unknown[]).includes(tools.mode) &&
     isTexts(value.unguardedAgents) &&
+    optional(value.unmatchedRules, isTexts) &&
     optional(value.permissionsBlock, (block) => Array.isArray(block) && block.every(isRule)) &&
     isRecord(host) &&
     only(host, ["version", "range", "tested"]) &&
@@ -168,6 +172,7 @@ export function statusRows(status: Status): StatusRow[] {
     { label: "Access", value: status.readOnly ? "read-only" : "reads and writes (writes ask first)" },
     ...(status.enterprise ? [] : [{ label: "Toolsets", value: status.toolsets.join(", ") }]),
     { label: "Host", value: status.enterprise ? `${status.enterprise} (GitHub Enterprise Server)` : "github.com" },
+    ...(status.unmatchedRules?.length ? [{ label: "Rules that never match", value: status.unmatchedRules.join("; ") }] : []),
     { label: "Tools", value: describeTools(status) },
     { label: "Agents without default rules", value: status.unguardedAgents.length > 0 ? status.unguardedAgents.join(", ") : NONE },
     { label: "OpenCode", value: describeHost(status) },

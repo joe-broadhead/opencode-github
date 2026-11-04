@@ -60,7 +60,8 @@ permissions above.
 A fine-grained token reaches only the repositories you select, and GitHub enforces that. For writes
 (`readOnly: false`), give the token write access to what those tools change, for example Issues or Pull requests.
 
-To sign out, run `opencode auth logout GitHub`, or remove the account in `/connect` → **GitHub**.
+To sign out, run `opencode auth logout GitHub <login>`, where `<login>` is the account's label, your GitHub login,
+or remove the account in `/connect` → **GitHub**.
 
 ## Use
 
@@ -77,8 +78,9 @@ branch protection, rulesets, Actions variables, downloading artifacts and logs t
 GitHub's REST or GraphQL API with your GitHub sign-in, for example
 `{ "method": "GET", "path": "/repos/OWNER/REPO/branches/main/protection" }` or
 `{ "graphql": { "query": "query { viewer { login } }" } }`. GET, HEAD and a single GraphQL query read; every other
-call changes GitHub, asks first, and is refused while the plugin is read-only. Requests go only to GitHub's API; a
-redirect to file storage is followed without your token. `download: { path }` saves a response to a file in the
+call changes GitHub, asks first, and is refused while the plugin is read-only. Requests go only to GitHub's API. A
+change never follows a redirect; a read follows one within the API only after asking for the new path, and only a
+download follows one to GitHub's file storage, without your token. `download: { path }` saves a response to a file in the
 project, and `upload: { path, contentType }` sends a project file as a release asset; both ask first.
 
 Three skills come with it:
@@ -130,13 +132,16 @@ Your own rules and saved approvals still win:
   ```
 
   Every rule needs a `"resource"`. OpenCode skips a rule without it.
-- `github_api` rules match `METHOD /path`, and `*` matches any text, slashes included. This lets the agent change one
-  owner's repositories without a prompt, and never delete anything:
+- `github_api` rules match `METHOD /path`, and `*` matches any text, slashes included. **Write owner and repo names
+  in lower case**: GitHub reads them without regard to case, so the plugin checks `/repos/Owner/Prod/…` as
+  `/repos/owner/prod/…`, and a rule with an upper-case name never matches (the status warns about it). The same holds
+  for organisation, user and team names, and environment, label, secret and variable names. This lets the agent change
+  one owner's repositories without a prompt, and never delete anything:
 
   ```json
   {
     "permissions": [
-      { "action": "github_api", "resource": "POST /repos/OWNER/*", "effect": "allow" },
+      { "action": "github_api", "resource": "POST /repos/my-org/*", "effect": "allow" },
       { "action": "github_api", "resource": "DELETE *", "effect": "deny" }
     ]
   }
@@ -235,7 +240,9 @@ without default rules, OpenCode and Next step, with `none` where a row is empty.
 | `not configured` | Restart OpenCode. If GitHub is still missing, check that no other plugin removes the MCP server named github. |
 | `conflict` | Your OpenCode config or another plugin defines its own MCP server named github, so this plugin left it unchanged. Rename or remove that server to use this plugin's GitHub sign-in. |
 
-When the connection needs nothing, the next step names the agents without default rules and how to fix them (see
+A **Rules that never match** row lists `github_api` rules with an upper-case owner or repo name (see
+[Permissions](#permissions)), and the next step gives the lower-case form. Otherwise, when the connection needs
+nothing, the next step names the agents without default rules and how to fix them (see
 [Permissions](#permissions)); on an untested OpenCode release it names the tested ones. Otherwise it is "Nothing to do."
 
 Error codes:
@@ -261,12 +268,14 @@ Other problems:
 
 ## Uninstall
 
-Sign out first: once the plugin is removed, OpenCode no longer knows the GitHub sign-in it holds.
+Sign out first: once the plugin is removed, `opencode auth list` no longer shows the GitHub sign-in, but OpenCode
+still stores its token.
 
-1. Sign out: `opencode auth logout GitHub` (with `host`: `opencode auth logout "GitHub Enterprise"`). It lists the
-   accounts to choose from; add the account's label, your GitHub login, to skip the list. Then, on GitHub, delete the
-   token under **Settings → Developer settings → Personal access tokens**, or, after a device sign-in, revoke the
-   OAuth App under **Settings → Applications → Authorized OAuth Apps**.
+1. Sign out: `opencode auth logout GitHub <login>`, where `<login>` is the account's label in `/connect`, your GitHub
+   login (with `host`: `opencode auth logout "GitHub Enterprise" <login>`). Without `<login>` it asks you to pick the
+   account, which works only in an interactive terminal. Then, on GitHub, delete the token under **Settings →
+   Developer settings → Personal access tokens**, or, after a device sign-in, revoke the OAuth App under **Settings →
+   Applications → Authorized OAuth Apps**.
 2. Run `opencode plugin remove @joe-broadhead/opencode-github`, then `opencode reload`.
 3. Data folders: none. The plugin stores nothing of its own.
 4. Remove the default rules you copied into agents' own `permissions`.

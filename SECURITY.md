@@ -22,9 +22,10 @@ The plugin's own code connects only to these GitHub endpoints:
 | `https://github.com/login/device/code` and `https://github.com/login/oauth/access_token` | Device sign-in, only when `clientId` is set. |
 | `https://api.github.com/user` | Checking a credential and reading its GitHub login. |
 | `https://<host>/login/…`, `https://<host>/api/v3`, `/api/graphql` and `/api/uploads` | Only with the `host` option: sign-in and `github_api` on your GitHub Enterprise Server, instead of the github.com endpoints. |
-| `https://api.github.com` and `https://uploads.github.com` | The `github_api` tool. It refuses any other host. Redirects to GitHub's file storage (logs, artifacts, release assets) are followed without the token. |
+| `https://api.github.com` and `https://uploads.github.com` | The `github_api` tool. It refuses any other host. A download follows GitHub's redirects to its file storage (logs, artifacts, release assets) without the token; other calls never leave the API. |
 
-It sends no telemetry. Apart from following GitHub's redirects to its file storage, it contacts no other service.
+It sends no telemetry. Apart from following a download's redirects to GitHub's file storage, it contacts no other
+service.
 
 ### Credentials
 
@@ -36,8 +37,9 @@ It sends no telemetry. Apart from following GitHub's redirects to its file stora
   and needs only its public client ID.
 - When you paste a token into `opencode auth login` on OpenCode 2.2.3, the terminal shows it as you type. Clear the
   screen afterwards if others can see it.
-- To revoke access, sign out in OpenCode (`opencode auth logout GitHub`), then revoke the app under **GitHub Settings →
-  Applications → Authorized OAuth Apps**, or delete the token under **Developer settings → Personal access tokens**.
+- To revoke access, sign out in OpenCode (`opencode auth logout GitHub <login>`, with your GitHub login), then revoke
+  the app under **GitHub Settings → Applications → Authorized OAuth Apps**, or delete the token under **Developer
+  settings → Personal access tokens**.
 
 ### Scopes and least privilege
 
@@ -70,7 +72,9 @@ public issues, can place text that tries to steer your agent.
   `global` project, so an approval saved there applies to every such folder.
 - **Agents defined only in your config get no default rules.** They run GitHub tools, including writes, without
   asking, until you add the plugin's rules to their own `permissions`. The status names these agents.
-- For a hard stop, use a `deny` rule. An `ask` can be approved.
+- For a hard stop, use a `deny` rule. An `ask` can be approved. Write `github_api` rules with lower-case owner and
+  repo names: the plugin checks those names in lower case, as GitHub reads them, so a rule in another case never
+  matches. The status lists such rules.
 - The default `github_*` ask rule also matches tools of any other MCP server whose name starts with `github_`.
 
 See [docs/configuration.md](docs/configuration.md#permissions).

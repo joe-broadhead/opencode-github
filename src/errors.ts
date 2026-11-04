@@ -34,6 +34,8 @@ type ErrorCode =
   | "API_UNREACHABLE"
   | "API_REDIRECT_LOOP"
   | "API_REDIRECT_INSECURE"
+  | "API_REDIRECT_OFF_HOST"
+  | "API_REDIRECTED"
   | "SCRIPT_READ_ONLY"
 
 export class GitHubPluginError extends Error {

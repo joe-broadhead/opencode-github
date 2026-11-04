@@ -226,20 +226,33 @@ are untrusted GitHub content.
 Markdown; every other POST writes. A GraphQL document reads only when it holds exactly one operation and that
 operation is a query; the plugin scans the document itself, skipping strings and comments. Everything else is a
 write: it asks first, as `github_api` on `METHOD /path` (`POST /graphql` for GraphQL), and with `readOnly: true` it is
-refused with `READ_ONLY`. Saving a download asks as `download <file>`, also while read-only. Reads never ask.
+refused with `READ_ONLY`. In that path, the names GitHub reads without regard to case are in lower case (see Rules). Saving a download asks as `download <file>`, also while read-only. Reads never ask.
 
 **Hosts and the token.** Requests go only to `https://api.github.com`, and uploads to `https://uploads.github.com`; with
-[`host`](#host-github-enterprise-server), to the server's own API. Redirects are followed by the plugin: to another host, such as the storage
-that serves logs, artifacts and release assets, without the `Authorization` header. The token never appears in
-output, errors or logs. A 401 marks the account in `/connect` as needing a new sign-in.
+[`host`](#host-github-enterprise-server), to the server's own API. The plugin handles redirects itself:
 
-**Rules.** Rules for `github_api` match `METHOD /path`, and `*` matches any text, slashes included:
+- A change (any method but GET and HEAD, GraphQL and uploads included) never follows one. It fails with
+  `API_REDIRECTED`, which names the new path, so you can call again with that path and have it checked there.
+- A GET or HEAD follows a redirect within the API only after `github_api`'s permission check passes for the new
+  `METHOD /path`, as if it had been called with it; with the default rules that asks. A script's `api` read gets the
+  same check, and an ask is refused. A read redirected outside the API fails with `API_REDIRECT_OFF_HOST`.
+- A download follows a redirect within the API the same way, and, as before, one to the storage that serves logs,
+  artifacts and release assets, without the `Authorization` header. To read logs, download them.
+
+The token never appears in output, errors or logs. A 401 marks the account in `/connect` as needing a new sign-in.
+
+**Rules.** Rules for `github_api` match `METHOD /path`, and `*` matches any text, slashes included. GitHub reads
+some names without regard to case, so the path a rule is checked against has them in lower case: owner, repository,
+organisation, user, enterprise and team names (`/repos/{owner}/{repo}`, `/orgs/{org}`, `/users/{user}`,
+`/orgs/{org}/teams/{team}`, members and collaborators), and environment, label, secret and variable names. **Write
+those names in lower case.** A rule such as `DELETE /repos/Owner/prod/*` never matches, and the status lists it under
+"Rules that never match". Branch names, file paths and everything else keep their case.
 
 ```json
 {
   "permissions": [
-    { "action": "github_api", "resource": "POST /repos/OWNER/*", "effect": "allow" },
-    { "action": "github_api", "resource": "PUT /repos/OWNER/REPO/pulls/*/merge", "effect": "allow" },
+    { "action": "github_api", "resource": "POST /repos/my-org/*", "effect": "allow" },
+    { "action": "github_api", "resource": "PUT /repos/my-org/site/pulls/*/merge", "effect": "allow" },
     { "action": "github_api", "resource": "DELETE *", "effect": "deny" }
   ]
 }
@@ -381,6 +394,8 @@ passed through unchanged.
 | `API_UNREACHABLE` | The API host could not be reached. | Check your network, then try again. |
 | `API_REDIRECT_LOOP` | GitHub redirected more than 5 times. | Try again later. |
 | `API_REDIRECT_INSECURE` | GitHub redirected to a non-HTTPS address. | Try again later. |
+| `API_REDIRECTED` | GitHub redirected a change, which is never followed. The message names the new path. | Call github_api again with path <the new path>, so the change is checked for that path. |
+| `API_REDIRECT_OFF_HOST` | GitHub redirected a read outside its API. | Pass download: { path } to save the response; a download follows GitHub's storage redirects, without the token. |
 | `SCRIPT_READ_ONLY` | A script's `api` call could change GitHub, or would download or upload a file. | Call api with GET, HEAD or a single GraphQL query; make changes from an OpenCode session, where they ask first. |
 
 A script's calls through the tools RPC, `github.platform.tools`, have more codes for sessions, permissions and the
