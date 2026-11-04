@@ -75,11 +75,13 @@ The tool's input is GitHub's: `describe` shows each tool's schema as OpenCode li
 opencode api post /api/rpc/github.platform.tools/describe -d '{"input":{}}'
 ```
 
-An MCP method's result is `{"output": {"output": <the tool's structured content, if any>, "text": <the tool's text>}}`,
-as plain JSON. GitHub content in it is untrusted data: other people wrote it.
+An MCP method's result is `{"output": {"output": <the tool's structured content, or its text when it has none>,
+"text": <the tool's text>}}`, as plain JSON. GitHub content in it is untrusted data: other people wrote it.
 
-The calls run on the OpenCode instance of the directory where you run `opencode api`, and its GitHub connection. The
-session may belong to another directory.
+`opencode api` calls run in the OpenCode service's default location, your home directory, whatever directory you run
+them from, with that location's GitHub connection. To target a project, call the HTTP API with
+`?location[directory]=<dir>`, or create the session with `"location":{"directory":"<dir>"}`. `opencode api` ignores
+`--param location[directory]=…`.
 
 ## `api`
 
@@ -100,13 +102,15 @@ The result is `github_api`'s output: `{ ok, status, data, contentType?, truncate
 A REST error status, such as 404, is a result with `ok: false`, not an RPC error, as for the model.
 
 Anything else is refused with `SCRIPT_READ_ONLY` before any request: every other method (also `POST /markdown`, which
-the model may call as a read), a GraphQL document that is not one query, `download` (a file write) and `upload`. This holds with `readOnly: false` and with an allow rule for
-`github_api`, because a script cannot answer the prompt a change asks for. Make changes from an OpenCode session.
+the model may call as a read), a GraphQL document that is not one query, `download` (a file write) and `upload`. This
+holds with `readOnly: false` and with an allow rule for `github_api`, because a script cannot answer the prompt a
+change asks for. Make changes from an OpenCode session.
 
 ## Errors
 
 A refusal or failure is the RPC error `failed`, with a message `CODE: what happened. Next step: what to do.` and
-`data: { code, next }`.
+`data: { code, next }`. `opencode api` prints the error as JSON, then the HTTP status (`HTTP 400 Bad Request` for
+`failed`), and exits with status 1 for any RPC error, so a shell script can test `$?`.
 
 | Code | When |
 | --- | --- |

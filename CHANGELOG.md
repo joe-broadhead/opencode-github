@@ -23,6 +23,11 @@ All notable changes to this project are documented here. The format follows [Kee
   fails with `API_FILE_EXISTS`.
 - A download to a file that already exists asked for approval first and only then failed. It is now refused before
   the prompt.
+- The scripting docs said `opencode api` runs in the directory you call it from. It runs in the OpenCode service's
+  default location, your home directory; the docs now say how to target a project. They also say that `opencode api`
+  exits with status 1 on an RPC error, and that a tool with no structured content returns its text as `output`.
+- The README says to run `opencode reload` after install, how to update, and orders Uninstall as sign out, remove,
+  data folders (none) and copied rules.
 - `/github-status` and the dialog left out the Account and Agents without default rules rows when they were empty,
   and `/github-status` had no title line. Every row is now shown, with `none` where it is empty, under
   "GitHub status".

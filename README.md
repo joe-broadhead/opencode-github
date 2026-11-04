@@ -19,7 +19,14 @@ Unofficial; not affiliated with GitHub. GitHub is a trademark of GitHub, Inc.
 opencode plugin add @joe-broadhead/opencode-github
 ```
 
-Restart OpenCode. `opencode mcp list` then shows `github  needs authentication` until you sign in.
+Run `opencode reload`, or restart OpenCode. Then run `/github-status`: it shows `Connection: sign-in required` until
+you sign in, and `opencode mcp list` shows `github  needs authentication`.
+
+### Update
+
+Update with `opencode plugin update @joe-broadhead/opencode-github`, then run `opencode reload`. Your options and
+rules stay as they are. An entry pinned to a version (`@joe-broadhead/opencode-github@0.0.1`) does not update: remove
+the `@<version>` from its `plugins` entry first.
 
 ## Sign in
 
@@ -254,10 +261,15 @@ Other problems:
 
 ## Uninstall
 
-1. Sign out: `opencode auth logout GitHub`.
-2. Run `opencode plugin remove @joe-broadhead/opencode-github`, and remove any default rules you copied into agents.
-3. On GitHub, delete the token under **Settings → Developer settings → Personal access tokens**, or, after a device
-   sign-in, revoke the OAuth App under **Settings → Applications → Authorized OAuth Apps**.
+Sign out first: once the plugin is removed, OpenCode no longer knows the GitHub sign-in it holds.
+
+1. Sign out: `opencode auth logout GitHub` (with `host`: `opencode auth logout "GitHub Enterprise"`). It lists the
+   accounts to choose from; add the account's label, your GitHub login, to skip the list. Then, on GitHub, delete the
+   token under **Settings → Developer settings → Personal access tokens**, or, after a device sign-in, revoke the
+   OAuth App under **Settings → Applications → Authorized OAuth Apps**.
+2. Run `opencode plugin remove @joe-broadhead/opencode-github`, then `opencode reload`.
+3. Data folders: none. The plugin stores nothing of its own.
+4. Remove the default rules you copied into agents' own `permissions`.
 
 ## Links
 
