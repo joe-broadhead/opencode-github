@@ -141,6 +141,18 @@ export interface ToolsRpcOptions {
     readonly server: string | ((account: string | undefined) => string | undefined)
     /** False while the name belongs to a server the plugin does not manage, such as the user's own. */
     readonly managed: (server: string) => boolean
+    /**
+     * Optional. For a known read that OpenCode does not list, `describe` adds the text this returns as `detail`
+     * beside the code in `reason`, such as the toolset and option that turn the method on. Called with the method
+     * name and that code; undefined adds nothing. Without it, describe is unchanged.
+     */
+    readonly unavailableDetail?: (method: string, code: Code) => string | undefined
+    /**
+     * Optional. The code and next step used instead of NOT_REGISTERED while the server is not registered, such as a
+     * missing client ID that keeps the plugin from registering it; undefined keeps NOT_REGISTERED. Read at each call
+     * and each describe. Without it, NOT_REGISTERED stays.
+     */
+    readonly notRegistered?: (server: string) => { readonly code: string; readonly next: string } | undefined
   }
   /** Plugin-owned read tools. */
   readonly owned?: readonly OwnedMethod[]
@@ -156,6 +168,11 @@ export interface ToolCall {
   readonly id: string
   readonly signal: AbortSignal
   readonly progress: () => Promise<void>
+  /**
+   * A plugin-owned method's call only, with per-account servers: the envelope's `account`, already known to the
+   * `mcp.server` function. Absent when the envelope has none (the default account).
+   */
+  readonly account?: string
 }
 
 type Rule = { readonly action: string; readonly resource: string; readonly effect: "allow" | "deny" | "ask" }
@@ -188,6 +205,7 @@ const DESCRIBED = object(
     description: STRING,
     available: { type: "boolean" },
     reason: STRING,
+    detail: STRING,
     input: ANY_OBJECT,
     output: ANY_OBJECT,
   },
@@ -373,6 +391,9 @@ export async function registerToolsRpc(ctx: ToolsRpcContext, options: ToolsRpcOp
     return { agent: info.agent as string, rules }
   }
 
+  /** The plugin's own code and next step for a server that is not registered, if its `notRegistered` hook gives one. */
+  const notRegistered = (server: string) => mcp?.notRegistered?.(server)
+
   /** Why the server's tool is missing: its connection state, or TOOL_UNAVAILABLE while it is connected. */
   const unavailable = async (server: string, tool: string, connected: Exclude<Code, "ACCOUNT_UNKNOWN">) => {
     const status = (await ctx.mcp.list()).data.find((entry) => entry.name === server)?.status.status
@@ -380,7 +401,9 @@ export async function registerToolsRpc(ctx: ToolsRpcContext, options: ToolsRpcOp
     if (code === "TOOL_UNAVAILABLE") return fail(code, `OpenCode does not list ${tool} on the connected "${server}" server`)
     // The call found the server not connected, and it reads connected now: it reconnected meanwhile.
     if (status === "connected") return fail(code, `the "${server}" server was reconnecting when ${tool} ran`)
-    return fail(code, `the "${server}" server ${STATUS_TEXT[code] ?? "is unavailable"}`)
+    const what = `the "${server}" server ${STATUS_TEXT[code] ?? "is unavailable"}`
+    const own = code === "NOT_REGISTERED" ? notRegistered(server) : undefined
+    return own ? new ScriptError({ code: own.code, what, next: own.next }) : fail(code, what)
   }
 
   /**
@@ -428,11 +451,16 @@ export async function registerToolsRpc(ctx: ToolsRpcContext, options: ToolsRpcOp
     }
   }
 
-  const ownedTarget = (spec: OwnedMethod, envelope: Envelope): Target => ({
-    action: spec.action,
-    mcp: false,
-    run: async (call) => (await spec.run(envelope.input, call)) ?? null,
-  })
+  const ownedTarget = (spec: OwnedMethod, envelope: Envelope): Target => {
+    // With per-account servers, an unknown account is ACCOUNT_UNKNOWN before the spec runs, as for an MCP method.
+    if (accounts) serverOf(envelope.account)
+    const account = accounts && envelope.account !== undefined ? { account: envelope.account } : {}
+    return {
+      action: spec.action,
+      mcp: false,
+      run: async (call) => (await spec.run(envelope.input, { ...call, ...account })) ?? null,
+    }
+  }
 
   const invoke = async (target: (envelope: Envelope) => Target, raw: unknown, context: RpcContext) => {
     const envelope = raw as Envelope
@@ -490,7 +518,9 @@ export async function registerToolsRpc(ctx: ToolsRpcContext, options: ToolsRpcOp
       for (const name of KNOWN_READS) {
         const id = `${server}_${name}`
         const tool = managed ? tools.find((entry) => entry.id === id) : undefined
-        const reason: Code | undefined = !managed ? "SERVER_CONFLICT" : tool ? undefined : (connection(status) ?? "TOOL_UNAVAILABLE")
+        const code: Code | undefined = !managed ? "SERVER_CONFLICT" : tool ? undefined : (connection(status) ?? "TOOL_UNAVAILABLE")
+        const reason = code === "NOT_REGISTERED" ? (notRegistered(server)?.code ?? code) : code
+        const detail = code === undefined ? undefined : mcp.unavailableDetail?.(name, code)
         const input = jsonSchema(tool?.input) ?? ANY_OBJECT
         const output = jsonSchema(tool?.output)
         methods.push({
@@ -501,6 +531,7 @@ export async function registerToolsRpc(ctx: ToolsRpcContext, options: ToolsRpcOp
           description: tool?.description ?? "",
           available: reason === undefined,
           ...(reason ? { reason } : {}),
+          ...(detail === undefined ? {} : { detail }),
           input,
           output: mcpOutput(output),
         })

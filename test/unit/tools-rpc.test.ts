@@ -65,6 +65,8 @@ interface Setup {
   owned?: OwnedMethod[]
   mcp?: false
   lookup?: (sessionID: string) => Promise<unknown>
+  unavailableDetail?: NonNullable<ToolsRpcOptions["mcp"]>["unavailableDetail"]
+  notRegistered?: NonNullable<ToolsRpcOptions["mcp"]>["notRegistered"]
 }
 
 interface Harness {
@@ -149,7 +151,16 @@ async function setup(options: Setup = {}): Promise<Harness> {
     mcp: { list: async () => ({ data: [{ name: SERVER, status: { status: options.status ?? "connected" } }] }) },
   }
   const stop = await registerToolsRpc(ctx as never, {
-    ...(options.mcp === false ? {} : { mcp: { server: options.server ?? SERVER, managed: () => options.managed ?? true } }),
+    ...(options.mcp === false
+      ? {}
+      : {
+          mcp: {
+            server: options.server ?? SERVER,
+            managed: () => options.managed ?? true,
+            ...(options.unavailableDetail ? { unavailableDetail: options.unavailableDetail } : {}),
+            ...(options.notRegistered ? { notRegistered: options.notRegistered } : {}),
+          },
+        }),
     ...(options.owned ? { owned: options.owned } : {}),
   })
   return { contract: contract!, handlers, hook: (evaluation) => hook(evaluation), calls, evaluations, disposed, stop }
@@ -257,6 +268,35 @@ mcpDescribe("describe", () => {
     for (const method of (await auth.handlers.describe!({}, rpcContext())).methods) expect(method).toMatchObject({ available: false, reason: "AUTH_REQUIRED" })
     const conflict = await setup({ managed: false })
     for (const method of (await conflict.handlers.describe!({}, rpcContext())).methods) expect(method).toMatchObject({ available: false, reason: "SERVER_CONFLICT" })
+  })
+
+  mcpTest("adds the unavailableDetail hook's text as detail beside the reason code; without the hook, no detail", async () => {
+    const seen: [string, string][] = []
+    const detail = (method: string, code: string) => (seen.push([method, code]), method === READ ? `Turn on ${method}'s toolset with the toolsets option.` : undefined)
+    const h = await setup({ tools: {}, unavailableDetail: detail })
+    const methods = (await h.handlers.describe!({}, rpcContext())).methods
+    expect(methods[0]).toMatchObject({ name: READ, available: false, reason: "TOOL_UNAVAILABLE", detail: `Turn on ${READ}'s toolset with the toolsets option.` })
+    for (const method of methods.slice(1)) expect(Object.hasOwn(method, "detail")).toBe(false)
+    expect(seen).toEqual(KNOWN_READS.map((name) => [name, "TOOL_UNAVAILABLE"]))
+    expect(h.contract.methods.describe!.output.properties.methods.items.properties.detail).toEqual({ type: "string" })
+    // A listed method never asks the hook; the code it gets is the reason, such as a connection state.
+    seen.length = 0
+    const listed = await setup({ unavailableDetail: detail })
+    expect((await listed.handlers.describe!({}, rpcContext())).methods.every((method: object) => !Object.hasOwn(method, "detail"))).toBe(true)
+    expect(seen).toEqual([])
+    await (await setup({ tools: {}, status: "needs_auth", unavailableDetail: detail })).handlers.describe!({}, rpcContext())
+    expect(seen[0]).toEqual([READ, "AUTH_REQUIRED"])
+    for (const method of (await (await setup({ tools: {} })).handlers.describe!({}, rpcContext())).methods) expect(Object.hasOwn(method, "detail")).toBe(false)
+  })
+
+  mcpTest("gives the notRegistered hook's code as the reason while the server is not registered, and only then", async () => {
+    const own = { code: "CLIENT_ID_MISSING", next: "Set the client ID." }
+    const absent = await setup({ tools: {}, status: "absent", notRegistered: () => own })
+    for (const method of (await absent.handlers.describe!({}, rpcContext())).methods) expect(method).toMatchObject({ available: false, reason: "CLIENT_ID_MISSING" })
+    const fallback = await setup({ tools: {}, status: "absent", notRegistered: () => undefined })
+    for (const method of (await fallback.handlers.describe!({}, rpcContext())).methods) expect(method).toMatchObject({ reason: "NOT_REGISTERED" })
+    const auth = await setup({ tools: {}, status: "needs_auth", notRegistered: () => own })
+    for (const method of (await auth.handlers.describe!({}, rpcContext())).methods) expect(method).toMatchObject({ reason: "AUTH_REQUIRED" })
   })
 })
 
@@ -422,6 +462,28 @@ mcpDescribe("server and tool state", () => {
     refusedWith(refused, "CONNECTING")
     expect(refused.data.next).toBe(NEXT_STEPS.CONNECTING)
     expect(refused.message).toContain(`the "${SERVER}" server was reconnecting when ${ID} ran`)
+  })
+
+  mcpTest("uses the notRegistered hook's code and next step while the server is not registered; undefined keeps NOT_REGISTERED", async () => {
+    let own: { code: string; next: string } | undefined = { code: "CLIENT_ID_MISSING", next: "Run /connect and set the client ID." }
+    const servers: string[] = []
+    const notRegistered = (server: string) => (servers.push(server), own)
+    const missing = await call(await setup({ tools: {}, status: "absent", notRegistered }), READ)
+    refusedWith(missing, "CLIENT_ID_MISSING")
+    expect(missing.message).toBe(`CLIENT_ID_MISSING: the "${SERVER}" server is not registered. Next step: Run /connect and set the client ID.`)
+    expect(missing.data).toEqual({ code: "CLIENT_ID_MISSING", next: "Run /connect and set the client ID." })
+    expect(servers).toEqual([SERVER])
+    // The executor's "not connected" error while the server is gone takes the same path.
+    const gone = await setup({ status: "absent", notRegistered, tools: { [ID]: async () => Promise.reject(new Error(`MCP server "${SERVER}" is not connected`)) } })
+    refusedWith(await call(gone, READ), "CLIENT_ID_MISSING")
+    // Other states never ask the hook.
+    servers.length = 0
+    refusedWith(await call(await setup({ tools: {}, status: "failed", notRegistered }), READ), "CONNECTION_FAILED")
+    expect(servers).toEqual([])
+    own = undefined
+    const plain = await call(await setup({ tools: {}, status: "absent", notRegistered }), READ)
+    refusedWith(plain, "NOT_REGISTERED")
+    expect(plain.data.next).toBe(NEXT_STEPS.NOT_REGISTERED)
   })
 })
 
@@ -652,6 +714,52 @@ describe("per-account servers", () => {
     await h.handlers[READ]!({ sessionID: "ses_1", account: "work", input: {} }, rpcContext())
     expect(h.calls.map((entry) => entry.tool)).toEqual([`srv-work_${READ}`])
     refusedWith(await h.handlers[READ]!({ sessionID: "ses_1", account: "nope", input: {} }, rpcContext()), "ACCOUNT_UNKNOWN")
+  })
+
+  /**
+   * Runs a body with per-account servers allowed. A plugin without them has no ACCOUNT_UNKNOWN next step; the shared
+   * part reads NEXT_STEPS when it runs, so the body sets one for its duration and removes it afterwards.
+   */
+  const withAccounts = async (body: () => Promise<void>) => {
+    const steps = NEXT_STEPS as { ACCOUNT_UNKNOWN?: string }
+    const had = steps.ACCOUNT_UNKNOWN !== undefined
+    if (!had) steps.ACCOUNT_UNKNOWN = "Pass a known account."
+    try {
+      await body()
+    } finally {
+      if (!had) delete steps.ACCOUNT_UNKNOWN
+    }
+  }
+  const ownedSpec = (run: OwnedMethod["run"]): OwnedMethod => ({ name: "owned_read", action: "plugin_owned_read", description: "", input: {}, output: {}, run })
+
+  test("give a plugin-owned method the envelope's account as call.account, and none when the envelope has none", async () =>
+    withAccounts(async () => {
+      const seen: ToolCall[] = []
+      const h = await setup({ server: accounts, owned: [ownedSpec(async (_input, live) => (seen.push(live), { ok: true }))] })
+      expect(h.contract.methods.owned_read!.input.properties.account).toEqual({ type: "string", minLength: 1 })
+      expect(await h.handlers.owned_read!({ sessionID: "ses_1", account: "work", input: {} }, rpcContext())).toEqual({ ok: true })
+      expect(await h.handlers.owned_read!({ sessionID: "ses_1", input: {} }, rpcContext())).toEqual({ ok: true })
+      expect(seen[0]).toMatchObject({ sessionID: "ses_1", agent: "build", account: "work", id: expect.stringMatching(/^script:/) })
+      expect(Object.hasOwn(seen[1]!, "account")).toBe(false)
+    }))
+
+  test("refuse an unknown account with ACCOUNT_UNKNOWN before a plugin-owned method runs, as for an MCP method", async () =>
+    withAccounts(async () => {
+      let runs = 0
+      const h = await setup({ server: accounts, owned: [ownedSpec(async () => (runs++, {}))] })
+      const refused = await h.handlers.owned_read!({ sessionID: "ses_1", account: "nope", input: {} }, rpcContext())
+      refusedWith(refused, "ACCOUNT_UNKNOWN")
+      expect(refused.data.next).toBe(NEXT_STEPS.ACCOUNT_UNKNOWN)
+      expect(runs).toBe(0)
+      expect(h.evaluations).toEqual([])
+    }))
+
+  test("without per-account servers, a plugin-owned method's call has no account", async () => {
+    const seen: ToolCall[] = []
+    const h = await setup({ owned: [ownedSpec(async (_input, live) => (seen.push(live), {}))] })
+    expect(Object.hasOwn(h.contract.methods.owned_read!.input.properties, "account")).toBe(false)
+    await h.handlers.owned_read!({ sessionID: "ses_1", input: {} }, rpcContext())
+    expect(Object.hasOwn(seen[0]!, "account")).toBe(false)
   })
 })
 
