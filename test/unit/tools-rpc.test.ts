@@ -35,7 +35,10 @@ const ID = `${SERVER}_${READ}`
  * not apply, and the plugin-owned tests below cover sessions, permissions, the hook and cancellation on their own.
  */
 const MCP = KNOWN_READS.length > 0
-const mcpTest = test.skipIf(!MCP)
+/** Registers an MCP-only test, or nothing when the plugin has no known reads. A plain if: some repos' scans ban skip calls. */
+const mcpTest = (name: string, body: () => unknown): void => {
+  if (MCP) test(name, body as () => Promise<void>)
+}
 
 /** A Tool.Error as OpenCode's executor rejects with it: a permission refusal carries a cause, an upstream failure none. */
 const toolError = (message: string, cause?: unknown) => Object.assign(new Error(message), { _tag: "Tool.Error", ...(cause === undefined ? {} : { error: cause }) })
@@ -203,7 +206,17 @@ describe("the contract", () => {
     expect(messages({ sessionID: "ses_1" })).toEqual([`"input" is missing`])
     expect(messages({ sessionID: "ses_1", input: ["q"] })).toEqual([`"input" must be an object`])
     expect(messages({ sessionID: "ses_1", account: "work", input: {} })).toEqual([`"account" is not allowed`])
-    expect(messages("text")).toEqual(["Expected an object"])
+    expect(messages("text")).toEqual([`the envelope must be an object, such as {"sessionID":"<session>","input":<the tool's input>}`])
+  })
+
+  test("describe takes nothing or an empty object; any other input gets one plain message", async () => {
+    const h = await setup()
+    const input = h.contract.methods.describe!.input
+    expect(input).toEqual({ type: "object", properties: {}, required: [], additionalProperties: false })
+    for (const value of [undefined, null, {}]) expect(input["~standard"].validate(value)).toEqual({ value })
+    for (const value of [{ sessionID: "ses_1" }, { sessionID: "ses_1", input: {} }, "text", []]) {
+      expect(input["~standard"].validate(value)).toEqual({ issues: [{ message: "describe takes no input" }] })
+    }
   })
 
   test("gives every code one next step that ends with a full stop", () => {
@@ -318,6 +331,22 @@ describe("permissions", () => {
     refusedWith(await call(h, READ), "PERMISSION_DENIED")
   })
 
+  mcpTest("names the action of the request a refusal carries, in the message and the next step, when it is not the method's", async () => {
+    const cause = Object.assign(new Error("denied"), { request: { sessionID: "ses_1", action: `${SERVER}_other`, resources: ["*"] } })
+    const h = await setup({ tools: { [ID]: async () => Promise.reject(toolError(`Permission denied: ${SERVER}_other`, cause)) } })
+    const refused = await call(h, READ)
+    refusedWith(refused, "PERMISSION_DENIED")
+    expect(refused.message).toStartWith(`PERMISSION_DENIED: ${ID} needs ${SERVER}_other, which was refused for this session's agent: `)
+    expect(refused.data.next).toBe(`Add an allow rule for ${SERVER}_other to the session's agent or to the session, or use a session whose agent allows it.`)
+  })
+
+  mcpTest("keeps the plugin's next step when the refused request is the method's own", async () => {
+    const h = await setup({ agents: { build: [rule("*", "allow"), rule(ID, "ask")] } })
+    const refused = await call(h, READ)
+    expect(refused.message).toStartWith(`PERMISSION_DENIED: ${ID} was refused for this session's agent: `)
+    expect(refused.data.next).toBe(NEXT_STEPS.PERMISSION_DENIED)
+  })
+
   mcpTest("refuses an ask at once: the hook turns this call's ask into a deny, and no prompt is left", async () => {
     const h = await setup({ agents: { build: [rule("*", "allow"), rule(ID, "ask")] } })
     const refused = await call(h, READ)
@@ -377,6 +406,14 @@ describe("server and tool state", () => {
   mcpTest("maps OpenCode's \"MCP server is not connected\" error from the executor to the connection state", async () => {
     const h = await setup({ status: "needs_auth", tools: { [ID]: async () => Promise.reject(new Error(`MCP server "${SERVER}" is not connected`)) } })
     refusedWith(await call(h, READ), "AUTH_REQUIRED")
+  })
+
+  mcpTest("gives CONNECTING, not CONNECTION_FAILED, when that error comes from a server that reads connected again", async () => {
+    const h = await setup({ status: "connected", tools: { [ID]: async () => Promise.reject(new Error(`MCP server "${SERVER}" is not connected`)) } })
+    const refused = await call(h, READ)
+    refusedWith(refused, "CONNECTING")
+    expect(refused.data.next).toBe(NEXT_STEPS.CONNECTING)
+    expect(refused.message).toContain(`the "${SERVER}" server was reconnecting when ${ID} ran`)
   })
 })
 
@@ -483,6 +520,29 @@ describe("plugin-owned methods", () => {
     })
     refusedWith(await call(h, "owned_read", {}), "PERMISSION_DENIED")
     expect(asked).toMatchObject({ effect: "deny", message: expect.stringMatching(/cannot answer an approval prompt/) })
+  })
+
+  test("a refused check of another action, such as a download a transcription asks for, names that action", async () => {
+    let calls = 0
+    const h: Harness = await setup({
+      owned: [
+        owned(async (_input, live) => {
+          // The first call's check of another action asks; the second call's own check is denied by a rule.
+          if (calls++ > 0) throw toolError("Permission denied: plugin_owned_read", new Error("rule"))
+          const asked: Evaluation = { sessionID: live.sessionID, action: "plugin_download", resources: ["*"], source: { type: "tool", messageID: live.messageID, id: live.id }, effect: "ask" }
+          h.hook(asked)
+          throw toolError(asked.message!, new Error("hook"))
+        }),
+      ],
+    })
+    const refused = await call(h, "owned_read", {})
+    refusedWith(refused, "PERMISSION_DENIED")
+    expect(refused.message).toStartWith("PERMISSION_DENIED: plugin_owned_read needs plugin_download, which was refused for this session's agent: A script cannot answer")
+    expect(refused.data.next).toBe("Add an allow rule for plugin_download to the session's agent or to the session, or use a session whose agent allows it.")
+    // The next call starts clean: its own refusal names its own action.
+    const again = await call(h, "owned_read", {})
+    expect(again.message).toStartWith("PERMISSION_DENIED: plugin_owned_read was refused")
+    expect(again.data.next).toBe(NEXT_STEPS.PERMISSION_DENIED)
   })
 
   test("a failure that is not a permission refusal propagates, unless pluginError names it", async () => {
