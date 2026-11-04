@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { createServer } from "node:http"
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -315,6 +315,53 @@ describe("download and upload", () => {
     expect(seen[1]!.headers.authorization).toBeUndefined()
     await expect(callRest(input, restTarget(input, GITHUB_COM), deps(fetch))).rejects.toThrow(/^API_FILE_EXISTS: /)
     await callRest({ ...input, download: { path: "out/a.zip", overwrite: true } }, restTarget(input, GITHUB_COM), deps(fetch))
+  })
+
+  // QA GITHUB-2: a download has a size cap, by its Content-Length and while it streams.
+  it("stops a download over the cap and leaves no file behind", async () => {
+    const stream = () =>
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.enqueue(new Uint8Array(3))
+        },
+      })
+    // A fresh response per call: a cloned endless stream never finishes cancelling.
+    const routes: Record<string, () => Response> = {
+      "https://api.github.com/declared": () => new Response(new Uint8Array(5), { headers: { "content-type": "application/zip", "content-length": "5" } }),
+      "https://api.github.com/endless": () => new Response(stream(), { headers: { "content-type": "application/zip" } }),
+      "https://api.github.com/fits": () => new Response(new Uint8Array(4), { headers: { "content-type": "application/zip", "content-length": "4" } }),
+    }
+    const capped = { ...deps(async (url: string) => routes[url]!()), maxDownloadBytes: 4 }
+    for (const path of ["/declared", "/endless"]) {
+      const input = rest({ method: "GET", path, download: { path: `out${path}.zip` } })
+      await expect(callRest(input, restTarget(input, GITHUB_COM), capped)).rejects.toThrow(
+        "API_DOWNLOAD_TOO_LARGE: The download is over 4 bytes. Next step: Narrow the request, or download it outside OpenCode.",
+      )
+    }
+    const fits = rest({ method: "GET", path: "/fits", download: { path: "out/fits.zip" } })
+    expect((await callRest(fits, restTarget(fits, GITHUB_COM), capped)).download?.bytes).toBe(4)
+    expect(readdirSync(join(root, "out"))).toEqual(["fits.zip"])
+  })
+
+  // QA GITHUB-7: without overwrite, a file that appears while the download runs is kept.
+  it("never replaces a file that appeared during the download, unless overwrite is set", async () => {
+    const target = join(root, "out", "a.zip")
+    const { fetch } = fakeFetch({
+      "https://api.github.com/a": () => {
+        mkdirSync(join(root, "out"), { recursive: true })
+        writeFileSync(target, "theirs")
+        return new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "application/zip" } })
+      },
+    })
+    const input = rest({ method: "GET", path: "/a", download: { path: "out/a.zip" } })
+    await expect(callRest(input, restTarget(input, GITHUB_COM), deps(fetch))).rejects.toThrow(/^API_FILE_EXISTS: The file out\/a\.zip already exists\./)
+    expect(readFileSync(target, "utf8")).toBe("theirs")
+    expect(readdirSync(join(root, "out"))).toEqual(["a.zip"])
+    rmSync(target)
+    const replace = rest({ method: "GET", path: "/a", download: { path: "out/a.zip", overwrite: true } })
+    await callRest(replace, restTarget(replace, GITHUB_COM), deps(fetch))
+    expect([...readFileSync(target)]).toEqual([1, 2, 3])
+    expect(readdirSync(join(root, "out"))).toEqual(["a.zip"])
   })
 
   it("keeps files inside the project, also through a symbolic link", async () => {

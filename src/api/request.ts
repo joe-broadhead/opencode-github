@@ -3,7 +3,7 @@
 // a redirect to any other origin (logs, artifacts and release assets live in blob storage)
 // is followed without the Authorization header. Results are capped for inline display.
 import { createHash } from "node:crypto"
-import { mkdir, open, readFile, realpath, rename, rm, stat } from "node:fs/promises"
+import { link, mkdir, open, readFile, realpath, rename, rm, stat } from "node:fs/promises"
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import type { Endpoints } from "../config.js"
 import { GitHubPluginError } from "../errors.js"
@@ -19,6 +19,8 @@ export const MAX_INLINE_BYTES = 100_000
 const MAX_READ_BYTES = 10 * 1024 * 1024
 /** Largest file upload accepts. */
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+/** Largest file download saves; a bigger response is stopped and its partial file removed. */
+export const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024
 const MAX_REDIRECTS = 5
 const DEFAULT_MAX_PAGES = 10
 const DEFAULT_MAX_ITEMS = 1000
@@ -36,6 +38,8 @@ export type CallDeps = {
   readonly signal?: AbortSignal
   /** The project folder; download and upload files must be inside it. */
   readonly root: string
+  /** The download cap; MAX_DOWNLOAD_BYTES unless a test sets a smaller one. */
+  readonly maxDownloadBytes?: number
 }
 
 /** A REST call's target: the URL and the `METHOD /path` that permissions see. `path` is exactly the path sent. */
@@ -135,13 +139,11 @@ export async function callRest(input: RestInput, target: RestTarget, deps: CallD
   }
 
   if (input.download) {
-    const file = await projectPath(deps.root, input.download.path)
-    if (!input.download.overwrite && (await stat(file.absolute).then(() => true, () => false))) {
-      throw new GitHubPluginError("API_FILE_EXISTS", `The file ${file.relative} already exists.`, "Choose another path, or pass download.overwrite: true.")
-    }
+    const overwrite = input.download.overwrite === true
+    const file = await downloadTarget(deps.root, input.download.path, overwrite)
     const response = await send(target.url, { method: input.method, headers, body }, deps)
     if (!response.ok) return finish(response, await readBody(response, input.method), deps)
-    const saved = await save(response, file)
+    const saved = await save(response, file, { overwrite, maxBytes: deps.maxDownloadBytes ?? MAX_DOWNLOAD_BYTES })
     return { ...base(response), download: saved, truncated: false }
   }
 
@@ -268,7 +270,33 @@ async function readCapped(response: Response, limit: number): Promise<{ bytes: U
   return { bytes, truncated }
 }
 
-async function save(response: Response, file: { absolute: string; relative: string }): Promise<{ path: string; bytes: number; sha256: string }> {
+const fileExists = (file: { relative: string }) =>
+  new GitHubPluginError("API_FILE_EXISTS", `The file ${file.relative} already exists.`, "Choose another path, or pass download.overwrite: true.")
+
+/** The download file inside the project; refused when it exists and overwrite is off. */
+export async function downloadTarget(root: string, path: string, overwrite: boolean): Promise<{ absolute: string; relative: string }> {
+  const file = await projectPath(root, path)
+  if (!overwrite && (await stat(file.absolute).then(() => true, () => false))) throw fileExists(file)
+  return file
+}
+
+const tooLarge = (limit: number) =>
+  new GitHubPluginError("API_DOWNLOAD_TOO_LARGE", `The download is over ${limit} bytes.`, "Narrow the request, or download it outside OpenCode.")
+
+/**
+ * Streams the body to a temporary file beside the target, then publishes it: with a hard link
+ * when overwrite is off, so a file that appeared meanwhile is never replaced, else with rename.
+ */
+async function save(
+  response: Response,
+  file: { absolute: string; relative: string },
+  options: { overwrite: boolean; maxBytes: number },
+): Promise<{ path: string; bytes: number; sha256: string }> {
+  const declared = Number(response.headers.get("content-length"))
+  if (Number.isFinite(declared) && declared > options.maxBytes) {
+    await response.body?.cancel().catch(() => undefined)
+    throw tooLarge(options.maxBytes)
+  }
   await mkdir(dirname(file.absolute), { recursive: true })
   const temporary = join(dirname(file.absolute), `.${basename(file.absolute)}.${process.pid}.${Date.now()}.part`)
   const hash = createHash("sha256")
@@ -277,13 +305,20 @@ async function save(response: Response, file: { absolute: string; relative: stri
   try {
     if (response.body) {
       for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
-        hash.update(chunk)
         bytes += chunk.byteLength
+        if (bytes > options.maxBytes) throw tooLarge(options.maxBytes)
+        hash.update(chunk)
         await handle.write(chunk)
       }
     }
     await handle.close()
-    await rename(temporary, file.absolute)
+    if (options.overwrite) await rename(temporary, file.absolute)
+    else {
+      await link(temporary, file.absolute).catch((error: NodeJS.ErrnoException) => {
+        throw error.code === "EEXIST" ? fileExists(file) : error
+      })
+      await rm(temporary, { force: true })
+    }
   } catch (error) {
     await handle.close().catch(() => undefined)
     await rm(temporary, { force: true })

@@ -10,7 +10,7 @@ import { SERVER_NAME } from "../rpc.js"
 import { API_TOOL_NAME } from "../tools.js"
 import { graphqlKind, graphqlOperations, restKind } from "./classify.js"
 import { type ApiInput, ApiOutput, ApiInput as InputSchema, type RestInput } from "./contract.js"
-import { type Fetch, callGraphql, callRest, projectPath, restTarget } from "./request.js"
+import { type Fetch, callGraphql, callRest, downloadTarget, restTarget } from "./request.js"
 
 export const API_ACTION = "github_api"
 
@@ -130,7 +130,8 @@ export async function registerApiTool(
       await assert(call, described.resource, described.metadata)
     }
     if (!("graphql" in input) && input.download) {
-      const file = await projectPath(deps.root, input.download.path)
+      // An existing file is refused before the prompt, so the user never approves a call that cannot save.
+      const file = await downloadTarget(deps.root, input.download.path, input.download.overwrite === true)
       await assert(call, `download ${file.relative}`, { ...described.metadata, download: file.relative })
     }
 
