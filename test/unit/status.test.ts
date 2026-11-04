@@ -1,7 +1,9 @@
+import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { loadOptions } from "../../src/config.js"
 import { type Rule, defaultRules, insertDefaults } from "../../src/permissions.js"
 import { STATES, formatStatus, isStatus } from "../../src/rpc.js"
+import { PLUGIN_VERSION } from "../../src/version.js"
 import { STATUS_COMMAND, type StatusDeps, computeStatus, registerStatus } from "../../src/status.js"
 import { jargonIn } from "./jargon.js"
 
@@ -67,11 +69,11 @@ function deps(overrides: Partial<StatusDeps> = {}): StatusDeps {
 describe("computeStatus", () => {
   it.each([
     ["connected", { server: "connected", label: "octocat" }, {}, "Nothing to do."],
-    ["needs_auth", { server: "needs_auth" }, {}, "Run /connect and choose GitHub."],
-    ["pending", { server: "pending" }, {}, "GitHub is still starting. Check again in a few seconds."],
+    ["sign_in_required", { server: "needs_auth" }, {}, "Run /connect and choose GitHub."],
+    ["connecting", { server: "pending" }, {}, "GitHub is still starting. Check again in a few seconds."],
     ["failed", { server: "failed" }, {}, "OpenCode could not reach GitHub's MCP server. Check your network connection, then reconnect github in /mcps."],
     ["disabled", { server: "disabled" }, {}, "Turn the github server back on in /mcps."],
-    ["not_registered", {}, {}, "Restart OpenCode. If GitHub is still missing, check that no other plugin removes the MCP server named github."],
+    ["not_configured", {}, {}, "Restart OpenCode. If GitHub is still missing, check that no other plugin removes the MCP server named github."],
     ["conflict", { server: "connected", label: "octocat" }, { conflict: () => true }, expect.stringContaining("Rename or remove that server")],
   ] as const)("reports %s with its next step", async (state, ctxInput, override, nextStep) => {
     const { ctx } = fakeCtx(ctxInput as Parameters<typeof fakeCtx>[0])
@@ -86,14 +88,14 @@ describe("computeStatus", () => {
     expect((await computeStatus(fakeCtx({ server: "connected", label: "octocat" }).ctx, deps({ conflict: () => true }))).account).toBeUndefined()
   })
 
-  it("is pending until OpenCode has applied the MCP config", async () => {
+  it("is connecting until OpenCode has applied the MCP config", async () => {
     const status = await computeStatus(fakeCtx().ctx, deps({ conflict: () => undefined }))
-    expect(status.state).toBe("pending")
+    expect(status.state).toBe("connecting")
   })
 
-  it("is pending while the sign-in methods are not attached yet", async () => {
+  it("is connecting while the sign-in methods are not attached yet", async () => {
     const status = await computeStatus(fakeCtx({ server: "needs_auth" }).ctx, deps({ integrationID: () => undefined }))
-    expect(status.state).toBe("pending")
+    expect(status.state).toBe("connecting")
     const connected = await computeStatus(fakeCtx({ server: "connected" }).ctx, deps({ integrationID: () => undefined }))
     expect(connected.state).toBe("connected")
   })
@@ -105,15 +107,62 @@ describe("computeStatus", () => {
         options: loadOptions({ toolsets: ["repos"], readOnly: false, unknownTools: "hide" }),
         tools: () => ({ visible: 12, unknown: ["github_a", "github_b"] }),
         hostVersion: "2.3.0",
-        hostWarning: "OpenCode 2.3.0 is not a tested host.",
+        hostWarning: "OpenCode 2.3.0 is outside the supported range.",
       }),
     )
     expect(status).toMatchObject({
       readOnly: false,
       toolsets: ["repos"],
       tools: { visible: 12, unknown: ["github_a", "github_b"], mode: "hide" },
-      host: { version: "2.3.0", warning: "OpenCode 2.3.0 is not a tested host." },
+      host: { version: "2.3.0", range: ">=2.2.3 <2.3.0", tested: false },
+      hostWarning: "OpenCode 2.3.0 is outside the supported range.",
     })
+  })
+
+  // S13: the shared status fields, with the S9 labels in machine form.
+  it("has the shared fields: version, host with range and tested, state, unguardedAgents and nextStep", async () => {
+    const status = await computeStatus(fakeCtx({ server: "connected", label: "octocat" }).ctx, deps({ hostVersion: "2.2.5" }))
+    expect(status).toMatchObject({ version: PLUGIN_VERSION, state: "connected", host: { version: "2.2.5", range: ">=2.2.3 <2.3.0", tested: true }, unguardedAgents: [], nextStep: "Nothing to do." })
+    expect(PLUGIN_VERSION).toBe(JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version)
+    for (const state of STATES) expect(state).toMatch(/^[a-z_]+$/)
+  })
+
+  it("on a release in the range that is not tested, says so in the next step when nothing else is needed", async () => {
+    const status = await computeStatus(fakeCtx({ server: "connected", label: "octocat" }).ctx, deps({ hostVersion: "2.2.6" }))
+    expect(status.host).toEqual({ version: "2.2.6", range: ">=2.2.3 <2.3.0", tested: false })
+    expect(status.nextStep).toBe("If GitHub misbehaves, use OpenCode 2.2.3, 2.2.4 or 2.2.5, where it is tested.")
+  })
+
+  // QA LIVE-1: an agent whose own rules already ask or deny for GitHub's tools needs no fix.
+  it("lists an agent only when its own rules would run an unknown GitHub tool without asking", async () => {
+    const agents = [
+      { id: "build", permissions: insertDefaults([BASE], defaultRules()) },
+      { id: "open", permissions: [BASE] },
+      { id: "asks", permissions: [BASE, { action: "*", resource: "*", effect: "ask" } as Rule] },
+      { id: "denies-github", permissions: [BASE, { action: "github_*", resource: "*", effect: "deny" } as Rule] },
+      { id: "asks-github-mcp", permissions: [BASE, { action: "github_*", resource: "*", effect: "ask" } as Rule] },
+      { id: "no-base", permissions: [{ action: "read", resource: "*", effect: "allow" } as Rule] },
+      { id: "allows-github", permissions: [{ action: "github_*", resource: "*", effect: "allow" } as Rule] },
+      { id: "fixed-by-hand", permissions: [BASE, { action: "*", resource: "*", effect: "allow" } as Rule, ...defaultRules()] },
+    ]
+    const status = await computeStatus(fakeCtx({ server: "connected", agents }).ctx, deps())
+    expect(status.unguardedAgents).toEqual(["open", "allows-github"])
+  })
+
+  // QA LIVE-2: the next step is never "Nothing to do." while agents are listed.
+  it("names the unguarded agents and the fix in the next step once the connection needs nothing", async () => {
+    const open = (id: string) => ({ id, permissions: [BASE] })
+    const one = await computeStatus(fakeCtx({ server: "connected", label: "octocat", agents: [open("reviewer")] }).ctx, deps())
+    expect(one.nextStep).toBe("Add the default rules to reviewer: first in the agent's own permissions, followed by your top-level rules for github_ tools.")
+    const two = await computeStatus(fakeCtx({ server: "connected", label: "octocat", agents: [open("reviewer"), open("docs")] }).ctx, deps())
+    expect(two.nextStep).toBe("Add the default rules to reviewer and docs: first in each agent's own permissions, followed by your top-level rules for github_ tools.")
+    const many = await computeStatus(fakeCtx({ server: "connected", label: "octocat", agents: ["a", "b", "c", "d", "e", "f", "g"].map(open) }).ctx, deps())
+    expect(many.nextStep).toBe("Add the default rules to a, b, c, d, e and 2 more: first in each agent's own permissions, followed by your top-level rules for github_ tools.")
+    // A connection problem comes first; on GitHub Enterprise Server the agents count too.
+    expect((await computeStatus(fakeCtx({ server: "needs_auth", agents: [open("reviewer")] }).ctx, deps())).nextStep).toBe("Run /connect and choose GitHub.")
+    const enterprise = await computeStatus(fakeCtx({ label: "octocat", agents: [open("reviewer")] }).ctx, deps({ enterprise: "ghe.example.com" }))
+    expect(enterprise.nextStep).toMatch(/^Add the default rules to reviewer: /)
+    expect(formatStatus(one).match(/Next step: .*/g)).toEqual([`Next step: ${one.nextStep}`])
   })
 
   it("names agents without the default rules and includes the block for them", async () => {
@@ -131,8 +180,8 @@ describe("computeStatus", () => {
 
   it("leaves out empty optional fields", async () => {
     const status = await computeStatus(fakeCtx({ server: "needs_auth" }).ctx, deps())
-    expect(Object.keys(status).sort()).toEqual(["host", "nextStep", "readOnly", "state", "tools", "toolsets", "unguardedAgents"])
-    expect(status.host).toEqual({ version: "2.2.3" })
+    expect(Object.keys(status).sort()).toEqual(["host", "nextStep", "readOnly", "state", "tools", "toolsets", "unguardedAgents", "version"])
+    expect(status.host).toEqual({ version: "2.2.3", range: ">=2.2.3 <2.3.0", tested: true })
   })
 
   it("answers 20 concurrent calls, each with fresh data", async () => {
@@ -145,7 +194,7 @@ describe("computeStatus", () => {
   it("on GitHub Enterprise Server, reports the sign-in on the plugin's integration and says only github_api works", async () => {
     const enterprise = { enterprise: "ghe.example.com", integrationID: () => ID, conflict: () => false }
     const signedOut = await computeStatus(fakeCtx().ctx, deps(enterprise))
-    expect(signedOut).toMatchObject({ state: "needs_auth", enterprise: "ghe.example.com", nextStep: "Run /connect and choose GitHub Enterprise." })
+    expect(signedOut).toMatchObject({ state: "sign_in_required", enterprise: "ghe.example.com", nextStep: "Run /connect and choose GitHub Enterprise." })
     const signedIn = await computeStatus(fakeCtx({ label: "octocat" }).ctx, deps(enterprise))
     expect(signedIn).toMatchObject({ state: "connected", account: "octocat", nextStep: "Nothing to do." })
     expect(formatStatus(signedIn)).toContain("Host: ghe.example.com (GitHub Enterprise Server)\nTools: github_api only. GitHub's hosted MCP tools do not support GitHub Enterprise Server; run github-mcp-server yourself for them.")
@@ -153,7 +202,7 @@ describe("computeStatus", () => {
   })
 
   it("covers every state", () => {
-    expect([...STATES].sort()).toEqual(["conflict", "connected", "disabled", "failed", "needs_auth", "not_registered", "pending"])
+    expect([...STATES].sort()).toEqual(["conflict", "connected", "connecting", "disabled", "failed", "not_configured", "sign_in_required"])
   })
 })
 

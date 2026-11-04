@@ -27,19 +27,30 @@ export function insertDefaults<R extends Rule>(rules: readonly R[], defaults: re
   return [...rules.slice(0, base + 1), ...defaults.map((rule) => ({ ...rule })), ...rules.slice(base + 1)]
 }
 
+/** A GitHub tool the plugin does not know: what an agent's rules do for it shows whether GitHub's writes ask. */
+const UNKNOWN_TOOL = `${TOOL_PREFIX}unknown_tool`
+
 /**
- * Agents with a base allow rule but no default block after it. OpenCode creates agents
- * defined only in the user's config after plugins run, so they never receive the block.
- * An agent fixed by hand carries the block in its own rules, after the top-level ones.
+ * Agents without the default block whose own rules would let an unknown GitHub tool run without
+ * asking. OpenCode creates agents defined only in the user's config after plugins run, so they never
+ * receive the block. An agent fixed by hand carries the block in its own rules, after the top-level
+ * ones; an agent whose rules already ask for or deny GitHub's tools needs no fix and is not listed.
  */
 export function unguardedAgents(agents: readonly { readonly id: string; readonly permissions: readonly Rule[] }[]): string[] {
   const defaults = defaultRules()
   return agents
-    .filter((agent) => {
-      const base = agent.permissions.findIndex(isBaseAllow)
-      return base !== -1 && !hasBlockAfter(agent.permissions, base, defaults)
-    })
+    .filter((agent) => !hasBlockAfter(agent.permissions, agent.permissions.findIndex(isBaseAllow), defaults))
+    .filter((agent) => evaluate(agent.permissions, UNKNOWN_TOOL) === "allow")
     .map((agent) => agent.id)
+}
+
+/** OpenCode's wildcards: `*` matches any run of characters and `?` one character, over the whole text. */
+const matches = (pattern: string, value: string) =>
+  new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`).test(value)
+
+/** The effect of `rules` for an MCP tool call (resource `*`): the last matching rule wins, and no match asks. */
+export function evaluate(rules: readonly Rule[], action: string): Rule["effect"] {
+  return rules.findLast((rule) => matches(rule.action, action) && matches(rule.resource, "*"))?.effect ?? "ask"
 }
 
 function hasBlockAfter(rules: readonly Rule[], base: number, defaults: readonly Rule[]): boolean {

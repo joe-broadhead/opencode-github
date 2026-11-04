@@ -3,8 +3,10 @@
 import type { Plugin } from "@opencode/plugin"
 import type { Options } from "./config.js"
 import { GitHubPluginError } from "./errors.js"
+import { HOST_RANGE, TESTED_HOSTS, isTestedHost } from "./host-version.js"
 import { defaultRules, unguardedAgents } from "./permissions.js"
 import { GithubRpc, NOTHING_TO_DO, SERVER_NAME, type Status, formatStatus } from "./rpc.js"
+import { PLUGIN_VERSION } from "./version.js"
 
 export const STATUS_COMMAND = "github-status"
 const UNAVAILABLE = new GitHubPluginError("STATUS_UNAVAILABLE", "GitHub status is unavailable right now.", "Run /github-status again.").message
@@ -37,7 +39,7 @@ export async function computeStatus(ctx: StatusContext, deps: StatusDeps): Promi
     // No MCP server: the sign-in on the plugin's own integration is the whole state.
     const integrationID = deps.integrationID()
     account = integrationID ? await accountOf(ctx, integrationID) : undefined
-    state = account ? "connected" : "needs_auth"
+    state = account ? "connected" : "sign_in_required"
   } else {
     const server = servers.data.find((item) => item.name === SERVER_NAME)
     state = stateOf(server?.status.status, deps.conflict(), deps.integrationID() !== undefined)
@@ -45,7 +47,9 @@ export async function computeStatus(ctx: StatusContext, deps: StatusDeps): Promi
   }
   const unguarded = unguardedAgents(agents.data)
   const tools = deps.tools()
+  const tested = isTestedHost(deps.hostVersion)
   return {
+    version: PLUGIN_VERSION,
     state,
     ...(account ? { account } : {}),
     readOnly: deps.options.readOnly,
@@ -53,20 +57,38 @@ export async function computeStatus(ctx: StatusContext, deps: StatusDeps): Promi
     tools: { visible: tools.visible, unknown: [...tools.unknown], mode: deps.options.unknownTools },
     unguardedAgents: unguarded,
     ...(unguarded.length > 0 ? { permissionsBlock: defaultRules() } : {}),
-    host: { version: deps.hostVersion, ...(deps.hostWarning ? { warning: deps.hostWarning } : {}) },
+    host: { version: deps.hostVersion, range: HOST_RANGE, tested },
+    ...(deps.hostWarning ? { hostWarning: deps.hostWarning } : {}),
     ...(deps.enterprise ? { enterprise: deps.enterprise } : {}),
-    nextStep: deps.enterprise ? enterpriseStep(state) : nextStep(state),
+    nextStep: (deps.enterprise ? enterpriseStep(state) : connectionStep(state)) ?? agentStep(unguarded) ?? hostStep(tested) ?? NOTHING_TO_DO,
   }
+}
+
+/** Agent names in a next step: at most this many, then a count. */
+const NAMED_AGENTS = 5
+
+/** The fix for agents without the default rules, naming them (QA LIVE-2). */
+function agentStep(unguarded: readonly string[]): string | undefined {
+  if (unguarded.length === 0) return undefined
+  const shown = unguarded.slice(0, NAMED_AGENTS)
+  const rest = unguarded.length - shown.length
+  const names = rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.length > 1 ? `${shown.slice(0, -1).join(", ")} and ${shown.at(-1)}` : shown[0]
+  const where = unguarded.length === 1 ? "the agent's" : "each agent's"
+  return `Add the default rules to ${names}: first in ${where} own permissions, followed by your top-level rules for github_ tools.`
+}
+
+function hostStep(tested: boolean): string | undefined {
+  return tested ? undefined : `If GitHub misbehaves, use OpenCode ${TESTED_HOSTS.slice(0, -1).join(", ")} or ${TESTED_HOSTS.at(-1)}, where it is tested.`
 }
 
 type ServerState = "connected" | "pending" | "disabled" | "failed" | "needs_auth"
 
 function stateOf(server: ServerState | undefined, conflict: boolean | undefined, attached: boolean): Status["state"] {
   if (conflict === true) return "conflict"
-  if (server === undefined) return conflict === undefined ? "pending" : "not_registered"
+  if (server === undefined) return conflict === undefined ? "connecting" : "not_configured"
   // The sign-in methods attach about a second after OpenCode registers the server.
-  if (server === "needs_auth" && !attached) return "pending"
-  return server
+  if (server === "pending" || (server === "needs_auth" && !attached)) return "connecting"
+  return server === "needs_auth" ? "sign_in_required" : server
 }
 
 async function accountOf(ctx: StatusContext, integrationID: string): Promise<string | undefined> {
@@ -74,23 +96,24 @@ async function accountOf(ctx: StatusContext, integrationID: string): Promise<str
   return connection?.type === "credential" ? connection.label : undefined
 }
 
-function enterpriseStep(state: Status["state"]): string {
-  return state === "connected" ? NOTHING_TO_DO : "Run /connect and choose GitHub Enterprise."
+function enterpriseStep(state: Status["state"]): string | undefined {
+  return state === "connected" ? undefined : "Run /connect and choose GitHub Enterprise."
 }
 
-function nextStep(state: Status["state"]): string {
+/** The next step for the connection, or undefined when it needs nothing. */
+function connectionStep(state: Status["state"]): string | undefined {
   switch (state) {
     case "connected":
-      return NOTHING_TO_DO
-    case "needs_auth":
+      return undefined
+    case "sign_in_required":
       return "Run /connect and choose GitHub."
-    case "pending":
+    case "connecting":
       return "GitHub is still starting. Check again in a few seconds."
     case "failed":
       return "OpenCode could not reach GitHub's MCP server. Check your network connection, then reconnect github in /mcps."
     case "disabled":
       return "Turn the github server back on in /mcps."
-    case "not_registered":
+    case "not_configured":
       return "Restart OpenCode. If GitHub is still missing, check that no other plugin removes the MCP server named github."
     case "conflict":
       return "Your OpenCode config or another plugin defines its own MCP server named github, so this plugin left it unchanged. Rename or remove that server to use this plugin's GitHub sign-in."
