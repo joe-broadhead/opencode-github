@@ -1,21 +1,21 @@
 // Packs the package, checks the file list and size, installs the tarball into a fresh project with
 // lifecycle scripts disabled (as OpenCode installs plugins), and checks that it pulls in none of the
-// packages OpenCode supplies itself. Then it loads the installed plugin in stock OpenCode 2.2.3 and
-// 2.2.4 (the plugin active, its skills read from the installed package), checks that dist/ holds
+// packages OpenCode supplies itself. Then it loads the installed plugin in each stock OpenCode release of
+// TESTED_HOSTS (the plugin active, its skills read from the installed package), checks that dist/ holds
 // exactly the two self-contained entries, and finally imports the server entry with @opencode/plugin installed beside it in
 // place of the host. Run it through `npm run test:pack`, which builds first.
 // `--tarball <file>` checks that tarball instead of packing; the release workflow uses it on the
 // tarball it publishes.
 //
-// The stock binaries come from OPENCODE_BIN_2_2_3 and OPENCODE_BIN_2_2_4. When one is unset,
-// @opencode/cli and its platform package are installed into the temp folder with scripts disabled.
-// Each host runs in its own temporary profile, with a proxy that refuses every outbound request.
+// The stock binaries come from OPENCODE_BIN_2_2_3, OPENCODE_BIN_2_2_4 and OPENCODE_BIN_2_2_5. When one is
+// unset, @opencode/cli and its platform package are installed into the temp folder with scripts disabled,
+// once per version. Each host runs in its own temporary profile under /tmp, on its own free port, with a
+// proxy that refuses every outbound request.
 import { execFileSync, spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { createServer } from "node:net"
-import { tmpdir } from "node:os"
-import { basename, join, resolve } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { loadSource } from "./source.mjs"
 
@@ -36,7 +36,8 @@ const RELATIVE_IMPORT = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\(\s*)["']\.{1,
 const HOST_PACKAGES = ["@opencode/plugin", "@opentui/core", "@opentui/solid", "solid-js"]
 // Scripts that run on install or pack. The package has none: dist/ is built before packing.
 const LIFECYCLE_SCRIPTS = ["preinstall", "install", "postinstall", "prepare", "prepack"]
-const STOCK_HOSTS = ["2.2.3", "2.2.4"]
+/** The one list of tested releases, from src/host-version.ts. */
+const { TESTED_HOSTS: STOCK_HOSTS } = await loadSource("host-version.ts")
 const HOST_TIMEOUT_MS = 180_000
 const OFFLINE = { OPENCODE_DISABLE_MODELS_FETCH: "1", OPENCODE_DISABLE_AUTOUPDATE: "1", OPENCODE_DISABLE_FREE_MODELS: "1" }
 
@@ -50,6 +51,22 @@ assert.throws(() => import.meta.resolve("${NAME}/rpc"), "the RPC contract is int
 `
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * A temp folder under the system's /tmp, never under $TMPDIR, which can sit below $HOME: OpenCode searches upward for
+ * .opencode folders and opencode.json files and would read the owner's own. One with them above it is refused.
+ */
+function scratchDir(prefix) {
+  const dir = realpathSync(mkdtempSync(join(realpathSync("/tmp"), prefix)))
+  for (let parent = dirname(dir); ; parent = dirname(parent)) {
+    const found = [".opencode", "opencode.json", "opencode.jsonc"].map((name) => join(parent, name)).find((path) => existsSync(path))
+    if (found) {
+      rmSync(dir, { recursive: true, force: true })
+      throw new Error(`${found} is above the test folder ${dir}, so OpenCode would read it. Remove it, then run the tests again.`)
+    }
+    if (dirname(parent) === parent) return dir
+  }
+}
 
 function run(command, args, cwd, env = process.env) {
   try {
@@ -95,10 +112,17 @@ function checkEntries(installed) {
   return problems
 }
 
-/** OPENCODE_BIN_<version>, or the stock binary installed from npm with scripts disabled. */
+const binaries = new Map()
+
+/** OPENCODE_BIN_<version>, or the stock binary installed from npm with scripts disabled, once per version. */
 function stockBinary(version, work) {
   const configured = process.env[`OPENCODE_BIN_${version.replaceAll(".", "_")}`]
   if (configured) return configured
+  if (!binaries.has(version)) binaries.set(version, install(version, work))
+  return binaries.get(version)
+}
+
+function install(version, work) {
   const dir = join(work, `cli-${version}`)
   mkdirSync(dir)
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "cli", private: true }))
@@ -264,7 +288,7 @@ function tarballArgument() {
 }
 
 async function main() {
-  const work = realpathSync(mkdtempSync(join(tmpdir(), "github-pack-smoke-")))
+  const work = scratchDir("github-pack-smoke-")
   try {
     const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
     const problems = checkManifest(manifest)
@@ -293,7 +317,7 @@ async function main() {
     run(process.execPath, ["--input-type=module", "-e", IMPORT_CHECK], consumer)
 
     console.log(
-      `pack-smoke: OK (${pack.files.length} files, ${pack.size} bytes packed${pack.unpackedSize ? `, ${pack.unpackedSize} bytes unpacked` : ""}; limit ${MAX_PACKED_BYTES}; loaded in stock OpenCode ${STOCK_HOSTS.join(" and ")})`,
+      `pack-smoke: OK (${pack.files.length} files, ${pack.size} bytes packed${pack.unpackedSize ? `, ${pack.unpackedSize} bytes unpacked` : ""}; limit ${MAX_PACKED_BYTES}; loaded in stock OpenCode ${STOCK_HOSTS.join(", ")})`,
     )
     return 0
   } catch (error) {

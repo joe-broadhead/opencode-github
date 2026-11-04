@@ -134,7 +134,7 @@ for (const version of STOCK_VERSIONS)
       expect(UPSTREAM_FAILURE).toContain("fake-signature-123")
     })
 
-    test("refuses api writes, downloads and GraphQL mutations before any request; a read runs github_api's own spec", async () => {
+    test("refuses api writes, downloads and GraphQL mutations before any request; a read reaches github_api's sign-in check", async () => {
       const refusals = [
         { method: "POST", path: "/repos/octo/hello/issues", body: { title: "x" } },
         { method: "GET", path: "/repos/octo/hello/zipball", download: { path: "hello.zip" } },
