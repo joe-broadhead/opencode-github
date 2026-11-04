@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- A `jelly` section in `package.json`, which [Jelly](https://heyjelly.ai) reads without loading the plugin:
+  - every known tool and `github_api`, with its permission, the effect the plugin's default rules give it and
+    whether it only reads, so that Jelly's agents, which have no base allow rule for those rules to follow, still
+    ask before a write. It includes `issue_artifact_read` (runs) and `issue_artifact_write` (asks);
+  - the skill ids, and the name Jelly shows on the plugin's card;
+  - two sign-ins, of which one connected is enough: the `github` server's, and the **GitHub Enterprise** one that
+    the `host` option uses.
+
+  [docs/jelly.md](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/jelly.md) explains each part.
+
 ## [0.0.2] - 2026-11-04
 
 ### Fixed
