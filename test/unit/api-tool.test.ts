@@ -123,6 +123,20 @@ describe("github_api", () => {
     expect(await message(api.run({ method: "POST", path: "/markdown/x", body: {} }))).toMatch(/^READ_ONLY: /)
   })
 
+  // GITHUB-R1: an upload sends a project file away, so it is a write whatever its path.
+  it("asks before any upload, also to POST /markdown, and refuses it while read-only", async () => {
+    writeFileSync(join(root, "notes.txt"), "private")
+    const upload = { method: "POST", path: "/markdown", upload: { path: "notes.txt", contentType: "text/plain" } }
+    const api = setUp()
+    await api.run(upload)
+    expect(api.asserts).toEqual([expect.objectContaining({ action: "github_api", resources: ["POST /markdown"] })])
+
+    const readOnly = setUp({ readOnly: true })
+    expect(await message(readOnly.run(upload))).toMatch(/^READ_ONLY: POST \/markdown changes GitHub, /)
+    expect(readOnly.asserts).toEqual([])
+    expect(readOnly.requests).toEqual([])
+  })
+
   it("runs reads without asking: GET, HEAD and a single GraphQL query", async () => {
     const api = setUp({ readOnly: true })
     expect((await api.run({ method: "GET", path: "/user" })).output).toMatchObject({ ok: true, status: 200, data: { ok: 1 } })

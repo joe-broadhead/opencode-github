@@ -78,7 +78,8 @@ export function describeCall(input: ApiInput, endpoints: Endpoints) {
   if (input.upload && input.body !== undefined) throw usage("upload sends the file as the body, so body must be left out.")
   if (input.paginate && input.method !== "GET") throw usage("paginate works only with GET.")
   return {
-    kind: restKind(input.method, target.path),
+    // An upload sends a project file away, so it writes whatever the path.
+    kind: input.upload ? ("write" as const) : restKind(input.method, target.path),
     resource: target.resource,
     target,
     metadata: {
