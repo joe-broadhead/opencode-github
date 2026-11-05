@@ -15,7 +15,7 @@ import { type Fetch, callGraphql, callRest, downloadTarget, restTarget } from ".
 
 export const API_ACTION = "github_api"
 
-export const API_DESCRIPTION =
+const API_DESCRIPTION =
   "Calls GitHub's REST or GraphQL API with the signed-in GitHub account. Prefer the github_ MCP tools; use this only when none does the job, " +
   "for example auto-merge, release create and release asset upload, branch protection, rulesets, Actions variables, artifact download, or any GraphQL. " +
   "REST: { method, path, query?, body? } where path is relative, such as /repos/OWNER/REPO/releases; add paginate for lists, " +

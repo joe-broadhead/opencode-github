@@ -49,7 +49,7 @@ export const matches = (pattern: string, value: string) =>
   new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`).test(value)
 
 /** The effect of `rules` for an MCP tool call (resource `*`): the last matching rule wins, and no match asks. */
-export function evaluate(rules: readonly Rule[], action: string): Rule["effect"] {
+function evaluate(rules: readonly Rule[], action: string): Rule["effect"] {
   return rules.findLast((rule) => matches(rule.action, action) && matches(rule.resource, "*"))?.effect ?? "ask"
 }
 

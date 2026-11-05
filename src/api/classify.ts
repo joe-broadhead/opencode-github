@@ -7,7 +7,7 @@
 export type Kind = "read" | "write"
 
 /** POST endpoints that change nothing: GitHub renders the Markdown it is sent. Exact paths only. */
-export const POST_READS: readonly string[] = ["/markdown", "/markdown/raw"]
+const POST_READS: readonly string[] = ["/markdown", "/markdown/raw"]
 
 /** `path` is the canonical path restTarget sends, without the query. */
 export function restKind(method: string, path: string): Kind {

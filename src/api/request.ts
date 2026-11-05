@@ -15,7 +15,7 @@ import { ACCEPT, type ApiOutput, type GraphqlInput, type RestInput } from "./con
 
 export type Fetch = (url: string, init: RequestInit) => Promise<Response>
 
-export const API_VERSION = "2022-11-28"
+const API_VERSION = "2022-11-28"
 /** Inline result cap, in bytes of JSON. */
 export const MAX_INLINE_BYTES = 100_000
 /** Most bytes read from one response into memory; larger responses need download. */
@@ -23,7 +23,7 @@ const MAX_READ_BYTES = 10 * 1024 * 1024
 /** Largest file upload accepts. */
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 /** Largest file download saves; a bigger response is stopped and its partial file removed. */
-export const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024
+const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024
 const MAX_REDIRECTS = 5
 const DEFAULT_MAX_PAGES = 10
 const DEFAULT_MAX_ITEMS = 1000
