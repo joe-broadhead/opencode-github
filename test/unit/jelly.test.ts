@@ -54,9 +54,9 @@ describe("the jelly declaration", () => {
     for (const [permission, readOnly] of known) expect(declared.get(permission), permission).toBe(readOnly)
   })
 
-  it("declares the github server's sign-in and, as its alternative, the GitHub Enterprise one", () => {
+  it("declares the github server's sign-in, which takes a Jelly host's OAuth App as clientId, and, as its alternative, the GitHub Enterprise one", () => {
     expect(jelly.signIns).toEqual([
-      { id: "github", label: "GitHub", server: SERVER_NAME, group: "github" },
+      { id: "github", label: "GitHub", server: SERVER_NAME, group: "github", hostClient: { id: "github", option: "clientId" } },
       { id: "github-enterprise", label: ENTERPRISE_NAME, integration: ENTERPRISE_INTEGRATION_ID, group: "github" },
     ])
   })
