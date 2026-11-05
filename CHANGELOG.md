@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The `/connect` "needs a new sign-in" mark on the GitHub account now clears. The plugin read the mark back from
+  `integration.connection.active`, which returns the credential without its status, so it never saw its own report: after
+  a rejected token the account kept asking for a sign-in, and a `github_api` call that worked never cleared it. Both now
+  read the status from `integration.get`, which projects it.
+
 ## [0.0.6] - 2026-11-05
 
 ### Changed

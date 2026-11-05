@@ -56,7 +56,7 @@ export function namespaceDescription(input: { readonly enterprise: boolean; read
 type ApiContext = {
   readonly tool: Pick<Plugin.Context["tool"], "transform">
   readonly permission: Pick<Plugin.Context["permission"], "assert">
-  readonly integration: { readonly connection: Pick<Plugin.Context["integration"]["connection"], "active" | "resolve" | "status"> }
+  readonly integration: Pick<Plugin.Context["integration"], "get" | "connection">
 }
 
 export type ApiDeps = {
@@ -132,6 +132,20 @@ function bodySummary(body: unknown): { keys?: string[]; bytes: number } {
 }
 
 /**
+ * Whether /connect shows a status on this account. `connection.active` returns the credential alone, so the status the
+ * plugin set is read from the connection `integration.get` projects.
+ */
+async function statusShown(ctx: ApiContext, integrationID: string, connectionID: string | undefined): Promise<boolean> {
+  if (connectionID === undefined) return false
+  try {
+    const { data } = await ctx.integration.get({ integrationID })
+    return data.connections?.some((item) => item.type === "credential" && item.id === connectionID && item.status !== undefined) === true
+  } catch {
+    return false
+  }
+}
+
+/**
  * Registers github_api. `run` is its spec, for the tools RPC's api method: a checked input, and the call's context.
  */
 export async function registerApiTool(
@@ -200,7 +214,7 @@ export async function registerApiTool(
       await ctx.integration.connection
         .status({ integrationID, connection, status: { status: "needs_auth", message: "GitHub rejected the saved sign-in. Sign in again." } })
         .catch(() => undefined)
-    } else if (output.status < 400 && connection.status) {
+    } else if (output.status < 400 && (await statusShown(ctx, integrationID, "id" in connection ? connection.id : undefined))) {
       await ctx.integration.connection.status({ integrationID, connection, status: undefined }).catch(() => undefined)
     }
     return output

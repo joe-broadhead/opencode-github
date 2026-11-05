@@ -17,10 +17,18 @@ function fakeHost(input: { server: ServerStatus; credential?: boolean }) {
   const ctx = {
     mcp: { list: async () => ({ location: LOCATION, data: [{ name: "github", status: { status: server }, integrationID: ID }] }) },
     integration: {
+      // `active` returns the credential alone; the status the plugin sets is projected by `get`, as on the host.
+      get: async () => ({
+        data: {
+          id: ID,
+          name: "GitHub",
+          connections: [{ type: "credential" as const, id: "cred_1", label: "octocat", method: "oauth" as const, ...(reported ? { status: reported } : {}) }],
+        },
+      }),
       connection: {
         active: async (integrationID: string) =>
           integrationID === ID && input.credential !== false
-            ? { type: "credential" as const, id: "cred_1", label: "octocat", method: "oauth" as const, ...(reported ? { status: reported } : {}) }
+            ? { type: "credential" as const, id: "cred_1", label: "octocat", method: "oauth" as const }
             : undefined,
         status: async (report: Report) => {
           reports.push(report)

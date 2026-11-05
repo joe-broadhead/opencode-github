@@ -345,18 +345,28 @@ describe(`a revoked sign-in on OpenCode ${SDK_VERSION}`, () => {
   })
   afterAll(() => host?.close())
 
-  test("GitHub rejecting the token marks the account in /connect as needing sign-in", async () => {
+  test("GitHub rejecting the token marks the account in /connect as needing sign-in, and accepting it again clears the mark", async () => {
     const id = await integrationID(host)
+    const account = async () => {
+      const { data } = await host.client.integration.get({ integrationID: id, location: host.location })
+      return data.connections.find((connection) => connection.type === "credential")
+    }
     host.fake.revoke()
     await host.client.experimental.mcp.disconnect({ server: "github", location: host.location })
     await host.client.experimental.mcp.connect({ server: "github", location: host.location })
     await until("github needs sign-in", async () => (await githubServer(host))?.status.status === "needs_auth")
-    const account = await until("the account is marked", async () => {
-      const { data } = await host.client.integration.get({ integrationID: id, location: host.location })
-      const found = data.connections.find((connection) => connection.type === "credential")
+    const marked = await until("the account is marked", async () => {
+      const found = await account()
       return found?.status && found
     })
-    expect(account).toMatchObject({ label: PAT_LOGIN, status: { status: "needs_auth", message: "GitHub rejected the saved sign-in. Sign in again." } })
+    expect(marked).toMatchObject({ label: PAT_LOGIN, status: { status: "needs_auth", message: "GitHub rejected the saved sign-in. Sign in again." } })
+    // GitHub accepts the stored token again: the server connects and the plugin clears its own mark, so /connect stops
+    // asking for a sign-in the person has already given.
+    host.fake.restore()
+    await host.client.experimental.mcp.disconnect({ server: "github", location: host.location })
+    await host.client.experimental.mcp.connect({ server: "github", location: host.location })
+    await connected(host)
+    expect(await until("the account's mark clears", async () => (await account())?.status === undefined)).toBe(true)
   })
 })
 
