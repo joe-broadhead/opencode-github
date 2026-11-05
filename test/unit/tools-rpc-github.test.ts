@@ -88,7 +88,7 @@ async function setUp(
       return input.answers?.[url]?.() ?? Response.json({ full_name: "octo/repo" })
     },
   })
-  const spy = { ...api, run: (value: Parameters<typeof api.run>[0], call: Parameters<typeof api.run>[1]) => (runs.push(call as ToolCall), api.run(value, call)) }
+  const spy = { ...api, run: (...[value, call, caller]: Parameters<typeof api.run>) => (runs.push(call as ToolCall), api.run(value, call, caller)) }
   await registerToolsRpc(ctx as never, { mcp: { server: "github", managed: () => input.managed ?? true }, owned: [scriptApi(spy, GITHUB_COM)] })
   const call = (method: string, value: unknown, agent = "build") =>
     handlers[method]!({ sessionID: `ses_${agent}`, input: value }, { signal: new AbortController().signal, error: (type, message, data) => ({ type, message, data }) })
@@ -118,9 +118,9 @@ describe("GitHub's tools RPC", () => {
     expect(NEXT_STEPS.AUTH_REQUIRED).toBe("Run /connect and choose GitHub.")
     expect(NEXT_STEPS.NOT_REGISTERED).toContain("call the api method")
     expect(NEXT_STEPS.TOOL_UNAVAILABLE).toContain("toolsets option")
-    // QA LIVE-9: it names the toolsets that are off by default, so a script knows what to turn on.
+    // QA LIVE-9: it names the toolsets that are off by default; GITHUB-R18: and where to read what else hides a method.
     expect(NEXT_STEPS.TOOL_UNAVAILABLE).toBe(
-      "Add the method's toolset to the plugin's toolsets option and run opencode reload (off by default: copilot_spaces, gists, github_support_docs_search, governance, notifications, projects, stargazers); describe shows which methods run now.",
+      "Add the method's toolset to the plugin's toolsets option and run opencode reload (off by default: copilot_spaces, gists, github_support_docs_search, governance, notifications, projects, stargazers); describe's detail names the method's toolset, or the feature flag that hides it.",
     )
   })
 
@@ -184,22 +184,20 @@ describe("the api method", () => {
     expect(h.asserts).toEqual([])
   })
 
-  // QA GITHUB-1 follow-up: a script's read follows a redirect only through the same check, which no one can approve.
-  it("checks a script's redirect within the API, and refuses it when the rules ask; never follows one off the API", async () => {
+  // GITHUB-R2: a script's read follows a redirect within the API with no assert, as the model's does; never one off the API.
+  it("follows a script's redirect within the API without an assert, and never one off the API", async () => {
     const answers = {
       "https://api.github.com/repos/Old/Name": () => new Response(null, { status: 301, headers: { location: "/repositories/10" } }),
       "https://api.github.com/repos/o/r/actions/jobs/1/logs": () => new Response(null, { status: 302, headers: { location: "https://blob.example.net/l?sig=x" } }),
     }
-    const refused = await setUp({ answers, refuse: true })
-    const result = await refused.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/Old/Name" })
-    expect(result).toMatchObject({ type: "failed", data: { code: "PERMISSION_DENIED" } })
-    expect(refused.asserts).toEqual([expect.objectContaining({ action: "github_api", resources: ["GET /repositories/10"] })])
-    expect(refused.requests.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name"])
-
-    const allowed = await setUp({ answers })
-    expect(await allowed.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/Old/Name" })).toMatchObject({ ok: true })
-    expect(allowed.requests.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name", "https://api.github.com/repositories/10"])
-    expect(await allowed.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/o/r/actions/jobs/1/logs" })).toMatchObject({ type: "failed", data: { code: "API_REDIRECT_OFF_HOST" } })
+    const h = await setUp({ answers, refuse: true })
+    expect(await h.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/Old/Name" })).toMatchObject({ ok: true })
+    expect(h.asserts).toEqual([])
+    expect(h.requests.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name", "https://api.github.com/repositories/10"])
+    expect(await h.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/o/r/actions/jobs/1/logs" })).toMatchObject({
+      type: "failed",
+      data: { code: "API_REDIRECT_OFF_HOST", next: "For job logs, call the get_job_logs method; other files need github_api's download in an OpenCode session." },
+    })
   })
 
   it("refuses a read with a body, and an input github_api would not take, as API_INPUT_INVALID", async () => {

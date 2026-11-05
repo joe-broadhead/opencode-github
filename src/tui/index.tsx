@@ -5,7 +5,7 @@
 import type { Plugin } from "@opencode/plugin/tui"
 import { type RGBA, TextAttributes } from "@opentui/core"
 import { For, Show, createSignal } from "solid-js"
-import { AGENT_FIX, GithubRpc, SERVER_NAME, type Status, type StatusRow, isStatus, formatRules, statusRows } from "../rpc.js"
+import { GithubRpc, SERVER_NAME, type Status, type StatusRow, isStatus, formatRules, statusRows } from "../rpc.js"
 
 type View = { readonly state: "loading" } | { readonly state: "ready"; readonly status: Status } | { readonly state: "unavailable" }
 
@@ -71,7 +71,7 @@ function StatusDialog(props: {
   const ready = () => (props.view.state === "ready" ? props.view.status : undefined)
   const rowColor = (row: StatusRow, status: Status) => {
     if (row.label === "Connection") return tone(TONES[status.state])
-    if (row.label === "Rules that never match" || (row.label === "Agents without default rules" && status.unguardedAgents.length > 0) || (row.label === "OpenCode" && !status.host.tested)) return tone("warning")
+    if (row.label === "Rules that never match" || row.label === "Skills" || (row.label === "Agents without default rules" && status.unguardedAgents.length > 0) || (row.label === "OpenCode" && !status.host.tested)) return tone("warning")
     return colors().text.base
   }
   return (
@@ -100,7 +100,6 @@ function StatusDialog(props: {
                 <>
                   <Row label={row.label} value={row.value} fg={rowColor(row, status())} muted={colors().text.muted} />
                   <Show when={row.label === "Agents without default rules" && status().unguardedAgents.length > 0}>
-                    <Row label="" value={AGENT_FIX} fg={colors().text.base} muted={colors().text.muted} />
                     <box flexDirection="row" gap={1}>
                       <box width={LABEL_WIDTH} flexShrink={0} />
                       <scrollbox height={RULES_HEIGHT} flexGrow={1} scrollY>

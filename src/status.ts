@@ -7,16 +7,17 @@ import { HOST_RANGE, TESTED_HOSTS, isTestedHost } from "./host-version.js"
 import { lowerResource, neverMatches } from "./api/names.js"
 import { API_ACTION } from "./api/tool.js"
 import { type Rule, defaultRules, matches, unguardedAgents } from "./permissions.js"
-import { GithubRpc, NOTHING_TO_DO, SERVER_NAME, type Status, formatStatus } from "./rpc.js"
+import { AGENT_STEP, GithubRpc, NOTHING_TO_DO, SERVER_NAME, type SkillPath, type Status, formatStatus } from "./rpc.js"
 import { PLUGIN_VERSION } from "./version.js"
 
 export const STATUS_COMMAND = "github-status"
-const UNAVAILABLE = new GitHubPluginError("STATUS_UNAVAILABLE", "GitHub status is unavailable right now.", "Run /github-status again.").message
+const UNAVAILABLE = new GitHubPluginError("STATUS_UNAVAILABLE", "GitHub status is unavailable right now.", "Try again in a few seconds; if it persists, restart OpenCode.").message
 
 type StatusContext = {
   readonly mcp: Pick<Plugin.Context["mcp"], "list">
   readonly integration: { readonly connection: Pick<Plugin.Context["integration"]["connection"], "active"> }
   readonly agent: Pick<Plugin.Context["agent"], "list">
+  readonly skill: Pick<Plugin.Context["skill"], "list">
 }
 
 export type StatusDeps = {
@@ -31,10 +32,20 @@ export type StatusDeps = {
   readonly tools: () => { readonly visible: number; readonly unknown: readonly string[] }
   /** The GitHub Enterprise Server host, where no MCP server is registered. */
   readonly enterprise?: string
+  /** The skills the plugin registers, with their paths. */
+  readonly skills: readonly SkillPath[]
 }
 
 export async function computeStatus(ctx: StatusContext, deps: StatusDeps): Promise<Status> {
-  const [servers, agents] = await Promise.all([ctx.mcp.list(), ctx.agent.list()])
+  const [servers, agents, listed] = await Promise.all([
+    ctx.mcp.list(),
+    ctx.agent.list(),
+    // The skill check is advice: a failed list must not hide the rest of the status.
+    ctx.skill.list().then(
+      (result) => result.data,
+      () => undefined,
+    ),
+  ])
   let state: Status["state"]
   let account: string | undefined
   if (deps.enterprise) {
@@ -49,6 +60,7 @@ export async function computeStatus(ctx: StatusContext, deps: StatusDeps): Promi
   }
   const unguarded = unguardedAgents(agents.data)
   const unmatched = unmatchedRules(agents.data)
+  const shadowed = shadowedSkills(deps.skills, listed ?? [])
   const tools = deps.tools()
   const tested = isTestedHost(deps.hostVersion)
   return {
@@ -60,11 +72,18 @@ export async function computeStatus(ctx: StatusContext, deps: StatusDeps): Promi
     tools: { visible: tools.visible, unknown: [...tools.unknown], mode: deps.options.unknownTools },
     unguardedAgents: unguarded,
     ...(unmatched.length > 0 ? { unmatchedRules: unmatched } : {}),
+    ...(shadowed.length > 0 ? { shadowedSkills: shadowed } : {}),
     ...(unguarded.length > 0 ? { permissionsBlock: defaultRules() } : {}),
     host: { version: deps.hostVersion, range: HOST_RANGE, tested },
     ...(deps.hostWarning ? { hostWarning: deps.hostWarning } : {}),
     ...(deps.enterprise ? { enterprise: deps.enterprise } : {}),
-    nextStep: (deps.enterprise ? enterpriseStep(state) : connectionStep(state)) ?? ruleStep(unmatched) ?? agentStep(unguarded) ?? hostStep(tested) ?? NOTHING_TO_DO,
+    nextStep:
+      (deps.enterprise ? enterpriseStep(state) : connectionStep(state)) ??
+      ruleStep(unmatched) ??
+      (unguarded.length > 0 ? AGENT_STEP : undefined) ??
+      skillStep(shadowed) ??
+      hostStep(deps.hostWarning !== undefined) ??
+      NOTHING_TO_DO,
   }
 }
 
@@ -84,21 +103,22 @@ function ruleStep(unmatched: readonly string[]): string | undefined {
   return `Write the github_api rule "${first}"${more} with lower-case owner and repo names, as "${lowerResource(first)}": as written it never matches.`
 }
 
-/** Agent names in a next step: at most this many, then a count. */
-const NAMED_AGENTS = 5
-
-/** The fix for agents without the default rules, naming them (QA LIVE-2). */
-function agentStep(unguarded: readonly string[]): string | undefined {
-  if (unguarded.length === 0) return undefined
-  const shown = unguarded.slice(0, NAMED_AGENTS)
-  const rest = unguarded.length - shown.length
-  const names = rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.length > 1 ? `${shown.slice(0, -1).join(", ")} and ${shown.at(-1)}` : shown[0]
-  const where = unguarded.length === 1 ? "the agent's" : "each agent's"
-  return `Add the default rules to ${names}: first in ${where} own permissions, followed by your top-level rules for github_ tools.`
+/** The plugin's skills that OpenCode lists from another file: a skill with the same id, such as a user's, replaced it. */
+function shadowedSkills(own: readonly SkillPath[], listed: readonly SkillPath[]): SkillPath[] {
+  return own.flatMap((skill) => {
+    const found = listed.find((item) => item.id === skill.id)
+    return found && found.path !== skill.path ? [{ id: skill.id, path: found.path }] : []
+  })
 }
 
-function hostStep(tested: boolean): string | undefined {
-  return tested ? undefined : `If GitHub misbehaves, use OpenCode ${TESTED_HOSTS.slice(0, -1).join(", ")} or ${TESTED_HOSTS.at(-1)}, where it is tested.`
+function skillStep(shadowed: readonly SkillPath[]): string | undefined {
+  if (shadowed.length === 0) return undefined
+  return `Rename or move ${shadowed.map((skill) => `the "${skill.id}" skill at ${skill.path}`).join(" and ")}, which OpenCode loads instead of the plugin's skill of the same name.`
+}
+
+/** Only outside the supported range (allowUntestedHost); an untested release inside it leaves the next step alone (S13). */
+function hostStep(outsideRange: boolean): string | undefined {
+  return outsideRange ? `If GitHub misbehaves, use OpenCode ${TESTED_HOSTS.slice(0, -1).join(", ")} or ${TESTED_HOSTS.at(-1)}, where it is tested.` : undefined
 }
 
 type ServerState = "connected" | "pending" | "disabled" | "failed" | "needs_auth"

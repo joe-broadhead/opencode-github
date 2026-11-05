@@ -8,7 +8,7 @@ import * as z from "zod"
 import type { Endpoints } from "../config.js"
 import { GitHubPluginError } from "../errors.js"
 import type { JsonSchema, OwnedMethod } from "../host/tools-rpc.js"
-import { API_ACTION, type Call, describeCall, parseInput } from "./tool.js"
+import { API_ACTION, type Call, type Caller, describeCall, parseInput } from "./tool.js"
 import { type ApiInput, ApiOutput, ScriptApiInput } from "./contract.js"
 
 export const SCRIPT_API_METHOD = "api"
@@ -34,7 +34,7 @@ function change(input: ApiInput, endpoints: Endpoints): string | undefined {
 }
 
 export function scriptApi(
-  api: { run(input: ApiInput, call: Call): Promise<ApiOutput>; signedIn(): Promise<boolean> },
+  api: { run(input: ApiInput, call: Call, caller?: Caller): Promise<ApiOutput>; signedIn(): Promise<boolean> },
   endpoints: Endpoints,
 ): OwnedMethod {
   return {
@@ -52,7 +52,7 @@ export function scriptApi(
       // A read with a body: github_api would send it; a script's read has none.
       const read = ScriptApiInput.safeParse(raw)
       if (!read.success) throw new GitHubPluginError("API_INPUT_INVALID", `${read.error.issues.map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`).join("; ")}.`, "Fix the api input and call it again.")
-      return api.run(input, call)
+      return api.run(input, call, { script: true })
     },
   }
 }

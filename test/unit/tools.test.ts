@@ -82,8 +82,21 @@ describe("the catalog", () => {
     expect(reads).not.toContain("create_issue")
   })
 
-  it("pins only catalogued reads", () => {
-    expect(PINNED).toEqual(["get_me", "issue_read", "pull_request_read"])
+  // Baseline evals: with only api's signature shown, agents used github_api in 10 of 11 runs. The core reads are shown instead.
+  it("pins the core catalogued reads, in toolsets that are on by default", () => {
+    expect(PINNED).toEqual([
+      "get_file_contents",
+      "search_code",
+      "list_commits",
+      "get_commit",
+      "list_issues",
+      "search_issues",
+      "list_label",
+      "issue_read",
+      "pull_request_read",
+      "get_job_logs",
+    ])
+    for (const name of PINNED) expect(toolsetsOf(name).some((toolset) => (DEFAULT_TOOLSETS as readonly string[]).includes(toolset))).toBe(true)
     for (const name of PINNED) expect(toolKind(name)).toBe("read")
     expect(TOOL_PREFIX).toBe("github_")
   })
@@ -165,7 +178,7 @@ describe("registerToolFilter", () => {
     const host = fakeTools(TOOLS)
     await registerToolFilter(host.ctx, { unknownTools: "ask", owned: () => true })
     const pinned = host.build().filter((tool) => tool.options?.pinned === true)
-    expect(ids(pinned)).toEqual(["github_get_me", "github_issue_read", "github_pull_request_read"])
+    expect(ids(pinned)).toEqual(["github_issue_read", "github_pull_request_read", "github_search_code"])
     expect(pinned[0]?.options).toEqual({ namespace: "github", codemode: true, pinned: true })
   })
 

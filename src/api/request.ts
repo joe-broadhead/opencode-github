@@ -1,9 +1,9 @@
 // Sends one github_api call. Requests go only to the configured API base (uploads to the
 // uploads base); the token goes only to those origins. Redirects are handled by hand: a change
-// (any method but GET and HEAD) never follows one; a read follows one on the API host only after
-// github_api's permission check passes for the new path, and refuses one to another host; a
-// download also follows GitHub's redirects to its storage hosts (logs, artifacts and release
-// assets), without the Authorization header. Results are capped for inline display.
+// (any method but GET and HEAD) never follows one; a read follows one within the API base (reads
+// never ask, so neither does their redirect), and refuses one to another host; a download also
+// follows GitHub's redirects to its storage hosts (logs, artifacts and release assets), without
+// the Authorization header. Results are capped for inline display.
 import { createHash } from "node:crypto"
 import { link, mkdir, open, readFile, realpath, rename, rm, stat } from "node:fs/promises"
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
@@ -15,7 +15,7 @@ import { ACCEPT, type ApiOutput, type GraphqlInput, type RestInput } from "./con
 
 export type Fetch = (url: string, init: RequestInit) => Promise<Response>
 
-export const API_VERSION = "2022-11-28"
+const API_VERSION = "2022-11-28"
 /** Inline result cap, in bytes of JSON. */
 export const MAX_INLINE_BYTES = 100_000
 /** Most bytes read from one response into memory; larger responses need download. */
@@ -23,7 +23,7 @@ const MAX_READ_BYTES = 10 * 1024 * 1024
 /** Largest file upload accepts. */
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 /** Largest file download saves; a bigger response is stopped and its partial file removed. */
-export const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024
+const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024
 const MAX_REDIRECTS = 5
 const DEFAULT_MAX_PAGES = 10
 const DEFAULT_MAX_ITEMS = 1000
@@ -43,14 +43,13 @@ export type CallDeps = {
   readonly root: string
   /** The download cap; MAX_DOWNLOAD_BYTES unless a test sets a smaller one. */
   readonly maxDownloadBytes?: number
-  /**
-   * github_api's permission check for a read's redirect on the API host, on its new `METHOD /path` resource. It
-   * throws when the rules refuse, and then the redirect is not followed.
-   */
-  readonly checkRedirect: (resource: string) => Promise<void>
+  /** A script's call through the tools RPC, which cannot download: next steps name what it can do. */
+  readonly script?: boolean
+  /** GitHub Enterprise Server: no MCP tools, so next steps never name one. */
+  readonly enterprise?: boolean
 }
 
-/** How a request may follow redirects: never for a change; for a read, on the API host after a check; a download also to storage hosts. */
+/** How a request may follow redirects: never for a change; for a read, within the API base; a download also to storage hosts. */
 type Follow = "never" | "api" | "storage"
 
 /**
@@ -120,11 +119,17 @@ export function restTarget(input: Pick<RestInput, "method" | "path" | "query" | 
   return { url, path, resource: `${input.method} ${permissionPath(path)}` }
 }
 
-/** A redirect's target as a REST target on the API base, or undefined when it leaves the API host or base path. */
-function apiTarget(next: URL, method: RestInput["method"], endpoints: Endpoints): RestTarget | undefined {
+/** Whether a URL is on the API origin and under its base path (on GitHub Enterprise Server the web shares the origin). */
+function onApiBase(url: URL, endpoints: Endpoints): boolean {
   const base = new URL(endpoints.api)
   const basePath = base.pathname.replace(/\/$/, "")
-  if (next.origin !== base.origin || !(next.pathname === basePath || next.pathname.startsWith(`${basePath}/`))) return undefined
+  return url.origin === base.origin && (url.pathname === basePath || url.pathname.startsWith(`${basePath}/`))
+}
+
+/** A redirect's target as a REST target on the API base, or undefined when it leaves the API host or base path. */
+function apiTarget(next: URL, method: RestInput["method"], endpoints: Endpoints): RestTarget | undefined {
+  if (!onApiBase(next, endpoints)) return undefined
+  const basePath = new URL(endpoints.api).pathname.replace(/\/$/, "")
   return restTarget({ method, path: `${next.pathname.slice(basePath.length) || "/"}${next.search}` }, endpoints)
 }
 
@@ -246,19 +251,28 @@ async function send(
     const onApi = next.protocol === "https:" ? apiTarget(next, method as RestInput["method"], deps.endpoints) : undefined
     if (hop >= MAX_REDIRECTS) throw new GitHubPluginError("API_REDIRECT_LOOP", `GitHub redirected more than ${MAX_REDIRECTS} times.`, "Try again later.")
     if (next.protocol !== "https:") throw new GitHubPluginError("API_REDIRECT_INSECURE", "GitHub redirected to a non-HTTPS address.", "Try again later.")
-    if (onApi) {
-      // The same check the request would get for the new path, before anything is sent there.
-      await deps.checkRedirect(onApi.resource)
-      current = onApi.url
-    } else if (policy.follow === "storage") current = next
+    if (onApi) current = onApi.url
+    else if (policy.follow === "storage") current = next
     else {
       throw new GitHubPluginError(
         "API_REDIRECT_OFF_HOST",
         `GitHub redirected ${policy.what} outside its API, to ${next.host}, and a read follows redirects only within the API.`,
-        "Pass download: { path } to save the response; a download follows GitHub's storage redirects, without the token.",
+        offHostStep(deps),
       )
     }
   }
+}
+
+/** Job logs have GitHub's get_job_logs; other files need a download, which only the model can make. */
+function offHostStep(deps: Pick<CallDeps, "script" | "enterprise">): string {
+  if (deps.script) {
+    return deps.enterprise
+      ? "Save the file with github_api's download in an OpenCode session; scripts never write files."
+      : "For job logs, call the get_job_logs method; other files need github_api's download in an OpenCode session."
+  }
+  return deps.enterprise
+    ? "Pass download: { path } to save the response; a download follows GitHub's storage redirects, without the token."
+    : "For job logs, call get_job_logs with return_content: true; for other files, pass download: { path }, which follows GitHub's storage redirects without the token."
 }
 
 const quietly = <T>(make: () => T): T | undefined => {
@@ -407,7 +421,8 @@ function finish(response: Response, body: Body, deps: CallDeps): ApiOutput {
   const output: ApiOutput = { ...base(response), ...(body.contentType ? { contentType: body.contentType } : {}), truncated: body.truncated }
   const nextStep = failureStep(response, deps, body.data)
   if (body.binary !== undefined) {
-    return { ...output, truncated: false, nextStep: nextStep ?? `The response is ${body.binary} bytes of ${body.contentType}; pass download: { path } to save it.` }
+    const save = deps.script ? "save it with github_api's download in an OpenCode session, as scripts never write files" : "pass download: { path } to save it"
+    return { ...output, truncated: false, nextStep: nextStep ?? `The response is ${body.binary} bytes of ${body.contentType}; ${save}.` }
   }
   if (body.data === undefined) return { ...output, ...(nextStep ? { nextStep } : {}) }
   const capped = capInline(body.data)
@@ -419,7 +434,7 @@ function finish(response: Response, body: Body, deps: CallDeps): ApiOutput {
     ...(nextStep
       ? { nextStep }
       : truncated
-        ? { nextStep: "The result was cut. Narrow it with query parameters such as per_page or filters, or save it with download." }
+        ? { nextStep: `The result was cut at 100,000 bytes. Narrow it with query parameters such as per_page${deps.enterprise ? "" : ", or read one file with get_file_contents"}.` }
         : {}),
   }
 }
@@ -434,7 +449,11 @@ function failureStep(response: Response, deps: CallDeps, data: unknown): string 
   const accepted = scopes(response.headers.get("x-accepted-oauth-scopes"))
   const granted = scopes(response.headers.get("x-oauth-scopes"))
   if (response.status === 403 && accepted.length > 0 && !accepted.some((scope) => granted.includes(scope))) {
-    return `The sign-in lacks the scope ${accepted.join(" or ")}. Add it to the plugin option scopes, then run /connect and choose ${deps.service} to sign in again.`
+    const scope = accepted.join(" or ")
+    // The scopes option only shapes device sign-in; a pasted token carries the scopes it was created with.
+    return deps.deviceSignIn
+      ? `The sign-in lacks the scope ${scope}. Add it to the plugin option scopes, then run /connect and choose ${deps.service} to sign in again.`
+      : `The token lacks the scope ${scope}. Create a token with it on GitHub (Settings, Developer settings, Personal access tokens), then run /connect and choose ${deps.service} to replace it.`
   }
   // A fine-grained token without the permission an endpoint needs. GitHub names it in X-Accepted-GitHub-Permissions.
   const message = (data as { message?: unknown } | undefined)?.message
@@ -471,9 +490,9 @@ function nextLink(response: Response, endpoints: Endpoints): URL | undefined {
   const link = response.headers.get("link")
   const match = link && /<([^>]+)>\s*;\s*rel="next"/.exec(link)
   if (!match) return undefined
-  const url = new URL(match[1]!)
-  // Only pages on the API host; anything else ends the pagination.
-  return url.origin === new URL(endpoints.api).origin ? url : undefined
+  const url = URL.parse(match[1]!)
+  // Only pages under the API base; anything else ends the pagination.
+  return url && onApiBase(url, endpoints) ? url : undefined
 }
 
 /** The list inside a page: the page itself, or the only array field of a list object. */

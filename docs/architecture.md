@@ -69,8 +69,9 @@ clears the report once the server connects again.
 `KNOWN_TOOLS` in `src/tools.ts` lists the known tools of each toolset, marked read or write, from
 github-mcp-server v2.1.0 and each tool's `readOnlyHint`; tools that only GitHub's hosted server has are classified by
 what they do. `ctx.tool.transform` records the `github` server's tools that are not in the catalog, removes them when
-`unknownTools` is `"hide"`, and pins `get_me`, `issue_read` and `pull_request_read` in the direct tool list. GitHub's
-tools otherwise stay in Code Mode, the host default.
+`unknownTools` is `"hide"`, and pins the core reads (`PINNED`): `get_file_contents`, `search_code`, `list_commits`, `get_commit`, `list_issues`, `search_issues`, `list_label`, `issue_read`, `pull_request_read` and `get_job_logs`. In Code Mode,
+`pinned` only puts a tool's signature in the `github` catalog's shown listings; it never makes a direct tool. Without
+the pins the catalog showed only `github_api`'s signature, and agents used it where a GitHub tool does the job.
 
 There are no wrapper tools. GitHub's own tools already have maintained schemas and descriptions, and they cover the
 workflows. A wrapper would add a second schema to keep in step with GitHub and would hide new upstream tools.
@@ -85,14 +86,16 @@ from `src/sign-in.ts`. The status reads the sign-in from that integration and na
 ## `github_api`
 
 `registerApiTool` (`src/api/tool.ts`) adds `github_api` (namespace `github`, name `api`, permission action
-`github_api`, pinned in Code Mode). `src/api/classify.ts` decides read or write: REST by method, GraphQL by scanning
+`github_api`, pinned in Code Mode). It also describes the `github` namespace: the core reads are shown and `search`
+finds the rest, the three skills, whether the plugin is read-only now, and the tools RPC for scripts.
+`src/api/classify.ts` decides read or write: REST by method, GraphQL by scanning
 the document's operations with a small tokenizer that skips strings, block strings and comments. Reads run; writes
 call `ctx.permission.assert` with `METHOD /path` as the resource and save pattern, and are refused while read-only.
 The resource writes the names GitHub reads without regard to case in lower case (`src/api/names.ts`).
 `src/api/request.ts` builds the URL on the configured API base (uploads on the uploads base), refuses anything that
 could leave it, sends the integration's active token, and handles redirects by hand with `redirect: "manual"`: never
-for a change, within the API for a read only after the same assert on the new path, and to storage hosts only for a
-download, without `Authorization`. It joins `Link` pages, caps the inline result, and streams downloads into the
+for a change, within the API base for a read (reads never assert, so neither do their redirects), and to storage
+hosts only for a download, without `Authorization`. It joins `Link` pages under the API base path, caps the inline result, and streams downloads into the
 project with a SHA-256. The tool filter leaves `github_api` alone even though it shares the `github_` prefix.
 
 ## Permission defaults
@@ -109,6 +112,9 @@ No permission hook decides the defaults. A hook would decide outside OpenCode's 
 approvals could not override it, and the same call could be judged differently by the plugin and the host. Plain
 rules keep one source of truth that the user can read and change. The plugin's one hook belongs to the tools RPC: it
 only turns an ask on one of the RPC's own script calls into a deny (see [Tools RPC](#tools-rpc)).
+
+`computeStatus` also compares the plugin's skills with `ctx.skill.list()`: a listed skill with the same id at another
+path, such as a user's, is the one OpenCode loads, so the status names it in `shadowedSkills` and a Skills row.
 
 Agents defined only in the user's config are created after plugins run and get no rules. `unguardedAgents` in
 `src/permissions.ts` finds agents without the default block whose own rules would let an unknown `github_` tool run

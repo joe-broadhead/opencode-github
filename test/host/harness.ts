@@ -13,7 +13,7 @@ import { join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import type { OpenCodeClient } from "@opencode/client"
 import { Plugin } from "@opencode/plugin"
-import { type FakeGitHub, FIXTURE_PAT, startFakeGitHub } from "./fake-github.js"
+import { FIXTURE_PAT, startFakeGitHub } from "./fake-github.js"
 import { routeFetch } from "./route-fetch.js"
 
 const PLUGIN_ID = "github.platform"
