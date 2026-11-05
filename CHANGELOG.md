@@ -12,6 +12,10 @@ All notable changes to this project are documented here. The format follows [Kee
   A script's `api` method names the tools RPC method instead. There is no hint with `host`, or when the tool's toolset
   is off.
 - Code Mode's `github` catalog also shows `list_pull_requests`' signature, beside the other core reads.
+- The `github` namespace description and the scripting guide say that a script, or a test of one, uses a session
+  created for it (`opencode api post /api/session` with an agent; keep `data.id`), never one found through history or a
+  session list, which would run as that session's agent. The namespace links the plain guide on
+  `raw.githubusercontent.com`, which an agent can read, instead of the GitHub page.
 
 ## [0.0.5] - 2026-11-05
 
