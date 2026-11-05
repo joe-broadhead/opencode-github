@@ -91,8 +91,8 @@ call `ctx.permission.assert` with `METHOD /path` as the resource and save patter
 The resource writes the names GitHub reads without regard to case in lower case (`src/api/names.ts`).
 `src/api/request.ts` builds the URL on the configured API base (uploads on the uploads base), refuses anything that
 could leave it, sends the integration's active token, and handles redirects by hand with `redirect: "manual"`: never
-for a change, within the API for a read only after the same assert on the new path, and to storage hosts only for a
-download, without `Authorization`. It joins `Link` pages, caps the inline result, and streams downloads into the
+for a change, within the API base for a read (reads never assert, so neither do their redirects), and to storage
+hosts only for a download, without `Authorization`. It joins `Link` pages under the API base path, caps the inline result, and streams downloads into the
 project with a SHA-256. The tool filter leaves `github_api` alone even though it shares the `github_` prefix.
 
 ## Permission defaults

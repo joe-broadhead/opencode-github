@@ -1,9 +1,9 @@
 // Sends one github_api call. Requests go only to the configured API base (uploads to the
 // uploads base); the token goes only to those origins. Redirects are handled by hand: a change
-// (any method but GET and HEAD) never follows one; a read follows one on the API host only after
-// github_api's permission check passes for the new path, and refuses one to another host; a
-// download also follows GitHub's redirects to its storage hosts (logs, artifacts and release
-// assets), without the Authorization header. Results are capped for inline display.
+// (any method but GET and HEAD) never follows one; a read follows one within the API base (reads
+// never ask, so neither does their redirect), and refuses one to another host; a download also
+// follows GitHub's redirects to its storage hosts (logs, artifacts and release assets), without
+// the Authorization header. Results are capped for inline display.
 import { createHash } from "node:crypto"
 import { link, mkdir, open, readFile, realpath, rename, rm, stat } from "node:fs/promises"
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
@@ -43,14 +43,9 @@ export type CallDeps = {
   readonly root: string
   /** The download cap; MAX_DOWNLOAD_BYTES unless a test sets a smaller one. */
   readonly maxDownloadBytes?: number
-  /**
-   * github_api's permission check for a read's redirect on the API host, on its new `METHOD /path` resource. It
-   * throws when the rules refuse, and then the redirect is not followed.
-   */
-  readonly checkRedirect: (resource: string) => Promise<void>
 }
 
-/** How a request may follow redirects: never for a change; for a read, on the API host after a check; a download also to storage hosts. */
+/** How a request may follow redirects: never for a change; for a read, within the API base; a download also to storage hosts. */
 type Follow = "never" | "api" | "storage"
 
 /**
@@ -252,11 +247,8 @@ async function send(
     const onApi = next.protocol === "https:" ? apiTarget(next, method as RestInput["method"], deps.endpoints) : undefined
     if (hop >= MAX_REDIRECTS) throw new GitHubPluginError("API_REDIRECT_LOOP", `GitHub redirected more than ${MAX_REDIRECTS} times.`, "Try again later.")
     if (next.protocol !== "https:") throw new GitHubPluginError("API_REDIRECT_INSECURE", "GitHub redirected to a non-HTTPS address.", "Try again later.")
-    if (onApi) {
-      // The same check the request would get for the new path, before anything is sent there.
-      await deps.checkRedirect(onApi.resource)
-      current = onApi.url
-    } else if (policy.follow === "storage") current = next
+    if (onApi) current = onApi.url
+    else if (policy.follow === "storage") current = next
     else {
       throw new GitHubPluginError(
         "API_REDIRECT_OFF_HOST",

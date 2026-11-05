@@ -184,22 +184,17 @@ describe("the api method", () => {
     expect(h.asserts).toEqual([])
   })
 
-  // QA GITHUB-1 follow-up: a script's read follows a redirect only through the same check, which no one can approve.
-  it("checks a script's redirect within the API, and refuses it when the rules ask; never follows one off the API", async () => {
+  // GITHUB-R2: a script's read follows a redirect within the API with no assert, as the model's does; never one off the API.
+  it("follows a script's redirect within the API without an assert, and never one off the API", async () => {
     const answers = {
       "https://api.github.com/repos/Old/Name": () => new Response(null, { status: 301, headers: { location: "/repositories/10" } }),
       "https://api.github.com/repos/o/r/actions/jobs/1/logs": () => new Response(null, { status: 302, headers: { location: "https://blob.example.net/l?sig=x" } }),
     }
-    const refused = await setUp({ answers, refuse: true })
-    const result = await refused.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/Old/Name" })
-    expect(result).toMatchObject({ type: "failed", data: { code: "PERMISSION_DENIED" } })
-    expect(refused.asserts).toEqual([expect.objectContaining({ action: "github_api", resources: ["GET /repositories/10"] })])
-    expect(refused.requests.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name"])
-
-    const allowed = await setUp({ answers })
-    expect(await allowed.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/Old/Name" })).toMatchObject({ ok: true })
-    expect(allowed.requests.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name", "https://api.github.com/repositories/10"])
-    expect(await allowed.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/o/r/actions/jobs/1/logs" })).toMatchObject({ type: "failed", data: { code: "API_REDIRECT_OFF_HOST" } })
+    const h = await setUp({ answers, refuse: true })
+    expect(await h.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/Old/Name" })).toMatchObject({ ok: true })
+    expect(h.asserts).toEqual([])
+    expect(h.requests.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name", "https://api.github.com/repositories/10"])
+    expect(await h.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/o/r/actions/jobs/1/logs" })).toMatchObject({ type: "failed", data: { code: "API_REDIRECT_OFF_HOST" } })
   })
 
   it("refuses a read with a body, and an input github_api would not take, as API_INPUT_INVALID", async () => {

@@ -100,9 +100,8 @@ opencode api post /api/rpc/github.platform.tools/api -d '{"input":{
 
 The result is `github_api`'s output: `{ ok, status, data, contentType?, truncated, rateLimit?, pagination?, trust }`.
 A REST error status, such as 404, is a result with `ok: false`, not an RPC error, as for the model. A redirect within
-the API is followed only after `github_api`'s permission check passes for the new path, as for the model; no one can
-answer an ask, so with the default rules it is refused with `PERMISSION_DENIED`. A redirect outside the API is
-`API_REDIRECT_OFF_HOST`.
+the API is followed, as for the model; one outside the API is `API_REDIRECT_OFF_HOST`. For job logs, call the
+`get_job_logs` method.
 
 Anything else is refused with `SCRIPT_READ_ONLY` before any request: every other method (also `POST /markdown`, which
 the model may call as a read), a GraphQL document that is not one query, `download` (a file write) and `upload`. This

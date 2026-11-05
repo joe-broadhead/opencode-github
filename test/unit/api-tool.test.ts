@@ -181,16 +181,13 @@ describe("github_api", () => {
     expect(api.requests).toEqual([{ url: "https://api.github.com/repos/Owner/Prod/hooks/1", method: "DELETE" }])
   })
 
-  it("asks before following a read's redirect to another API path, and stops when that is declined", async () => {
+  // GITHUB-R2: reads never ask, so a read's redirect within the API (a renamed repository) does not either.
+  it("follows a read's redirect to another API path without asking", async () => {
     const answers = { "https://api.github.com/repos/Old/Name": () => new Response(null, { status: 301, headers: { location: "https://api.github.com/repositories/10" } }) }
-    const declined = setUp({ answers, decline: (resource) => resource === "GET /repositories/10" })
-    expect(await message(declined.run({ method: "GET", path: "/repos/Old/Name" }))).toBe("declined")
-    expect(declined.asserts).toEqual([expect.objectContaining({ action: "github_api", resources: ["GET /repositories/10"], metadata: expect.objectContaining({ redirectedFrom: "GET /repos/old/name" }) })])
-    expect(declined.requests.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name"])
-
-    const allowed = setUp({ answers, readOnly: true })
-    expect((await allowed.run({ method: "GET", path: "/repos/Old/Name" })).output).toMatchObject({ ok: true })
-    expect(allowed.requests.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name", "https://api.github.com/repositories/10"])
+    const api = setUp({ answers, readOnly: true, decline: true })
+    expect((await api.run({ method: "GET", path: "/repos/Old/Name" })).output).toMatchObject({ ok: true })
+    expect(api.asserts).toEqual([])
+    expect(api.requests.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name", "https://api.github.com/repositories/10"])
   })
 
   it("never follows a write's redirect: one ask, one request, and an error naming the new path", async () => {

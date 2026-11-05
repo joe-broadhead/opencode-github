@@ -37,8 +37,8 @@ When you add a rule here, add it to the scan and its self-test too.
   cannot do. It classifies each call itself (GET and HEAD, `POST /markdown` and `/markdown/raw`, or one GraphQL query,
   read; everything else writes), asserts `github_api` on `METHOD /path` for writes, with exactly the path it sends
   (dot segments and needless percent-encoding are refused) and the names GitHub reads without regard to case in lower
-  case (`src/api/names.ts`), never follows a redirect for a change, follows a read's redirect within the API only after
-  the same assert on the new path, and leaves the API only for a download's storage redirect, refuses writes while read-only, sends requests only to the
+  case (`src/api/names.ts`), never follows a redirect for a change, follows a read's redirect (and a `Link` page) only
+  within the API base, with no assert, as reads never ask, and leaves the API only for a download's storage redirect, refuses writes while read-only, sends requests only to the
   configured API and uploads bases, and never forwards the token across origins. It and GitHub's MCP tools share the
   Code Mode namespace `github`, which it describes. Status lives in `/github-status`,
   the `/github` dialog and the status RPC, which all render one status model (`src/rpc.ts`).

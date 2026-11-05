@@ -233,11 +233,11 @@ refused with `READ_ONLY`. In that path, the names GitHub reads without regard to
 
 - A change (any method but GET and HEAD, GraphQL and uploads included) never follows one. It fails with
   `API_REDIRECTED`, which names the new path, so you can call again with that path and have it checked there.
-- A GET or HEAD follows a redirect within the API only after `github_api`'s permission check passes for the new
-  `METHOD /path`, as if it had been called with it; with the default rules that asks. A script's `api` read gets the
-  same check, and an ask is refused. A read redirected outside the API fails with `API_REDIRECT_OFF_HOST`.
-- A download follows a redirect within the API the same way, and, as before, one to the storage that serves logs,
-  artifacts and release assets, without the `Authorization` header. To read logs, download them.
+- A GET or HEAD follows a redirect within the API base, such as a renamed repository's, without asking, as reads
+  never ask. A read redirected outside the API fails with `API_REDIRECT_OFF_HOST`.
+- A download follows a redirect within the API too, and one to the storage that serves logs, artifacts and release
+  assets, without the `Authorization` header. For job logs, GitHub's `get_job_logs` tool returns the text.
+- Pagination follows a `Link` only under the API base path.
 
 The token never appears in output, errors or logs. A 401 marks the account in `/connect` as needing a new sign-in.
 

@@ -77,10 +77,10 @@ direct tool list. Projects, gists and notifications need extra scopes, so they a
 branch protection, rulesets, Actions variables, downloading artifacts and logs to a file, and any GraphQL. It calls
 GitHub's REST or GraphQL API with your GitHub sign-in, for example
 `{ "method": "GET", "path": "/repos/OWNER/REPO/branches/main/protection" }` or
-`{ "graphql": { "query": "query { viewer { login } }" } }`. GET, HEAD and a single GraphQL query read; every other
-call changes GitHub, asks first, and is refused while the plugin is read-only. Requests go only to GitHub's API. A
-change never follows a redirect; a read follows one within the API only after asking for the new path, and only a
-download follows one to GitHub's file storage, without your token. `download: { path }` saves a response to a file in the
+`{ "graphql": { "query": "query { viewer { login } }" } }`. GET, HEAD, `POST /markdown` and a single GraphQL query
+read; every other call changes GitHub, asks first, and is refused while the plugin is read-only. Requests go only to
+GitHub's API. A change never follows a redirect, a read follows one only within the API, and only a download follows
+one to GitHub's file storage, without your token. `download: { path }` saves a response to a file in the
 project, and `upload: { path, contentType }` sends a project file as a release asset; both ask first.
 
 Three skills come with it:

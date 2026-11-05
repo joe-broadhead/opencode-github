@@ -2,7 +2,7 @@
 // holds, for what GitHub's MCP tools cannot do. Reads (GET, HEAD, one GraphQL query) run
 // without asking. Every write asks through OpenCode's permission rules as `github_api` on
 // `METHOD /path` (owner, repo and other names in lower case), and is refused while the plugin is
-// read-only. Saving a download asks too, and so does a read's redirect to another API path.
+// read-only. Saving a download asks too.
 import type { Plugin } from "@opencode/plugin"
 import { Error as ToolError } from "@opencode/plugin/promise/tool"
 import type { Endpoints } from "../config.js"
@@ -158,8 +158,6 @@ export async function registerApiTool(
       deviceSignIn: deps.deviceSignIn === true,
       fetch: send,
       root: deps.root,
-      // A read's redirect within the API is followed only once github_api's rules allow its new path.
-      checkRedirect: (resource: string) => assert(call, resource, { ...described.metadata, redirectedFrom: described.resource }),
       ...(call.signal ? { signal: call.signal } : {}),
     }
     const output =
