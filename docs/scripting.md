@@ -39,7 +39,9 @@ access its model would have:
   waiting. The plugin's default rules allow the known reads, so an agent with the default rules needs nothing more.
   An agent defined only in your config has no default rules (`/github-status` names it); its own rules decide.
 
-Create the session once, with the agent the script runs as, and keep its id:
+Create a session for the script once, with the agent the script runs as, and keep its id (`data.id` in the reply). A
+test of a script gets its own session too. Never borrow a session found through history or a session list: the script
+would run as that session's agent, under its rules.
 
 ```sh
 opencode api post /api/session -d '{"title":"release digest","agent":"build"}'

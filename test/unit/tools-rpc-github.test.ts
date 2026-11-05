@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest"
 import { SCRIPT_API_METHOD, scriptApi } from "../../src/api/script.js"
 import { API_ACTION, registerApiTool } from "../../src/api/tool.js"
-import { GITHUB_COM } from "../../src/config.js"
+import { DEFAULT_TOOLSETS, GITHUB_COM } from "../../src/config.js"
 import { GitHubPluginError } from "../../src/errors.js"
 import { KNOWN_READS, NEXT_STEPS, PLUGIN_ID, pluginError, registerToolsRpc, TOOLS_RPC_ID, type ToolCall } from "../../src/host/tools-rpc.js"
 import { HIDDEN, KNOWN_TOOLS, allReadTools } from "../../src/tools.js"
@@ -81,6 +81,7 @@ async function setUp(
     readOnly: false,
     endpoints: GITHUB_COM,
     service: "GitHub",
+    toolsets: DEFAULT_TOOLSETS,
     root: "/workspace",
     integrationID: () => "mcp_github",
     fetch: async (url, init) => {
@@ -159,6 +160,14 @@ describe("the api method", () => {
     expect(h.asserts).toEqual([])
     expect(h.runs).toEqual([expect.objectContaining({ sessionID: "ses_build", agent: "build", id: expect.stringMatching(/^script:/) })])
     expect(JSON.stringify(output)).not.toContain(TOKEN)
+  })
+
+  // it3: a read one of GitHub's tools covers names that tool; for a script it is a method of this RPC.
+  it("names the method that covers a read in nextStep, and still answers", async () => {
+    const h = await setUp()
+    const output = await h.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/octo/repo/pulls" })
+    expect(output).toMatchObject({ ok: true, data: { full_name: "octo/repo" }, nextStep: "The list_pull_requests method covers this read: call it instead of api." })
+    expect(h.requests).toHaveLength(1)
   })
 
   it("runs a single GraphQL query", async () => {

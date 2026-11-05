@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.6] - 2026-11-05
+
+### Changed
+
+- `github_api` names the GitHub tool that covers a read: a working GET of `/repos/OWNER/REPO/pulls`, `/pulls/{number}`,
+  `/tags`, `/commits`, `/commits/{sha}`, `/contents/…`, `/issues`, `/issues/{number}` or `/actions/runs` gets a
+  `nextStep` such as "GitHub's list_tags tool covers this read: call it instead of github_api." The call still runs.
+  A script's `api` method names the tools RPC method instead. There is no hint with `host`, or when the tool's toolset
+  is off.
+- Code Mode's `github` catalog also shows `list_pull_requests`' signature, beside the other core reads.
+- The `github` namespace description and the scripting guide say that a script, or a test of one, uses a session
+  created for it (`opencode api post /api/session` with an agent; keep `data.id`), never one found through history or a
+  session list, which would run as that session's agent. The namespace links the plain guide on
+  `raw.githubusercontent.com`, which an agent can read, instead of the GitHub page.
+- The skills: `github-code-research` leaves `ref` out for the default branch instead of guessing `refs/heads/main`,
+  reads only the versions the user named, and checks `github_api`'s `truncated` before using `data` (a cut `/compare`
+  was read as "0 commits"). `github-issue-triage` runs one duplicate search, and a second wording only when the first
+  finds nothing but the issue itself.
+
 ## [0.0.5] - 2026-11-05
 
 ### Added

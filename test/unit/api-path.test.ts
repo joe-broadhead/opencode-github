@@ -7,7 +7,7 @@ import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { permissionPath } from "../../src/api/names.js"
 import { describeCall, registerApiTool } from "../../src/api/tool.js"
-import { type Endpoints, GITHUB_COM } from "../../src/config.js"
+import { DEFAULT_TOOLSETS, type Endpoints, GITHUB_COM } from "../../src/config.js"
 
 type Ctx = Parameters<typeof registerApiTool>[0]
 const GHES: Endpoints = {
@@ -70,6 +70,7 @@ async function setUp(endpoints: Endpoints) {
     readOnly: false,
     endpoints,
     service: "GitHub",
+    toolsets: DEFAULT_TOOLSETS,
     root,
     integrationID: () => "mcp_1",
     fetch: async (url) => {
