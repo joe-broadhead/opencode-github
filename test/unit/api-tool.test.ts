@@ -292,6 +292,17 @@ describe("github_api", () => {
     expect(await message(api.run({ method: "GET", path: "/user" }))).toBe("AUTH_REQUIRED: GitHub is not signed in. Next step: Run /connect and choose GitHub.")
   })
 
+  // GITHUB-R19: a working call clears the mark a 401 left, so /connect stops asking for a new sign-in.
+  it("clears the sign-in mark after a call that works", async () => {
+    let status = 401
+    const api = setUp({ answers: { "https://api.github.com/user": () => Response.json({ login: "octocat" }, { status }) } })
+    await api.run({ method: "GET", path: "/user" })
+    status = 200
+    await api.run({ method: "GET", path: "/user" })
+    await api.run({ method: "GET", path: "/user" })
+    expect(api.statuses).toEqual([{ status: "needs_auth", message: "GitHub rejected the saved sign-in. Sign in again." }, undefined])
+  })
+
   it("marks the account for sign-in on a 401, and never shows the token", async () => {
     const api = setUp({ status: 401 })
     const result = await api.run({ method: "GET", path: "/user" })
