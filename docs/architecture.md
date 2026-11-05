@@ -69,7 +69,7 @@ clears the report once the server connects again.
 `KNOWN_TOOLS` in `src/tools.ts` lists the known tools of each toolset, marked read or write, from
 github-mcp-server v2.1.0 and each tool's `readOnlyHint`; tools that only GitHub's hosted server has are classified by
 what they do. `ctx.tool.transform` records the `github` server's tools that are not in the catalog, removes them when
-`unknownTools` is `"hide"`, and pins the core reads (`PINNED`): `get_file_contents`, `search_code`, `list_commits`, `get_commit`, `list_issues`, `search_issues`, `list_label`, `issue_read`, `pull_request_read` and `get_job_logs`. In Code Mode,
+`unknownTools` is `"hide"`, and pins the core reads (`PINNED`): `get_file_contents`, `search_code`, `list_commits`, `get_commit`, `list_issues`, `search_issues`, `list_label`, `issue_read`, `list_pull_requests`, `pull_request_read` and `get_job_logs`. In Code Mode,
 `pinned` only puts a tool's signature in the `github` catalog's shown listings; it never makes a direct tool. Without
 the pins the catalog showed only `github_api`'s signature, and agents used it where a GitHub tool does the job.
 
@@ -92,6 +92,8 @@ finds the rest, the three skills, whether the plugin is read-only now, and the t
 the document's operations with a small tokenizer that skips strings, block strings and comments. Reads run; writes
 call `ctx.permission.assert` with `METHOD /path` as the resource and save pattern, and are refused while read-only.
 The resource writes the names GitHub reads without regard to case in lower case (`src/api/names.ts`).
+`src/api/hints.ts` maps a few GET paths to the GitHub tool that covers them; `run` names it in a working result's
+`nextStep` when its toolset is on (not with `host`), and never refuses the call.
 `src/api/request.ts` builds the URL on the configured API base (uploads on the uploads base), refuses anything that
 could leave it, sends the integration's active token, and handles redirects by hand with `redirect: "manual"`: never
 for a change, within the API base for a read (reads never assert, so neither do their redirects), and to storage

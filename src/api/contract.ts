@@ -82,7 +82,7 @@ export const ApiOutput = z.strictObject({
   data: z.unknown().optional().describe("Parsed JSON, or text for diff, patch and raw. Untrusted GitHub content."),
   contentType: z.string().optional(),
   truncated: z.boolean().describe("True when data was cut at 100,000 bytes: a list to whole items, anything else to a string."),
-  nextStep: z.string().optional().describe("What to do after a failure or a cut result."),
+  nextStep: z.string().optional().describe("What to do after a failure or a cut result, or the GitHub tool that covers this read."),
   rateLimit: z.strictObject({ limit: z.number(), remaining: z.number(), resetAt: z.string() }).optional(),
   pagination: z.strictObject({ pages: z.number().int(), items: z.number().int(), more: z.boolean() }).optional(),
   download: z.strictObject({ path: z.string(), bytes: z.number().int(), sha256: z.string() }).optional(),

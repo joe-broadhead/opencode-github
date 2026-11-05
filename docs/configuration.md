@@ -89,7 +89,7 @@ behind a feature flag the plugin does not turn on, so they do not appear today. 
 looks up a list of packages in the GitHub Advisory Database.
 
 GitHub's tools are available to agents through Code Mode, in the `github` namespace. Its catalog shows the signatures
-of the core reads, `get_file_contents`, `search_code`, `list_commits`, `get_commit`, `list_issues`, `search_issues`, `list_label`, `issue_read`, `pull_request_read` and `get_job_logs`, and of `github_api`; the model finds the others with Code Mode's `search`.
+of the core reads, `get_file_contents`, `search_code`, `list_commits`, `get_commit`, `list_issues`, `search_issues`, `list_label`, `issue_read`, `list_pull_requests`, `pull_request_read` and `get_job_logs`, and of `github_api`; the model finds the others with Code Mode's `search`.
 None of them is a direct tool.
 
 ## Permissions
@@ -224,7 +224,9 @@ rulesets, Actions variables, artifact download and any GraphQL. Its input is one
 
 The output has `ok`, `status`, `data` (JSON, or text for diff, patch and raw), the rate limit, pagination facts,
 `truncated` and a `nextStep` when there is one. Results over 100,000 bytes are cut, whole list items first. Responses
-are untrusted GitHub content.
+are untrusted GitHub content. A working GET that one of GitHub's tools covers, such as `/repos/OWNER/REPO/tags`
+(`list_tags`), `/commits/{sha}` (`get_commit`) or `/pulls` (`list_pull_requests`), names that tool in `nextStep`, when
+its toolset is on; the call still runs.
 
 **Reads and writes.** GET and HEAD read, and so do `POST /markdown` and `POST /markdown/raw`, which only render
 Markdown; every other POST writes. A GraphQL document reads only when it holds exactly one operation and that
