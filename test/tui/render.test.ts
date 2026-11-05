@@ -162,7 +162,7 @@ describe("GitHub TUI status view", () => {
     expect(frame).toContain(row("Access", "reads and writes (writes ask first)"))
     expect(frame).toContain(row("Tools", "27 available, 2 unknown (they ask first): github_new_a, github_new_b"))
     expect(frame).toContain(row("Agents without default rules", "reviewer"))
-    expect(frame).toContain("rules below first in each one's own")
+    expect(frame).not.toContain("rules below")
     expect(frame).toContain('{"action":"github_*","resource":"*","effect":"ask"},')
     expect(frame).toContain('{"action":"github_get_me","resource":"*","effect":"allow"}')
     expect(frame).toContain(row("OpenCode", "2.3.0 (untested: OpenCode 2.3.0 is outside the tested range.)"))

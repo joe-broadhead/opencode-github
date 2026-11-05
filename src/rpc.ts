@@ -16,6 +16,7 @@ const EFFECTS = ["allow", "ask", "deny"] as const
 const UNKNOWN_TOOL_MODES = ["ask", "hide"] as const
 
 export type Rule = { readonly action: string; readonly resource: string; readonly effect: (typeof EFFECTS)[number] }
+export type SkillPath = { readonly id: string; readonly path: string }
 
 /** In the order the dialog and /github-status show it. version, host, state, unguardedAgents and nextStep are the shared fields. */
 export type Status = {
@@ -32,6 +33,8 @@ export type Status = {
   readonly unguardedAgents: readonly string[]
   /** github_api rule resources with an owner, repo or other name not in lower case: they never match. Present only when there are any. */
   readonly unmatchedRules?: readonly string[]
+  /** The plugin's skills that OpenCode loads from another file with the same id, and that file. Present only when there are any. */
+  readonly shadowedSkills?: readonly SkillPath[]
   /** The default rules to add to those agents; present only when there are any. */
   readonly permissionsBlock?: readonly Rule[]
   /** The OpenCode release, the supported range, and whether this release is a tested one. */
@@ -49,6 +52,7 @@ const object = (properties: Record<string, object>, required: readonly string[])
   ({ type: "object", properties, required, additionalProperties: false }) as const
 
 const rule = object({ action: text, resource: text, effect: { enum: EFFECTS } }, ["action", "resource", "effect"])
+const skillPath = object({ id: text, path: text }, ["id", "path"])
 
 export const STATUS_SCHEMA = object(
   {
@@ -60,6 +64,7 @@ export const STATUS_SCHEMA = object(
     tools: object({ visible: { type: "integer", minimum: 0 }, unknown: texts, mode: { enum: UNKNOWN_TOOL_MODES } }, ["visible", "unknown", "mode"]),
     unguardedAgents: texts,
     unmatchedRules: texts,
+    shadowedSkills: { type: "array", items: skillPath },
     permissionsBlock: { type: "array", items: rule },
     host: object({ version: text, range: text, tested: { type: "boolean" } }, ["version", "range", "tested"]),
     hostWarning: text,
@@ -87,6 +92,7 @@ const isText = (value: unknown): value is string => typeof value === "string"
 const isTexts = (value: unknown) => Array.isArray(value) && value.every(isText)
 const only = (value: Record_, keys: readonly string[]) => Object.keys(value).every((key) => keys.includes(key))
 const optional = (value: unknown, check: (value: unknown) => boolean) => value === undefined || check(value)
+const isSkillPath = (value: unknown) => isRecord(value) && only(value, ["id", "path"]) && isText(value.id) && isText(value.path)
 const isRule = (value: unknown) =>
   isRecord(value) && only(value, ["action", "resource", "effect"]) && isText(value.action) && isText(value.resource) && (EFFECTS as readonly unknown[]).includes(value.effect)
 
@@ -108,6 +114,7 @@ export function isStatus(value: unknown): value is Status {
     (UNKNOWN_TOOL_MODES as readonly unknown[]).includes(tools.mode) &&
     isTexts(value.unguardedAgents) &&
     optional(value.unmatchedRules, isTexts) &&
+    optional(value.shadowedSkills, (skills) => Array.isArray(skills) && skills.every(isSkillPath)) &&
     optional(value.permissionsBlock, (block) => Array.isArray(block) && block.every(isRule)) &&
     isRecord(host) &&
     only(host, ["version", "range", "tested"]) &&
@@ -133,9 +140,9 @@ export const STATE_LABELS: Record<Status["state"], string> = {
 
 export const NOTHING_TO_DO = "Nothing to do."
 
-/** The fix for agents without the default rules, after their names. */
-export const AGENT_FIX =
-  'These agents run GitHub tools, including writes, without asking. Put the rules below first in each one\'s own "permissions" list, in opencode.json or in its Markdown file, followed by your top-level rules for github_ tools.'
+/** The next step for agents without the default rules: one fixed sentence across the plugins, with no names. */
+export const AGENT_STEP =
+  "Put the default rules shown by /github-status first in each listed agent's own permissions, in opencode.json or the agent's Markdown file, followed by your top-level rules for GitHub tools."
 
 /** The value of a row that has nothing to show. */
 export const NONE = "none"
@@ -173,6 +180,7 @@ export function statusRows(status: Status): StatusRow[] {
     ...(status.enterprise ? [] : [{ label: "Toolsets", value: status.toolsets.join(", ") }]),
     { label: "Host", value: status.enterprise ? `${status.enterprise} (GitHub Enterprise Server)` : "github.com" },
     ...(status.unmatchedRules?.length ? [{ label: "Rules that never match", value: status.unmatchedRules.join("; ") }] : []),
+    ...(status.shadowedSkills?.length ? [{ label: "Skills", value: status.shadowedSkills.map((skill) => `${skill.id} replaced by ${skill.path}`).join("; ") }] : []),
     { label: "Tools", value: describeTools(status) },
     { label: "Agents without default rules", value: status.unguardedAgents.length > 0 ? status.unguardedAgents.join(", ") : NONE },
     { label: "OpenCode", value: describeHost(status) },
@@ -187,7 +195,7 @@ export function formatStatus(status: Status): string {
   const lines: string[] = [STATUS_TITLE]
   for (const row of statusRows(status)) {
     lines.push(`${row.label}: ${row.value}`)
-    if (row.label === "Agents without default rules" && status.unguardedAgents.length > 0) lines.push(AGENT_FIX, formatRules(status.permissionsBlock ?? []))
+    if (row.label === "Agents without default rules" && status.unguardedAgents.length > 0) lines.push(formatRules(status.permissionsBlock ?? []))
   }
   return lines.join("\n")
 }

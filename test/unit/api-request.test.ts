@@ -54,18 +54,7 @@ beforeEach(() => {
 })
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
-/** The redirect checks callRest asked for, in order; a resource in `refuse` is refused, as a deny would be. */
-let checked: string[] = []
-let refuse = new Set<string>()
-beforeEach(() => {
-  checked = []
-  refuse = new Set()
-})
-const checkRedirect = async (resource: string) => {
-  checked.push(resource)
-  if (refuse.has(resource)) throw new Error(`refused ${resource}`)
-}
-const deps = (fetch: ReturnType<typeof fakeFetch>["fetch"], endpoints: Endpoints = GITHUB_COM) => ({ token: TOKEN, endpoints, service: "GitHub", fetch, root, checkRedirect })
+const deps = (fetch: ReturnType<typeof fakeFetch>["fetch"], endpoints: Endpoints = GITHUB_COM) => ({ token: TOKEN, endpoints, service: "GitHub", fetch, root })
 
 describe("restTarget pins requests to the API host", () => {
   it.each([
@@ -191,45 +180,50 @@ describe("callRest", () => {
     expect(seen[0]).toMatchObject({ redirect: "manual", headers: { authorization: `Bearer ${TOKEN}`, "x-github-api-version": "2022-11-28", accept: "application/vnd.github+json" } })
   })
 
-  // QA GITHUB-1 follow-up: a redirect never takes a call past the rules that checked it.
-  it("follows a read's redirect within the API only after the permission check passes for the new path", async () => {
+  it("follows a read's redirect within the API, with the token", async () => {
     const { fetch, seen } = fakeFetch({
       "https://api.github.com/repos/Old/Name/pulls": () => redirect("/repositories/10/pulls?state=all", 301),
       "https://api.github.com/repositories/10/pulls?state=all": () => json([{ number: 1 }]),
     })
     const moved = rest({ method: "GET", path: "/repos/Old/Name/pulls" })
     expect(await callRest(moved, restTarget(moved, GITHUB_COM), deps(fetch))).toMatchObject({ ok: true, data: [{ number: 1 }] })
-    expect(checked).toEqual(["GET /repositories/10/pulls"])
     expect(seen.at(-1)).toMatchObject({ url: "https://api.github.com/repositories/10/pulls?state=all", headers: { authorization: `Bearer ${TOKEN}` } })
-
-    refuse.add("GET /repositories/10/pulls")
-    const before = seen.length
-    await expect(callRest(moved, restTarget(moved, GITHUB_COM), deps(fetch))).rejects.toThrow("refused GET /repositories/10/pulls")
-    expect(seen.slice(before).map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name/pulls"])
   })
 
-  it("checks a GitHub Enterprise Server redirect as a path on its API base, in lower case, and refuses one outside it", async () => {
-    const { fetch } = fakeFetch({
+  it("follows a GitHub Enterprise Server redirect within its API base, and refuses one outside it", async () => {
+    const { fetch, seen } = fakeFetch({
       "https://ghe.example.com/api/v3/repos/a/b": () => redirect("https://ghe.example.com/api/v3/repos/Other/Prod"),
       "https://ghe.example.com/api/v3/repos/Other/Prod": () => json({ id: 1 }),
       "https://ghe.example.com/api/v3/repos/c/d": () => redirect("https://ghe.example.com/admin/x"),
     })
     const moved = rest({ method: "GET", path: "/repos/a/b" })
-    await callRest(moved, restTarget(moved, GHES), deps(fetch, GHES))
-    expect(checked).toEqual(["GET /repos/other/prod"])
+    expect(await callRest(moved, restTarget(moved, GHES), deps(fetch, GHES))).toMatchObject({ data: { id: 1 } })
+    expect(seen.at(-1)?.url).toBe("https://ghe.example.com/api/v3/repos/Other/Prod")
     const outside = rest({ method: "GET", path: "/repos/c/d" })
     await expect(callRest(outside, restTarget(outside, GHES), deps(fetch, GHES))).rejects.toThrow(/^API_REDIRECT_OFF_HOST: /)
   })
 
-  it("refuses a read's redirect to another host, and points to download", async () => {
+  // GITHUB-R10: job logs have their own tool, and a script cannot download.
+  it("refuses a read's redirect to another host, and points to get_job_logs, or to download where a caller can", async () => {
     const { fetch, seen } = fakeFetch({
       "https://api.github.com/repos/o/r/actions/jobs/1/logs": () => redirect("https://blob.example.net/logs/1?sig=x"),
+      "https://ghe.example.com/api/v3/repos/o/r/actions/jobs/1/logs": () => redirect("https://blob.example.net/logs/1?sig=x"),
     })
     const logs = rest({ method: "GET", path: "/repos/o/r/actions/jobs/1/logs" })
+    const what = "API_REDIRECT_OFF_HOST: GitHub redirected GET /repos/o/r/actions/jobs/1/logs outside its API, to blob.example.net, and a read follows redirects only within the API. Next step: "
     await expect(callRest(logs, restTarget(logs, GITHUB_COM), deps(fetch))).rejects.toThrow(
-      "API_REDIRECT_OFF_HOST: GitHub redirected GET /repos/o/r/actions/jobs/1/logs outside its API, to blob.example.net, and a read follows redirects only within the API. Next step: Pass download: { path } to save the response; a download follows GitHub's storage redirects, without the token.",
+      `${what}For job logs, call get_job_logs with return_content: true; for other files, pass download: { path }, which follows GitHub's storage redirects without the token.`,
     )
-    expect(seen).toHaveLength(1)
+    await expect(callRest(logs, restTarget(logs, GITHUB_COM), { ...deps(fetch), script: true })).rejects.toThrow(
+      `${what}For job logs, call the get_job_logs method; other files need github_api's download in an OpenCode session.`,
+    )
+    await expect(callRest(logs, restTarget(logs, GHES), { ...deps(fetch, GHES), enterprise: true })).rejects.toThrow(
+      `${what}Pass download: { path } to save the response; a download follows GitHub's storage redirects, without the token.`,
+    )
+    await expect(callRest(logs, restTarget(logs, GHES), { ...deps(fetch, GHES), enterprise: true, script: true })).rejects.toThrow(
+      `${what}Save the file with github_api's download in an OpenCode session; scripts never write files.`,
+    )
+    expect(seen).toHaveLength(4)
   })
 
   it.each(["POST", "PUT", "PATCH", "DELETE"] as const)("never follows a redirect for %s, and names the new path", async (method) => {
@@ -246,7 +240,6 @@ describe("callRest", () => {
     expect(error).toMatch(/^API_REDIRECTED: .* outside its API, to evil\.example, .* Next step: Check the path/)
     expect(error).not.toContain("sig=")
     expect(seen.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name/pulls/1/merge", "https://api.github.com/repos/o/r/x"])
-    expect(checked).toEqual([])
   })
 
   it("never follows a redirect for GraphQL or an upload", async () => {
@@ -263,7 +256,7 @@ describe("callRest", () => {
   })
 
   it("relies on Node's fetch returning a manual redirect with its Location, not following it", async () => {
-    const server = createServer((request, response) => {
+    const server = createServer((_request, response) => {
       response.writeHead(302, { location: "https://blob.example.net/x" }).end()
     })
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
@@ -325,13 +318,37 @@ describe("callRest", () => {
     expect(seen).toHaveLength(1)
   })
 
+  // GITHUB-R15: on GitHub Enterprise Server the API shares its origin with the web, so a page must stay under the API base path.
+  it("stops paginating at a Link outside the GitHub Enterprise Server API base path", async () => {
+    const { fetch, seen } = fakeFetch({
+      "https://ghe.example.com/api/v3/user/repos": () => json([1, 2], { headers: { link: '<https://ghe.example.com/admin/users?page=2>; rel="next"' } }),
+      "https://ghe.example.com/api/v3/orgs": () => json([1], { headers: { link: '<https://ghe.example.com/api/v3x/orgs?page=2>; rel="next"' } }),
+      "https://ghe.example.com/api/v3/teams": () => json([1], { headers: { link: '<https://ghe.example.com/api/v3/teams?page=2>; rel="next"' } }),
+      "https://ghe.example.com/api/v3/teams?page=2": () => json([2]),
+    })
+    for (const path of ["/user/repos", "/orgs"]) {
+      const input = rest({ method: "GET", path, paginate: true })
+      expect((await callRest(input, restTarget(input, GHES), deps(fetch, GHES))).pagination).toMatchObject({ pages: 1, more: false })
+    }
+    const inside = rest({ method: "GET", path: "/teams", paginate: true })
+    expect(await callRest(inside, restTarget(inside, GHES), deps(fetch, GHES))).toMatchObject({ data: [1, 2], pagination: { pages: 2 } })
+    expect(seen.map((request) => request.url)).toEqual([
+      "https://ghe.example.com/api/v3/user/repos",
+      "https://ghe.example.com/api/v3/orgs",
+      "https://ghe.example.com/api/v3/teams",
+      "https://ghe.example.com/api/v3/teams?page=2",
+    ])
+  })
+
   it("cuts a large result to whole items, with a next step", async () => {
     const items = Array.from({ length: 2000 }, (_, index) => ({ id: index, body: "x".repeat(100) }))
     const { fetch } = fakeFetch({ "https://api.github.com/big": () => json(items) })
     const input = rest({ method: "GET", path: "/big" })
     const output = await callRest(input, restTarget(input, GITHUB_COM), deps(fetch))
     expect(output.truncated).toBe(true)
-    expect(output.nextStep).toMatch(/Narrow it with query parameters/)
+    expect(output.nextStep).toBe("The result was cut at 100,000 bytes. Narrow it with query parameters such as per_page, or read one file with get_file_contents.")
+    const onServer = await callRest(input, restTarget(input, GHES), { ...deps(fakeFetch({ "https://ghe.example.com/api/v3/big": () => json(items) }).fetch, GHES), enterprise: true })
+    expect(onServer.nextStep).toBe("The result was cut at 100,000 bytes. Narrow it with query parameters such as per_page.")
     expect(Buffer.byteLength(JSON.stringify(output.data))).toBeLessThanOrEqual(MAX_INLINE_BYTES)
     expect((output.data as unknown[]).length).toBeGreaterThan(100)
   })
@@ -348,6 +365,9 @@ describe("callRest", () => {
     const output = await callRest(zip, restTarget(zip, GITHUB_COM), deps(fetch))
     expect(output.data).toBeUndefined()
     expect(output.nextStep).toBe("The response is 4 bytes of application/zip; pass download: { path } to save it.")
+    expect((await callRest(zip, restTarget(zip, GITHUB_COM), { ...deps(fetch), script: true })).nextStep).toBe(
+      "The response is 4 bytes of application/zip; save it with github_api's download in an OpenCode session, as scripts never write files.",
+    )
   })
 
   it("gives next steps for 401, a missing scope, an exhausted rate limit and a missing fine-grained permission", async () => {
@@ -364,7 +384,14 @@ describe("callRest", () => {
       return callRest(input, restTarget(input, GITHUB_COM), deps(fetch))
     }
     expect(await call("/a")).toMatchObject({ ok: false, status: 401, data: { message: "Bad credentials" }, nextStep: expect.stringContaining("Run /connect and choose GitHub") })
-    expect((await call("/b")).nextStep).toBe("The sign-in lacks the scope workflow. Add it to the plugin option scopes, then run /connect and choose GitHub to sign in again.")
+    // GITHUB-R9: without device sign-in the scopes option does nothing, so the token itself needs the scope.
+    expect((await call("/b")).nextStep).toBe(
+      "The token lacks the scope workflow. Create a token with it on GitHub (Settings, Developer settings, Personal access tokens), then run /connect and choose GitHub to replace it.",
+    )
+    const scoped = rest({ method: "GET", path: "/b" })
+    expect((await callRest(scoped, restTarget(scoped, GITHUB_COM), { ...deps(fetch), deviceSignIn: true })).nextStep).toBe(
+      "The sign-in lacks the scope workflow. Add it to the plugin option scopes, then run /connect and choose GitHub to sign in again.",
+    )
     expect((await call("/c")).nextStep).toBe("The rate limit is used up. Try again after 2026-10-31T00:00:00.000Z.")
     expect((await call("/d")).nextStep).toBe(
       "The token lacks the fine-grained permission Actions (read). Add it to the token on GitHub (Settings, Developer settings, Personal access tokens).",
@@ -398,10 +425,9 @@ describe("download and upload", () => {
     expect(seen[1]!.headers.authorization).toBeUndefined()
     await expect(callRest(input, restTarget(input, GITHUB_COM), deps(fetch))).rejects.toThrow(/^API_FILE_EXISTS: /)
     await callRest({ ...input, download: { path: "out/a.zip", overwrite: true } }, restTarget(input, GITHUB_COM), deps(fetch))
-    expect(checked).toEqual([])
   })
 
-  it("checks a download's redirect to another API path first, then follows the storage redirect without the token", async () => {
+  it("follows a download's redirect to another API path, then the storage redirect without the token", async () => {
     const { fetch, seen } = fakeFetch({
       "https://api.github.com/repos/Old/Name/zipball": () => redirect("/repos/new/name/zipball", 301),
       "https://api.github.com/repos/new/name/zipball": () => redirect("https://codeload.example.net/z?sig=x"),
@@ -409,7 +435,6 @@ describe("download and upload", () => {
     })
     const input = rest({ method: "GET", path: "/repos/Old/Name/zipball", download: { path: "z.zip" } })
     expect((await callRest(input, restTarget(input, GITHUB_COM), deps(fetch))).download?.bytes).toBe(1)
-    expect(checked).toEqual(["GET /repos/new/name/zipball"])
     expect(seen.map((request) => Boolean(request.headers.authorization))).toEqual([true, true, false])
   })
 

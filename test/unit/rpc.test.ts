@@ -50,6 +50,8 @@ describe("isStatus and the JSON Schema", () => {
     expect(isStatus(missing)).toBe(false)
     expect(isStatus(status({ tools: { visible: -1, unknown: [], mode: "ask" } }))).toBe(false)
     expect(isStatus(status({ permissionsBlock: [{ action: "x", resource: "*", effect: "maybe" as "ask" }] }))).toBe(false)
+    expect(isStatus(status({ shadowedSkills: [{ id: "github-pr-review", path: "/x/SKILL.md" }] }))).toBe(true)
+    expect(isStatus(status({ shadowedSkills: [{ id: "github-pr-review" } as unknown as { id: string; path: string }] }))).toBe(false)
     expect(isStatus(status({ host: { version: "2.2.3", range: ">=2.2.3 <2.3.0", tested: true, extra: 1 } as unknown as Status["host"] }))).toBe(false)
     expect(isStatus(status({ host: { version: "2.2.3", range: ">=2.2.3 <2.3.0" } as unknown as Status["host"] }))).toBe(false)
     const { version: _version, ...unversioned } = status()
@@ -59,7 +61,7 @@ describe("isStatus and the JSON Schema", () => {
 
   it("states the same fields and required fields in its JSON Schema", () => {
     expect(Object.keys(STATUS_SCHEMA.properties).sort()).toEqual(
-      ["account", "enterprise", "host", "hostWarning", "nextStep", "permissionsBlock", "readOnly", "state", "tools", "toolsets", "unguardedAgents", "unmatchedRules", "version"],
+      ["account", "enterprise", "host", "hostWarning", "nextStep", "permissionsBlock", "readOnly", "shadowedSkills", "state", "tools", "toolsets", "unguardedAgents", "unmatchedRules", "version"],
     )
     expect([...STATUS_SCHEMA.required].sort()).toEqual(["host", "nextStep", "readOnly", "state", "tools", "toolsets", "unguardedAgents", "version"])
     expect(STATUS_SCHEMA.additionalProperties).toBe(false)
@@ -89,7 +91,7 @@ describe("formatStatus", () => {
     const text = formatStatus(status())
     expect(text).toContain("\nAccount: none\n")
     expect(text).toContain("\nAgents without default rules: none\nOpenCode:")
-    expect(text).not.toContain("Put the rules below")
+    expect(text).not.toContain("[\n")
   })
 
   it.each([
@@ -115,12 +117,10 @@ describe("formatStatus", () => {
     expect(formatStatus(status({ tools: { visible: 3, unknown: ["github_a"], mode: "ask" } }))).toContain("(they ask first): github_a")
   })
 
-  it("names agents without the default rules, and gives the fix with the block before OpenCode and Next step", () => {
+  // TRIAGE decision 1: the agents row lists names only, followed by the rules block; the fix is the next step.
+  it("names agents without the default rules, followed by the block, before OpenCode and Next step", () => {
     const text = formatStatus(status({ unguardedAgents: ["reviewer", "docs"], permissionsBlock: defaultRules() }))
-    expect(text).toContain("Agents without default rules: reviewer, docs\n")
-    expect(text).toContain(`Put the rules below first in each one's own "permissions" list`)
-    expect(text).toContain("followed by your top-level rules for github_ tools.")
-    expect(text).toContain(formatRules(defaultRules()))
+    expect(text).toContain(`Agents without default rules: reviewer, docs\n${formatRules(defaultRules())}\nOpenCode:`)
     expect(text.indexOf(formatRules(defaultRules()))).toBeLessThan(text.indexOf("OpenCode:"))
     expect(text.match(/Next step:/g)).toHaveLength(1)
   })

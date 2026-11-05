@@ -15,7 +15,7 @@ import { observeMcp, registerMcp } from "./mcp.js"
 import { registerPermissionDefaults } from "./permissions.js"
 import { SERVER_NAME } from "./rpc.js"
 import { registerSignInStatus } from "./sign-in-status.js"
-import { registerSkills } from "./skills.js"
+import { SKILL_IDS, registerSkills, skillPath } from "./skills.js"
 import { type StatusDeps, registerStatus } from "./status.js"
 import { registerToolFilter, unavailableDetail } from "./tools.js"
 
@@ -74,6 +74,7 @@ export default Plugin.define({
         await registerStatus(ctx, {
           options,
           hostVersion: ctx.app.version,
+          skills: SKILL_IDS.map((id) => ({ id, path: skillPath(id) })),
           ...(hostWarning ? { hostWarning } : {}),
           ...source,
         }),

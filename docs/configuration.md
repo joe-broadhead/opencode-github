@@ -88,8 +88,9 @@ behind a feature flag the plugin does not turn on, so they do not appear today. 
 `github_support_docs_search`, exist only on GitHub's hosted server, as does `check_dependency_vulnerabilities`, which
 looks up a list of packages in the GitHub Advisory Database.
 
-GitHub's tools are available to agents through Code Mode, in the `github` namespace. The plugin keeps three entry
-tools in the model's direct tool list: `github_get_me`, `github_issue_read` and `github_pull_request_read`.
+GitHub's tools are available to agents through Code Mode, in the `github` namespace. Its catalog shows the signatures
+of the core reads, `get_file_contents`, `search_code`, `list_commits`, `get_commit`, `list_issues`, `search_issues`, `list_label`, `issue_read`, `pull_request_read` and `get_job_logs`, and of `github_api`; the model finds the others with Code Mode's `search`.
+None of them is a direct tool.
 
 ## Permissions
 
@@ -142,11 +143,14 @@ Never merge pull requests:
 { "permissions": [{ "action": "github_merge_pull_request", "resource": "*", "effect": "deny" }] }
 ```
 
-Ask before every GitHub tool, reads included:
+Ask before every GitHub MCP tool, reads included:
 
 ```json
 { "permissions": [{ "action": "github_*", "resource": "*", "effect": "ask" }] }
 ```
+
+`github_api` reads (GET, HEAD, `POST /markdown` and one GraphQL query) never ask; to stop them, deny `github_api` on
+`*`, which removes the tool.
 
 Keep one agent away from GitHub: add `{ "action": "github_*", "resource": "*", "effect": "deny" }` at the end of that
 agent's own `permissions` list.
@@ -158,7 +162,7 @@ whole project.
 
 OpenCode creates agents that exist only in your config after plugins run, so they do not get the default rules.
 They run GitHub tools, including writes, without asking. `/github-status` and the `/github` dialog list them under
-"Agents without default rules", and the next step names them. An agent whose own rules already ask for or deny
+"Agents without default rules", followed by the default block, and the next step reads: "Put the default rules shown by /github-status first in each listed agent's own permissions, in opencode.json or the agent's Markdown file, followed by your top-level rules for GitHub tools." An agent whose own rules already ask for or deny
 GitHub's tools, such as one that ends with `{ "action": "*", "resource": "*", "effect": "ask" }`, needs no fix and is
 not listed.
 
@@ -233,11 +237,11 @@ refused with `READ_ONLY`. In that path, the names GitHub reads without regard to
 
 - A change (any method but GET and HEAD, GraphQL and uploads included) never follows one. It fails with
   `API_REDIRECTED`, which names the new path, so you can call again with that path and have it checked there.
-- A GET or HEAD follows a redirect within the API only after `github_api`'s permission check passes for the new
-  `METHOD /path`, as if it had been called with it; with the default rules that asks. A script's `api` read gets the
-  same check, and an ask is refused. A read redirected outside the API fails with `API_REDIRECT_OFF_HOST`.
-- A download follows a redirect within the API the same way, and, as before, one to the storage that serves logs,
-  artifacts and release assets, without the `Authorization` header. To read logs, download them.
+- A GET or HEAD follows a redirect within the API base, such as a renamed repository's, without asking, as reads
+  never ask. A read redirected outside the API fails with `API_REDIRECT_OFF_HOST`.
+- A download follows a redirect within the API too, and one to the storage that serves logs, artifacts and release
+  assets, without the `Authorization` header. For job logs, GitHub's `get_job_logs` tool returns the text.
+- Pagination follows a `Link` only under the API base path.
 
 The token never appears in output, errors or logs. A 401 marks the account in `/connect` as needing a new sign-in.
 
@@ -288,14 +292,23 @@ server.
 
 ## Fine-grained token permissions
 
-With a fine-grained personal access token, each default toolset needs a read permission on the token: Metadata,
-Contents, Issues, Pull requests and Commit statuses (`repos`, `issues`, `pull_requests`, `labels`, `git`), Actions
-(`actions`), Code quality (`code_quality`), Code scanning alerts (`code_security`), Dependabot alerts
-(`dependabot`), Secret scanning alerts (`secret_protection`), Repository security advisories
-(`security_advisories`) and Discussions (`discussions`); for an organisation, also Members (the team tools) and
-Issue Types and Issue Fields. The token page that `/connect` opens fills in the repository permissions. A missing
-one fails with "Resource not accessible by personal access token", and `github_api` names the permission in its
-next step. Device sign-in needs none of this.
+The full list is in the README's [Sign in](https://github.com/joe-broadhead/opencode-github/blob/HEAD/README.md#sign-in).
+Which default toolset needs which read permission:
+
+| Permission | Toolsets |
+| --- | --- |
+| Metadata, Contents, Issues, Pull requests, Commit statuses | `repos`, `issues`, `pull_requests`, `labels`, `git` |
+| Actions | `actions` |
+| Code quality | `code_quality` |
+| Code scanning alerts | `code_security` |
+| Dependabot alerts | `dependabot` |
+| Secret scanning alerts | `secret_protection` |
+| Repository security advisories | `security_advisories` |
+| Discussions | `discussions` |
+| Members, Issue Types, Issue Fields (organisation) | the team and issue-type tools |
+
+A missing one fails with "Resource not accessible by personal access token", and `github_api` names the permission
+in its next step. Device sign-in needs none of this.
 
 ## `clientId` and `scopes`
 
@@ -343,8 +356,9 @@ GHE.com (data residency) is not supported yet; `host` refuses `*.ghe.com`.
 
 The plugin supports OpenCode `>=2.2.3 <2.3.0` and is tested on 2.2.3, 2.2.4 and 2.2.5. On a later 2.2 release it
 loads and works; the status shows `OpenCode: 2.2.6 (untested; supported range >=2.2.3 <2.3.0)`, and the status RPC
-`host.tested: false`. GitHub does not use the `host_untested` state: its state stays the connection's. Outside the
-range, including prereleases and development builds, it refuses to load:
+`host.tested: false`, and the state and next step stay those of the connection. Outside the range, including
+prereleases and development builds, it refuses to load, so there is no `/github-status`, `/github` dialog or status
+RPC, and no state `host_untested`:
 
 ```text
 HOST_UNTESTED: OpenCode 2.3.0 is outside the supported range >=2.2.3 <2.3.0. Next step: Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true.
@@ -366,7 +380,7 @@ passed through unchanged.
 | `OPTIONS_INVALID` | An option is unknown or has a wrong value. The message names the option. | Fix the options for @joe-broadhead/opencode-github in opencode.json. |
 | `HOST_UNTESTED` | OpenCode is outside `>=2.2.3 <2.3.0` and `allowUntestedHost` is not set. | Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true. |
 | `SKILLS_INVALID` | A skill file shipped with the plugin is missing or malformed. | Reinstall the plugin. |
-| `STATUS_UNAVAILABLE` | OpenCode did not report the `github` server's state. | Run /github-status again. |
+| `STATUS_UNAVAILABLE` | OpenCode did not report the `github` server's state. | Try again in a few seconds; if it persists, restart OpenCode. |
 | `SIGN_IN_EXPIRED` | The device code expired before it was entered. | Start the sign-in again. |
 | `SIGN_IN_CANCELLED` | The sign-in was cancelled on GitHub. | Start the sign-in again. |
 | `SIGN_IN_CODE_UNKNOWN` | GitHub did not recognise the device code. | Start the sign-in again. |
@@ -382,7 +396,7 @@ passed through unchanged.
 | `TOKEN_CHECK_TIMEOUT` | GitHub did not answer the token check within 10 seconds. | Try again. |
 | `TOKEN_CHECK_UNREACHABLE` | api.github.com could not be reached. | Check your network, then try again. |
 | `TOKEN_CHECK_FAILED` | GitHub could not check the token, or returned no account name. | Try again later. |
-| `READ_ONLY` | A `github_api` call would change GitHub, and `readOnly` is `true`. | Set the plugin option readOnly: false to allow changes; each one asks first. |
+| `READ_ONLY` | A `github_api` call would change GitHub, and `readOnly` is `true`. | Tell the user that this needs the plugin option readOnly: false, which they set in opencode.json; each change then asks first. |
 | `AUTH_REQUIRED` | `github_api` has no GitHub sign-in to use. | Run /connect and choose GitHub (GitHub Enterprise with `host`). |
 | `API_INPUT_INVALID` | The `github_api` input does not fit, for example `download` with a method other than GET. | Fix the github_api input and call it again. |
 | `API_PATH_INVALID` | The path is not a relative API path, has a `.` or `..` segment (also percent-encoded), or percent-encodes a character it can hold as itself. | Pass a relative API path such as /repos/OWNER/REPO/pulls. |
@@ -395,7 +409,7 @@ passed through unchanged.
 | `API_REDIRECT_LOOP` | GitHub redirected more than 5 times. | Try again later. |
 | `API_REDIRECT_INSECURE` | GitHub redirected to a non-HTTPS address. | Try again later. |
 | `API_REDIRECTED` | GitHub redirected a change, which is never followed. The message names the new path. | Call github_api again with path <the new path>, so the change is checked for that path. |
-| `API_REDIRECT_OFF_HOST` | GitHub redirected a read outside its API. | Pass download: { path } to save the response; a download follows GitHub's storage redirects, without the token. |
+| `API_REDIRECT_OFF_HOST` | GitHub redirected a read outside its API. | For job logs, call get_job_logs with return_content: true; for other files, pass download: { path }, which follows GitHub's storage redirects without the token. A script gets the get_job_logs method instead, and with `host` the step names only download. |
 | `SCRIPT_READ_ONLY` | A script's `api` call could change GitHub, or would download or upload a file. | Call api with GET, HEAD or a single GraphQL query; make changes from an OpenCode session, where they ask first. |
 
 A script's calls through the tools RPC, `github.platform.tools`, have more codes for sessions, permissions and the

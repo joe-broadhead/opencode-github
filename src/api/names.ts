@@ -47,7 +47,7 @@ export function permissionPath(path: string): string {
     const matched = pattern.every((part, index) => part === "@" || part === "*" || segments[index + 1] === undefined || part === segments[index + 1]!.toLowerCase())
     if (matched) pattern.forEach((part, index) => part === "@" && index + 1 < segments.length && names.add(index + 1))
   }
-  segments.forEach((segment, index) => {
+  segments.forEach((_segment, index) => {
     if (index > 1 && BEFORE_NAME.has(segments[index - 1]!.toLowerCase())) names.add(index)
   })
   return segments.map((segment, index) => (names.has(index) ? lower(segment) : segment)).join("/")

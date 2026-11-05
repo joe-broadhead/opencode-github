@@ -25,7 +25,7 @@ you sign in, and `opencode mcp list` shows `github  needs authentication`.
 ### Update
 
 Update with `opencode plugin update @joe-broadhead/opencode-github`, then run `opencode reload`. Your options and
-rules stay as they are. An entry pinned to a version (`@joe-broadhead/opencode-github@0.0.1`) does not update: remove
+rules stay as they are. An entry pinned to a version (`@joe-broadhead/opencode-github@<version>`) does not update: remove
 the `@<version>` from its `plugins` entry first.
 
 ## Sign in
@@ -70,17 +70,16 @@ pull request 42?". Agents use GitHub's own tools, read-only by default, from the
 issues, pull requests, labels, Actions runs and job logs, Git trees, discussions, code scanning, secret scanning,
 Dependabot and code quality alerts, security advisories, users and organisations. Examples: `github_issue_read`,
 `github_pull_request_read`, `github_get_file_contents`, `github_search_code` and `github_get_job_logs`. In Code Mode
-they are in the `github` namespace; `github_get_me`, `github_issue_read` and `github_pull_request_read` stay in the
-direct tool list. Projects, gists and notifications need extra scopes, so they are off by default.
+they are in the `github` namespace, whose catalog shows the core reads' signatures. Projects, gists and notifications need extra scopes, so they are off by default.
 
 **`github_api`** covers what GitHub's MCP tools cannot do: auto-merge, creating releases and uploading their assets,
 branch protection, rulesets, Actions variables, downloading artifacts and logs to a file, and any GraphQL. It calls
 GitHub's REST or GraphQL API with your GitHub sign-in, for example
 `{ "method": "GET", "path": "/repos/OWNER/REPO/branches/main/protection" }` or
-`{ "graphql": { "query": "query { viewer { login } }" } }`. GET, HEAD and a single GraphQL query read; every other
-call changes GitHub, asks first, and is refused while the plugin is read-only. Requests go only to GitHub's API. A
-change never follows a redirect; a read follows one within the API only after asking for the new path, and only a
-download follows one to GitHub's file storage, without your token. `download: { path }` saves a response to a file in the
+`{ "graphql": { "query": "query { viewer { login } }" } }`. GET, HEAD, `POST /markdown` and a single GraphQL query
+read; every other call changes GitHub, asks first, and is refused while the plugin is read-only. Requests go only to
+GitHub's API. A change never follows a redirect, a read follows one only within the API, and only a download follows
+one to GitHub's file storage, without your token. `download: { path }` saves a response to a file in the
 project, and `upload: { path, contentType }` sends a project file as a release asset; both ask first.
 
 Three skills come with it:
@@ -241,15 +240,17 @@ without default rules, OpenCode and Next step, with `none` where a row is empty.
 | `conflict` | Your OpenCode config or another plugin defines its own MCP server named github, so this plugin left it unchanged. Rename or remove that server to use this plugin's GitHub sign-in. |
 
 A **Rules that never match** row lists `github_api` rules with an upper-case owner or repo name (see
-[Permissions](#permissions)), and the next step gives the lower-case form. Otherwise, when the connection needs
-nothing, the next step names the agents without default rules and how to fix them (see
-[Permissions](#permissions)); on an untested OpenCode release it names the tested ones. Otherwise it is "Nothing to do."
+[Permissions](#permissions)), and the next step gives the lower-case form. A **Skills** row such as
+`github-pr-review replaced by <path>` means that a skill of yours with the same id, for example in
+`~/.config/opencode/skills/`, loads instead of the plugin's; the next step says to rename or move that file. Otherwise, when the connection needs
+nothing and agents are listed, the next step reads: "Put the default rules shown by /github-status first in each listed agent's own permissions, in opencode.json or the agent's Markdown file, followed by your top-level rules for GitHub tools." (see [Permissions](#permissions)). With `allowUntestedHost` outside the supported
+range, it names the tested OpenCode releases. Otherwise it is "Nothing to do."
 
 Error codes:
 
 | Code | What to do |
 | --- | --- |
-| `HOST_UNTESTED` | OpenCode is outside the supported range `>=2.2.3 <2.3.0`. Update OpenCode or the plugin, or set the option `allowUntestedHost: true` to load it anyway, with a warning in the status. |
+| `HOST_UNTESTED` | OpenCode is outside the supported range `>=2.2.3 <2.3.0`, so the plugin does not load: there is no `/github-status`, `/github` dialog or status RPC. Update OpenCode or the plugin, or set the option `allowUntestedHost: true` to load it anyway, with a warning in the status. |
 | `OPTIONS_INVALID` | An option is unknown or has a wrong value; the message names it. Fix that option for the plugin in `opencode.json`. |
 | `SIGN_IN_…`, `TOKEN_…`, `DEVICE_…`, `CLIENT_ID_UNKNOWN` | Sign-in failed. The message ends with the next step; [the error codes](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/configuration.md#errors) list them all. |
 
