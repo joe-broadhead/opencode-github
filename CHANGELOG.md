@@ -2,6 +2,66 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- The status names a skill of yours with the same id as one of the plugin's, such as
+  `~/.config/opencode/skills/github-pr-review/SKILL.md`, which OpenCode loads instead of the plugin's. `/github-status`
+  and the `/github` dialog show it in a **Skills** row, the status RPC in `shadowedSkills` (`[{ id, path }]`), and
+  the next step says to rename or move that file.
+
+### Changed
+
+- Code Mode's `github` catalog now shows the signatures of the core reads (`get_file_contents`, `search_code`,
+  `list_commits`, `get_commit`, `list_issues`, `search_issues`, `list_label`, `issue_read`, `pull_request_read` and
+  `get_job_logs`) beside `github_api`, instead of `get_me`, `issue_read` and `pull_request_read`. Agents used
+  `github_api` where one of these does the job, because only its signature was shown. `get_me` is still one `search`
+  away.
+- `github_api`'s description starts with "Use only when no GitHub tool covers the request", points to
+  `get_job_logs` for job logs, and states the result: `{ ok, status, data, truncated, nextStep? }`, a 4xx is
+  `ok: false`, and data over 100,000 bytes is cut.
+- The `github` namespace description says whether the plugin is read-only now, names the three skills, and tells
+  scripts to use the tools RPC (with its envelope and guide), never `gh`, `curl` or a copied token.
+- The skills say when to use them, and teach what agents got wrong: `pull_request_read` `get` first, one method at a
+  time; asking for the repository before any call when only a number is given; `get_job_logs` with `run_id` and
+  `failed_only` for an earlier CI failure; `list_label` before suggesting labels; `fields` to keep lists small; a
+  plain-words `search_issues` across open and closed issues for duplicates; `@me` in search queries instead of
+  `get_me`; and permalinks at a commit SHA. The "Scripts" paragraph moved to the namespace description.
+- With agents without default rules, the next step is now one fixed sentence: "Put the default rules shown by
+  /github-status first in each listed agent's own permissions, in opencode.json or the agent's Markdown file,
+  followed by your top-level rules for GitHub tools." The agents row lists the names, followed by the rules, with no
+  extra sentence.
+- An untested OpenCode release inside the supported range no longer changes the next step; the OpenCode row still
+  says it is untested. With `allowUntestedHost` outside the range, the next step still names the tested releases.
+- Next steps: `READ_ONLY` tells the model to ask you to set `readOnly: false`, instead of setting it;
+  `STATUS_UNAVAILABLE` says to try again in a few seconds, then restart OpenCode; `TOOL_UNAVAILABLE` points at
+  `describe`'s `detail`; a result cut at 100,000 bytes suggests `per_page` or `get_file_contents`, not a download;
+  and a script is never told to download.
+- A `github_api` input that is neither REST nor GraphQL, or both, says what to pass, and one form's own problem, such
+  as a missing `path`, is named, instead of "Invalid input".
+- The tools RPC: a deny names the action it refused, and its next step says to remove or narrow that deny rule, add
+  a later allow rule to the session, or use another agent (shared tools RPC module v4).
+
+### Fixed
+
+- **Security:** an `upload` to `POST /markdown` or `/markdown/raw` ran as a read: without asking, and also while
+  read-only. Any upload now asks first, and is refused with `READ_ONLY` while the plugin is read-only.
+- **Security:** with `host` (GitHub Enterprise Server), `paginate` followed a `Link` to any path on the server, with
+  the token. It now follows only pages under the API base path, such as `/api/v3/`.
+- A read redirected within the API, such as a renamed repository's, asked for permission, and a script's read was
+  refused with `PERMISSION_DENIED`. Reads never ask, so their redirects within the API no longer do either. Changes
+  still never follow a redirect.
+- A 403 for a missing OAuth scope told token users to add it to the `scopes` option, which only affects device
+  sign-in. Without device sign-in it now says to create a token with that scope and replace the saved one in
+  `/connect`.
+- `API_REDIRECT_OFF_HOST` on job logs sent the model to `download`, and scripts too, which cannot download. It now
+  names `get_job_logs`.
+- The docs said `get_me`, `issue_read` and `pull_request_read` stay in the direct tool list. In Code Mode, `pinned`
+  only shows a tool's signature in the catalog; the docs now say so.
+- `docs/configuration.md` offered `github_*` ask as asking before every tool, reads included; `github_api` reads
+  never ask. It now says how to stop them.
+
 ## [0.0.4] - 2026-11-04
 
 ### Added
