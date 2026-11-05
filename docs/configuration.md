@@ -143,11 +143,14 @@ Never merge pull requests:
 { "permissions": [{ "action": "github_merge_pull_request", "resource": "*", "effect": "deny" }] }
 ```
 
-Ask before every GitHub tool, reads included:
+Ask before every GitHub MCP tool, reads included:
 
 ```json
 { "permissions": [{ "action": "github_*", "resource": "*", "effect": "ask" }] }
 ```
+
+`github_api` reads (GET, HEAD, `POST /markdown` and one GraphQL query) never ask; to stop them, deny `github_api` on
+`*`, which removes the tool.
 
 Keep one agent away from GitHub: add `{ "action": "github_*", "resource": "*", "effect": "deny" }` at the end of that
 agent's own `permissions` list.
@@ -289,14 +292,23 @@ server.
 
 ## Fine-grained token permissions
 
-With a fine-grained personal access token, each default toolset needs a read permission on the token: Metadata,
-Contents, Issues, Pull requests and Commit statuses (`repos`, `issues`, `pull_requests`, `labels`, `git`), Actions
-(`actions`), Code quality (`code_quality`), Code scanning alerts (`code_security`), Dependabot alerts
-(`dependabot`), Secret scanning alerts (`secret_protection`), Repository security advisories
-(`security_advisories`) and Discussions (`discussions`); for an organisation, also Members (the team tools) and
-Issue Types and Issue Fields. The token page that `/connect` opens fills in the repository permissions. A missing
-one fails with "Resource not accessible by personal access token", and `github_api` names the permission in its
-next step. Device sign-in needs none of this.
+The full list is in the README's [Sign in](https://github.com/joe-broadhead/opencode-github/blob/HEAD/README.md#sign-in).
+Which default toolset needs which read permission:
+
+| Permission | Toolsets |
+| --- | --- |
+| Metadata, Contents, Issues, Pull requests, Commit statuses | `repos`, `issues`, `pull_requests`, `labels`, `git` |
+| Actions | `actions` |
+| Code quality | `code_quality` |
+| Code scanning alerts | `code_security` |
+| Dependabot alerts | `dependabot` |
+| Secret scanning alerts | `secret_protection` |
+| Repository security advisories | `security_advisories` |
+| Discussions | `discussions` |
+| Members, Issue Types, Issue Fields (organisation) | the team and issue-type tools |
+
+A missing one fails with "Resource not accessible by personal access token", and `github_api` names the permission
+in its next step. Device sign-in needs none of this.
 
 ## `clientId` and `scopes`
 

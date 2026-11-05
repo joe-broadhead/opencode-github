@@ -25,7 +25,7 @@ you sign in, and `opencode mcp list` shows `github  needs authentication`.
 ### Update
 
 Update with `opencode plugin update @joe-broadhead/opencode-github`, then run `opencode reload`. Your options and
-rules stay as they are. An entry pinned to a version (`@joe-broadhead/opencode-github@0.0.1`) does not update: remove
+rules stay as they are. An entry pinned to a version (`@joe-broadhead/opencode-github@<version>`) does not update: remove
 the `@<version>` from its `plugins` entry first.
 
 ## Sign in
