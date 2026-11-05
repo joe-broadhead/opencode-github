@@ -150,7 +150,8 @@ These fields have the same names and meanings in every plugin of this family:
 
 GitHub's own fields sit beside them: `account`, `readOnly`, `toolsets`, `tools` (`visible`, `unknown`, `mode`),
 `permissionsBlock` (the rules to copy, while agents are listed), `unmatchedRules` (`github_api` rule resources with an
-upper-case owner or repo name, which never match), `hostWarning` (outside the range, with
+upper-case owner or repo name, which never match), `shadowedSkills` (`{ id, path }` for each of the plugin's skills
+that a same-id skill at another path replaces), `hostWarning` (outside the range, with
 `allowUntestedHost`) and `enterprise` (with `host`).
 
 ## What scripts cannot do

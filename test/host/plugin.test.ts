@@ -3,7 +3,7 @@
 // which builds first; set HOST_SDK_DIR to run another SDK release (see harness.ts).
 import { ROOT } from "./isolate.js"
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, realpathSync } from "node:fs"
+import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, sep } from "node:path"
 import { Plugin } from "@opencode/plugin"
@@ -216,11 +216,17 @@ describe(`defaults on OpenCode ${SDK_VERSION}`, () => {
 
 describe("writes, lockdown and the user's own rules", () => {
   const userRules = [allow("github_create_pull_request"), deny("github_issue_read")]
+  // A user's own skill named like one of the plugin's, which OpenCode loads instead.
+  const userSkills = join(ROOT, "user-skills")
+  const userSkill = join(userSkills, "github-pr-review", "SKILL.md")
   let host: Host
   beforeAll(async () => {
+    mkdirSync(join(userSkills, "github-pr-review"), { recursive: true })
+    writeFileSync(userSkill, "---\nname: github-pr-review\ndescription: The user's own.\n---\nThe user's own.\n")
     host = await startHost({
       options: { readOnly: false, lockdown: true, toolsets: ["context", "issues", "pull_requests"] },
       config: () => ({
+        skills: [userSkills],
         permissions: userRules,
         // The documented fix for an agent defined only in the user's config: the plugin's
         // block in that agent's own list, then the user's top-level rules for GitHub again.
@@ -284,6 +290,15 @@ describe("writes, lockdown and the user's own rules", () => {
     expect(await attempt(host, sessionID, "reviewer", "github_create_pull_request")).toEqual({ asked: undefined, ok: true })
     expect(await attempt(host, sessionID, "reviewer", "github_issue_read")).toMatchObject({ asked: undefined, ok: false })
     expect(await status(host)).toMatchObject({ state: "connected", readOnly: false, toolsets: ["context", "issues", "pull_requests"], unguardedAgents: [] })
+  })
+
+  // TRIAGE decision 8: OpenCode's public skill list shows which file won.
+  test("status names a user's skill that OpenCode loads instead of the plugin's", async () => {
+    const shadowed = (await status(host)).shadowedSkills
+    expect(shadowed).toHaveLength(1)
+    expect(shadowed![0]!.id).toBe("github-pr-review")
+    expect(realpathSync(shadowed![0]!.path)).toBe(realpathSync(userSkill))
+    expect((await status(host)).nextStep).toStartWith('Rename or move the "github-pr-review" skill at ')
   })
 })
 

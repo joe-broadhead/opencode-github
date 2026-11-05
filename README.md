@@ -241,7 +241,9 @@ without default rules, OpenCode and Next step, with `none` where a row is empty.
 | `conflict` | Your OpenCode config or another plugin defines its own MCP server named github, so this plugin left it unchanged. Rename or remove that server to use this plugin's GitHub sign-in. |
 
 A **Rules that never match** row lists `github_api` rules with an upper-case owner or repo name (see
-[Permissions](#permissions)), and the next step gives the lower-case form. Otherwise, when the connection needs
+[Permissions](#permissions)), and the next step gives the lower-case form. A **Skills** row such as
+`github-pr-review replaced by <path>` means that a skill of yours with the same id, for example in
+`~/.config/opencode/skills/`, loads instead of the plugin's; the next step says to rename or move that file. Otherwise, when the connection needs
 nothing and agents are listed, the next step reads: "Put the default rules shown by /github-status first in each listed agent's own permissions, in opencode.json or the agent's Markdown file, followed by your top-level rules for GitHub tools." (see [Permissions](#permissions)). With `allowUntestedHost` outside the supported
 range, it names the tested OpenCode releases. Otherwise it is "Nothing to do."
 

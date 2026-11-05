@@ -7,7 +7,7 @@ import { HOST_RANGE, TESTED_HOSTS, isTestedHost } from "./host-version.js"
 import { lowerResource, neverMatches } from "./api/names.js"
 import { API_ACTION } from "./api/tool.js"
 import { type Rule, defaultRules, matches, unguardedAgents } from "./permissions.js"
-import { AGENT_STEP, GithubRpc, NOTHING_TO_DO, SERVER_NAME, type Status, formatStatus } from "./rpc.js"
+import { AGENT_STEP, GithubRpc, NOTHING_TO_DO, SERVER_NAME, type SkillPath, type Status, formatStatus } from "./rpc.js"
 import { PLUGIN_VERSION } from "./version.js"
 
 export const STATUS_COMMAND = "github-status"
@@ -17,6 +17,7 @@ type StatusContext = {
   readonly mcp: Pick<Plugin.Context["mcp"], "list">
   readonly integration: { readonly connection: Pick<Plugin.Context["integration"]["connection"], "active"> }
   readonly agent: Pick<Plugin.Context["agent"], "list">
+  readonly skill: Pick<Plugin.Context["skill"], "list">
 }
 
 export type StatusDeps = {
@@ -31,10 +32,20 @@ export type StatusDeps = {
   readonly tools: () => { readonly visible: number; readonly unknown: readonly string[] }
   /** The GitHub Enterprise Server host, where no MCP server is registered. */
   readonly enterprise?: string
+  /** The skills the plugin registers, with their paths. */
+  readonly skills: readonly SkillPath[]
 }
 
 export async function computeStatus(ctx: StatusContext, deps: StatusDeps): Promise<Status> {
-  const [servers, agents] = await Promise.all([ctx.mcp.list(), ctx.agent.list()])
+  const [servers, agents, listed] = await Promise.all([
+    ctx.mcp.list(),
+    ctx.agent.list(),
+    // The skill check is advice: a failed list must not hide the rest of the status.
+    ctx.skill.list().then(
+      (result) => result.data,
+      () => undefined,
+    ),
+  ])
   let state: Status["state"]
   let account: string | undefined
   if (deps.enterprise) {
@@ -49,6 +60,7 @@ export async function computeStatus(ctx: StatusContext, deps: StatusDeps): Promi
   }
   const unguarded = unguardedAgents(agents.data)
   const unmatched = unmatchedRules(agents.data)
+  const shadowed = shadowedSkills(deps.skills, listed ?? [])
   const tools = deps.tools()
   const tested = isTestedHost(deps.hostVersion)
   return {
@@ -60,6 +72,7 @@ export async function computeStatus(ctx: StatusContext, deps: StatusDeps): Promi
     tools: { visible: tools.visible, unknown: [...tools.unknown], mode: deps.options.unknownTools },
     unguardedAgents: unguarded,
     ...(unmatched.length > 0 ? { unmatchedRules: unmatched } : {}),
+    ...(shadowed.length > 0 ? { shadowedSkills: shadowed } : {}),
     ...(unguarded.length > 0 ? { permissionsBlock: defaultRules() } : {}),
     host: { version: deps.hostVersion, range: HOST_RANGE, tested },
     ...(deps.hostWarning ? { hostWarning: deps.hostWarning } : {}),
@@ -68,6 +81,7 @@ export async function computeStatus(ctx: StatusContext, deps: StatusDeps): Promi
       (deps.enterprise ? enterpriseStep(state) : connectionStep(state)) ??
       ruleStep(unmatched) ??
       (unguarded.length > 0 ? AGENT_STEP : undefined) ??
+      skillStep(shadowed) ??
       hostStep(deps.hostWarning !== undefined) ??
       NOTHING_TO_DO,
   }
@@ -87,6 +101,19 @@ function ruleStep(unmatched: readonly string[]): string | undefined {
   if (first === undefined) return undefined
   const more = unmatched.length > 1 ? ` (and ${unmatched.length - 1} more)` : ""
   return `Write the github_api rule "${first}"${more} with lower-case owner and repo names, as "${lowerResource(first)}": as written it never matches.`
+}
+
+/** The plugin's skills that OpenCode lists from another file: a skill with the same id, such as a user's, replaced it. */
+function shadowedSkills(own: readonly SkillPath[], listed: readonly SkillPath[]): SkillPath[] {
+  return own.flatMap((skill) => {
+    const found = listed.find((item) => item.id === skill.id)
+    return found && found.path !== skill.path ? [{ id: skill.id, path: found.path }] : []
+  })
+}
+
+function skillStep(shadowed: readonly SkillPath[]): string | undefined {
+  if (shadowed.length === 0) return undefined
+  return `Rename or move ${shadowed.map((skill) => `the "${skill.id}" skill at ${skill.path}`).join(" and ")}, which OpenCode loads instead of the plugin's skill of the same name.`
 }
 
 /** Only outside the supported range (allowUntestedHost); an untested release inside it leaves the next step alone (S13). */

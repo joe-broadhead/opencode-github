@@ -50,6 +50,8 @@ describe("isStatus and the JSON Schema", () => {
     expect(isStatus(missing)).toBe(false)
     expect(isStatus(status({ tools: { visible: -1, unknown: [], mode: "ask" } }))).toBe(false)
     expect(isStatus(status({ permissionsBlock: [{ action: "x", resource: "*", effect: "maybe" as "ask" }] }))).toBe(false)
+    expect(isStatus(status({ shadowedSkills: [{ id: "github-pr-review", path: "/x/SKILL.md" }] }))).toBe(true)
+    expect(isStatus(status({ shadowedSkills: [{ id: "github-pr-review" } as unknown as { id: string; path: string }] }))).toBe(false)
     expect(isStatus(status({ host: { version: "2.2.3", range: ">=2.2.3 <2.3.0", tested: true, extra: 1 } as unknown as Status["host"] }))).toBe(false)
     expect(isStatus(status({ host: { version: "2.2.3", range: ">=2.2.3 <2.3.0" } as unknown as Status["host"] }))).toBe(false)
     const { version: _version, ...unversioned } = status()
@@ -59,7 +61,7 @@ describe("isStatus and the JSON Schema", () => {
 
   it("states the same fields and required fields in its JSON Schema", () => {
     expect(Object.keys(STATUS_SCHEMA.properties).sort()).toEqual(
-      ["account", "enterprise", "host", "hostWarning", "nextStep", "permissionsBlock", "readOnly", "state", "tools", "toolsets", "unguardedAgents", "unmatchedRules", "version"],
+      ["account", "enterprise", "host", "hostWarning", "nextStep", "permissionsBlock", "readOnly", "shadowedSkills", "state", "tools", "toolsets", "unguardedAgents", "unmatchedRules", "version"],
     )
     expect([...STATUS_SCHEMA.required].sort()).toEqual(["host", "nextStep", "readOnly", "state", "tools", "toolsets", "unguardedAgents", "version"])
     expect(STATUS_SCHEMA.additionalProperties).toBe(false)

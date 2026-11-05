@@ -110,6 +110,9 @@ approvals could not override it, and the same call could be judged differently b
 rules keep one source of truth that the user can read and change. The plugin's one hook belongs to the tools RPC: it
 only turns an ask on one of the RPC's own script calls into a deny (see [Tools RPC](#tools-rpc)).
 
+`computeStatus` also compares the plugin's skills with `ctx.skill.list()`: a listed skill with the same id at another
+path, such as a user's, is the one OpenCode loads, so the status names it in `shadowedSkills` and a Skills row.
+
 Agents defined only in the user's config are created after plugins run and get no rules. `unguardedAgents` in
 `src/permissions.ts` finds agents without the default block whose own rules would let an unknown `github_` tool run
 without asking (the last matching rule wins), and the status names them with the block to copy.

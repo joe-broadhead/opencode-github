@@ -14,7 +14,11 @@ const ID = "mcp_0123456789abcdef"
 const LOCATION = { directory: "/workspace" }
 const BASE: Rule = { action: "*", resource: "*", effect: "allow" }
 
-function fakeCtx(input: { server?: ServerStatus; label?: string; agents?: Array<{ id: string; permissions: Rule[] }>; fail?: boolean } = {}) {
+const OWN = "/pkg/skills/github-pr-review/SKILL.md"
+
+function fakeCtx(
+  input: { server?: ServerStatus; label?: string; agents?: Array<{ id: string; permissions: Rule[] }>; fail?: boolean; skills?: Array<{ id: string; path: string }> | "fail" } = {},
+) {
   const calls = { list: 0, synthetic: [] as unknown[] }
   const registered: { commands: Array<Record<string, any>>; rpc?: { definition: any; handlers: any } } = { commands: [] }
   const ctx = {
@@ -31,6 +35,12 @@ function fakeCtx(input: { server?: ServerStatus; label?: string; agents?: Array<
     },
     agent: {
       list: async () => ({ location: LOCATION, data: input.agents ?? [{ id: "build", permissions: insertDefaults([BASE], defaultRules()) }] }),
+    },
+    skill: {
+      list: async () => {
+        if (input.skills === "fail") throw new Error("no skills")
+        return { location: LOCATION, data: input.skills ?? [{ id: "github-pr-review", path: OWN }] }
+      },
     },
     integration: {
       connection: {
@@ -62,6 +72,7 @@ function deps(overrides: Partial<StatusDeps> = {}): StatusDeps {
     integrationID: () => ID,
     tools: () => ({ visible: 26, unknown: [] }),
     hostVersion: "2.2.3",
+    skills: [{ id: "github-pr-review", path: OWN }],
     ...overrides,
   }
 }
@@ -199,6 +210,22 @@ describe("computeStatus", () => {
     const guarded = await computeStatus(fakeCtx({ server: "connected" }).ctx, deps())
     expect(guarded.unguardedAgents).toEqual([])
     expect("permissionsBlock" in guarded).toBe(false)
+  })
+
+  // TRIAGE decision 8: a user's skill with the plugin's id loads instead of the plugin's, so status names it.
+  it("names a skill that replaces one of the plugin's, in a row and the next step", async () => {
+    const theirs = "/home/me/.config/opencode/skills/github-pr-review/SKILL.md"
+    const status = await computeStatus(fakeCtx({ server: "connected", label: "octocat", skills: [{ id: "github-pr-review", path: theirs }] }).ctx, deps())
+    expect(status.shadowedSkills).toEqual([{ id: "github-pr-review", path: theirs }])
+    expect(status.nextStep).toBe(`Rename or move the "github-pr-review" skill at ${theirs}, which OpenCode loads instead of the plugin's skill of the same name.`)
+    expect(formatStatus(status)).toContain(`\nHost: github.com\nSkills: github-pr-review replaced by ${theirs}\nTools:`)
+    expect(isStatus(status)).toBe(true)
+    // The plugin's own, or a list that fails, gives nothing.
+    for (const skills of [undefined, "fail"] as const) {
+      const own = await computeStatus(fakeCtx({ server: "connected", label: "octocat", ...(skills ? { skills } : {}) }).ctx, deps())
+      expect(own).toMatchObject({ state: "connected", nextStep: "Nothing to do." })
+      expect("shadowedSkills" in own).toBe(false)
+    }
   })
 
   it("leaves out empty optional fields", async () => {
