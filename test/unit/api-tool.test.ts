@@ -207,7 +207,9 @@ describe("github_api", () => {
   it("refuses writes while read-only, without asking", async () => {
     const api = setUp({ readOnly: true })
     for (const input of [{ method: "PATCH", path: "/repos/o/r" }, { graphql: { query: "mutation { addStar(input: {}) { clientMutationId } }" } }]) {
-      expect(await message(api.run(input))).toMatch(/^READ_ONLY: .* changes GitHub, and the plugin is read-only\. Next step: Set the plugin option readOnly: false/)
+      expect(await message(api.run(input))).toMatch(
+        /^READ_ONLY: .* changes GitHub, and the plugin is read-only\. Next step: Tell the user that this needs the plugin option readOnly: false, which they set in opencode\.json; each change then asks first\.$/,
+      )
     }
     expect(api.asserts).toEqual([])
     expect(api.requests).toEqual([])
