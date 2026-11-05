@@ -9,7 +9,7 @@ const RESUBSCRIBE_MS = 5_000
 
 type SignInStatusContext = {
   readonly mcp: Pick<Plugin.Context["mcp"], "list">
-  readonly integration: { readonly connection: Pick<Plugin.Context["integration"]["connection"], "active" | "status"> }
+  readonly integration: Pick<Plugin.Context["integration"], "get" | "connection">
   readonly event: Pick<Plugin.Context["event"], "subscribe">
 }
 
@@ -28,8 +28,12 @@ export async function registerSignInStatus(
     if (!id || stopped.signal.aborted) return
     const [servers, connection] = await Promise.all([ctx.mcp.list(), ctx.integration.connection.active(id)])
     if (connection?.type !== "credential") return
+    // `active` returns the credential alone: the status the plugin set is projected by `get`. Read it there, so the
+    // mark it wrote is the one it clears.
+    const shown = (await ctx.integration.get({ integrationID: id })).data.connections?.find((item) => item.type === "credential" && item.id === connection.id)
+    const status = shown?.type === "credential" ? shown.status : undefined
     const rejected = servers.data.find((server) => server.name === input.serverName)?.status.status === "needs_auth"
-    if (rejected === (connection.status !== undefined)) return
+    if (rejected === (status !== undefined)) return
     await ctx.integration.connection.status({
       integrationID: id,
       connection,

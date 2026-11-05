@@ -51,6 +51,8 @@ export interface FakeGitHub {
   calls(): string[]
   /** From now on GitHub rejects every token, as after a revocation. */
   revoke(): void
+  /** From now on GitHub accepts tokens again, as after a new sign-in. */
+  restore(): void
   close(): Promise<void>
 }
 
@@ -139,6 +141,9 @@ export function startFakeGitHub(tools: readonly FakeTool[] = FAKE_TOOLS): FakeGi
     calls: () => requests.filter((request) => request.rpc === "tools/call").map((request) => request.tool ?? ""),
     revoke: () => {
       revoked = true
+    },
+    restore: () => {
+      revoked = false
     },
     close: () => server.stop(true),
   }
