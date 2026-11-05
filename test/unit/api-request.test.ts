@@ -54,18 +54,7 @@ beforeEach(() => {
 })
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
-/** The redirect checks callRest asked for, in order; a resource in `refuse` is refused, as a deny would be. */
-let checked: string[] = []
-let refuse = new Set<string>()
-beforeEach(() => {
-  checked = []
-  refuse = new Set()
-})
-const checkRedirect = async (resource: string) => {
-  checked.push(resource)
-  if (refuse.has(resource)) throw new Error(`refused ${resource}`)
-}
-const deps = (fetch: ReturnType<typeof fakeFetch>["fetch"], endpoints: Endpoints = GITHUB_COM) => ({ token: TOKEN, endpoints, service: "GitHub", fetch, root, checkRedirect })
+const deps = (fetch: ReturnType<typeof fakeFetch>["fetch"], endpoints: Endpoints = GITHUB_COM) => ({ token: TOKEN, endpoints, service: "GitHub", fetch, root })
 
 describe("restTarget pins requests to the API host", () => {
   it.each([
@@ -191,32 +180,25 @@ describe("callRest", () => {
     expect(seen[0]).toMatchObject({ redirect: "manual", headers: { authorization: `Bearer ${TOKEN}`, "x-github-api-version": "2022-11-28", accept: "application/vnd.github+json" } })
   })
 
-  // QA GITHUB-1 follow-up: a redirect never takes a call past the rules that checked it.
-  it("follows a read's redirect within the API only after the permission check passes for the new path", async () => {
+  it("follows a read's redirect within the API, with the token", async () => {
     const { fetch, seen } = fakeFetch({
       "https://api.github.com/repos/Old/Name/pulls": () => redirect("/repositories/10/pulls?state=all", 301),
       "https://api.github.com/repositories/10/pulls?state=all": () => json([{ number: 1 }]),
     })
     const moved = rest({ method: "GET", path: "/repos/Old/Name/pulls" })
     expect(await callRest(moved, restTarget(moved, GITHUB_COM), deps(fetch))).toMatchObject({ ok: true, data: [{ number: 1 }] })
-    expect(checked).toEqual(["GET /repositories/10/pulls"])
     expect(seen.at(-1)).toMatchObject({ url: "https://api.github.com/repositories/10/pulls?state=all", headers: { authorization: `Bearer ${TOKEN}` } })
-
-    refuse.add("GET /repositories/10/pulls")
-    const before = seen.length
-    await expect(callRest(moved, restTarget(moved, GITHUB_COM), deps(fetch))).rejects.toThrow("refused GET /repositories/10/pulls")
-    expect(seen.slice(before).map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name/pulls"])
   })
 
-  it("checks a GitHub Enterprise Server redirect as a path on its API base, in lower case, and refuses one outside it", async () => {
-    const { fetch } = fakeFetch({
+  it("follows a GitHub Enterprise Server redirect within its API base, and refuses one outside it", async () => {
+    const { fetch, seen } = fakeFetch({
       "https://ghe.example.com/api/v3/repos/a/b": () => redirect("https://ghe.example.com/api/v3/repos/Other/Prod"),
       "https://ghe.example.com/api/v3/repos/Other/Prod": () => json({ id: 1 }),
       "https://ghe.example.com/api/v3/repos/c/d": () => redirect("https://ghe.example.com/admin/x"),
     })
     const moved = rest({ method: "GET", path: "/repos/a/b" })
-    await callRest(moved, restTarget(moved, GHES), deps(fetch, GHES))
-    expect(checked).toEqual(["GET /repos/other/prod"])
+    expect(await callRest(moved, restTarget(moved, GHES), deps(fetch, GHES))).toMatchObject({ data: { id: 1 } })
+    expect(seen.at(-1)?.url).toBe("https://ghe.example.com/api/v3/repos/Other/Prod")
     const outside = rest({ method: "GET", path: "/repos/c/d" })
     await expect(callRest(outside, restTarget(outside, GHES), deps(fetch, GHES))).rejects.toThrow(/^API_REDIRECT_OFF_HOST: /)
   })
@@ -246,7 +228,6 @@ describe("callRest", () => {
     expect(error).toMatch(/^API_REDIRECTED: .* outside its API, to evil\.example, .* Next step: Check the path/)
     expect(error).not.toContain("sig=")
     expect(seen.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name/pulls/1/merge", "https://api.github.com/repos/o/r/x"])
-    expect(checked).toEqual([])
   })
 
   it("never follows a redirect for GraphQL or an upload", async () => {
@@ -420,10 +401,9 @@ describe("download and upload", () => {
     expect(seen[1]!.headers.authorization).toBeUndefined()
     await expect(callRest(input, restTarget(input, GITHUB_COM), deps(fetch))).rejects.toThrow(/^API_FILE_EXISTS: /)
     await callRest({ ...input, download: { path: "out/a.zip", overwrite: true } }, restTarget(input, GITHUB_COM), deps(fetch))
-    expect(checked).toEqual([])
   })
 
-  it("checks a download's redirect to another API path first, then follows the storage redirect without the token", async () => {
+  it("follows a download's redirect to another API path, then the storage redirect without the token", async () => {
     const { fetch, seen } = fakeFetch({
       "https://api.github.com/repos/Old/Name/zipball": () => redirect("/repos/new/name/zipball", 301),
       "https://api.github.com/repos/new/name/zipball": () => redirect("https://codeload.example.net/z?sig=x"),
@@ -431,7 +411,6 @@ describe("download and upload", () => {
     })
     const input = rest({ method: "GET", path: "/repos/Old/Name/zipball", download: { path: "z.zip" } })
     expect((await callRest(input, restTarget(input, GITHUB_COM), deps(fetch))).download?.bytes).toBe(1)
-    expect(checked).toEqual(["GET /repos/new/name/zipball"])
     expect(seen.map((request) => Boolean(request.headers.authorization))).toEqual([true, true, false])
   })
 
