@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `github_api` names the GitHub tool that covers a read: a working GET of `/repos/OWNER/REPO/pulls`, `/pulls/{number}`,
+  `/tags`, `/commits`, `/commits/{sha}`, `/contents/…`, `/issues`, `/issues/{number}` or `/actions/runs` gets a
+  `nextStep` such as "GitHub's list_tags tool covers this read: call it instead of github_api." The call still runs.
+  A script's `api` method names the tools RPC method instead. There is no hint with `host`, or when the tool's toolset
+  is off.
+- Code Mode's `github` catalog also shows `list_pull_requests`' signature, beside the other core reads.
+
 ## [0.0.5] - 2026-11-05
 
 ### Added

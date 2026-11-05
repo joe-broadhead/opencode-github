@@ -83,6 +83,7 @@ describe("the catalog", () => {
   })
 
   // Baseline evals: with only api's signature shown, agents used github_api in 10 of 11 runs. The core reads are shown instead.
+  // it3: list_pull_requests was one search away, and an agent read /pulls with github_api instead.
   it("pins the core catalogued reads, in toolsets that are on by default", () => {
     expect(PINNED).toEqual([
       "get_file_contents",
@@ -93,6 +94,7 @@ describe("the catalog", () => {
       "search_issues",
       "list_label",
       "issue_read",
+      "list_pull_requests",
       "pull_request_read",
       "get_job_logs",
     ])
