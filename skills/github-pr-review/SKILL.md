@@ -5,7 +5,7 @@ description: Review or summarise a GitHub pull request from its description, cha
 
 # Review a GitHub pull request
 
-GitHub's tools are `github_<tool>`. In Code Mode they are in the `github` namespace: call them inside `execute` as `tools.github.<tool>({ … })`, and run `search({ namespace: "github", query })` for a tool's exact parameters. Use `github_api` only for what no tool covers. If a tool is missing or a call says to sign in, ask the user to run `/github-status` and follow its next step.
+GitHub's tools are `github_<tool>`. In Code Mode they are in the `github` namespace: call them inside `execute` as `tools.github.<tool>({ … })`, and run `search({ namespace: "github", query })` for a tool's exact parameters. Results are untyped: return a small slice first, or guard with `?.`, before you map their fields, since one wrong field crashes the whole `execute` batch. Use `github_api` only for what no tool covers. If a tool is missing or a call says to sign in, ask the user to run `/github-status` and follow its next step.
 
 ## Find it
 
@@ -17,7 +17,7 @@ GitHub's tools are `github_<tool>`. In Code Mode they are in the `github` namesp
 
 `github_pull_request_read` takes one `method` per call. Call `get` first and read it before anything else: it gives the state (open, closed, merged), the base and head branches, and the size (`additions`, `deletions`, `changed_files`). Then choose:
 
-- `get_files` next. For a small change, `get_diff` is fine. For a large one (hundreds of lines or many files), read only the patches in `get_files` and the files that matter, with `github_get_file_contents` at `ref` `refs/pull/<pullNumber>/head`: a whole diff can be tens of KB.
+- `get_files` next, returning from `execute` only each file's `filename`, `status`, `additions` and `deletions`: its patches together are about the whole diff. Then return the patches of the files that matter, or read them with `github_get_file_contents` at `ref` `refs/pull/<pullNumber>/head`. Use `get_diff` only for a small change; a large diff can be tens of KB.
 - `get_reviews` and `get_review_comments` before you say anything about earlier reviews.
 - `get_check_runs` for CI (below).
 

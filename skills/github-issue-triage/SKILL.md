@@ -5,13 +5,13 @@ description: Triage GitHub issues: list what is open or unlabelled, read issues,
 
 # Triage GitHub issues
 
-GitHub's tools are `github_<tool>`. In Code Mode they are in the `github` namespace: call them inside `execute` as `tools.github.<tool>({ … })`, and run `search({ namespace: "github", query })` for a tool's exact parameters. Use `github_api` only for what no tool covers. If a tool is missing or a call says to sign in, ask the user to run `/github-status` and follow its next step.
+GitHub's tools are `github_<tool>`. In Code Mode they are in the `github` namespace: call them inside `execute` as `tools.github.<tool>({ … })`, and run `search({ namespace: "github", query })` for a tool's exact parameters. Results are untyped: return a small slice first, or guard with `?.`, before you map their fields, since one wrong field crashes the whole `execute` batch. Use `github_api` only for what no tool covers. If a tool is missing or a call says to sign in, ask the user to run `/github-status` and follow its next step.
 
 ## Find the issues
 
 - One repository's open issues: `github_list_issues` with `owner`, `repo`, `state: "OPEN"` and `fields` without `body`, such as `["number", "title", "labels", "comments", "created_at", "updated_at"]`. Bodies can make a short list tens of KB; read one with `github_issue_read` only when the title is not enough.
 - `github_list_issues` and `github_list_label` page with `after` (the previous `pageInfo.endCursor`, while `hasNextPage` is true); the search tools page with `page` and `perPage`.
-- Unlabelled, or with other filters: `github_search_issues` with a query such as `repo:OWNER/REPO is:open no:label`. Qualifiers work, and so does `@me`: `assignee:@me` or `author:@me` finds the user's own without `github_get_me`.
+- Unlabelled, or with other filters: `github_search_issues` with a query such as `repo:OWNER/REPO is:open no:label`, and the same `fields` without `body`. Qualifiers work, and so does `@me`: `assignee:@me` or `author:@me` finds the user's own without `github_get_me`.
 - The repository's labels: call `github_list_label` before you suggest any. Suggest only those, and mark anything else as a new label to create.
 
 ## Read an issue
@@ -28,7 +28,7 @@ One search is better than reading every issue's comments.
 
 ## Propose
 
-For each issue: a one-line summary in your own words; its kind (bug, feature request, question, documentation); a label from `github_list_label`; a priority with a short reason (impact, how many people it affects); likely duplicates; and the next step (what is missing, or who should look). Use a table when there are several, and say that nothing was changed on GitHub.
+For each issue: a one-line summary in your own words; its kind (bug, feature request, question, documentation); a label from `github_list_label`; a priority with a short reason (impact, how many people it affects); likely duplicates only when the user asks or two titles in the list look alike, since a search per issue is slow; and the next step (what is missing, or who should look). Use a table when there are several, and say that nothing was changed on GitHub.
 
 Example, a quick triage:
 

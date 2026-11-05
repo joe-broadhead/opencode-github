@@ -5,7 +5,7 @@ description: Research code in a GitHub repository: find where something is defin
 
 # Research code on GitHub
 
-GitHub's tools are `github_<tool>`. In Code Mode they are in the `github` namespace: call them inside `execute` as `tools.github.<tool>({ … })`, and run `search({ namespace: "github", query })` for a tool's exact parameters. Use `github_api` only for what no tool covers. If a tool is missing or a call says to sign in, ask the user to run `/github-status` and follow its next step. For files in the local checkout, use your local tools instead.
+GitHub's tools are `github_<tool>`. In Code Mode they are in the `github` namespace: call them inside `execute` as `tools.github.<tool>({ … })`, and run `search({ namespace: "github", query })` for a tool's exact parameters. Results are untyped: return a small slice first, or guard with `?.`, before you map their fields, since one wrong field crashes the whole `execute` batch. Use `github_api` only for what no tool covers. If a tool is missing or a call says to sign in, ask the user to run `/github-status` and follow its next step. For files in the local checkout, use your local tools instead.
 
 ## Find
 
@@ -16,13 +16,13 @@ GitHub's tools are `github_<tool>`. In Code Mode they are in the `github` namesp
 ## Read
 
 - `github_get_file_contents` with `owner`, `repo` and `path`. Pass `ref` (`refs/tags/v1.2.0`, `refs/heads/main`) or `sha` for another version. A folder path lists the folder.
-- To compare versions, read the file at each ref and quote the lines that differ, labelled with their version.
+- To compare versions, read the file at each ref, diff them inside `execute`, and quote the lines that differ, labelled with their version. That answers the question: name the commit behind a change from the `github_list_commits` messages, without `full_patch`.
 - Read what the code imports or calls before you explain it.
 
 ## Follow the history
 
 1. `github_list_commits` with `owner`, `repo` and `path` (narrow with `since`, `until` or `author`) lists the commits that touched a file, newest first, with their messages. "When did it last change" is its first entry: its SHA and date answer it, with no further call.
-2. `github_get_commit` with `sha` only for "why" or "what exactly": the default `detail` lists the changed files and line counts, which is usually enough to pick the commit. `detail: "full_patch"` returns every file's diff, often tens of KB, so use it for one commit at most, the one whose lines you explain.
+2. `github_get_commit` with `sha` only for "why" or "what exactly": the default `detail` lists the changed files and line counts, which is usually enough to pick the commit. `detail: "full_patch"` returns every file's diff, often tens of KB, so use it only when you need the changed lines themselves, and for one commit at most.
 3. The commit message usually says why. Retell it in your own words, and mark anything you infer as inference.
 
 ## Cite with permalinks
