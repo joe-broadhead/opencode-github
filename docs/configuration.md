@@ -158,7 +158,7 @@ whole project.
 
 OpenCode creates agents that exist only in your config after plugins run, so they do not get the default rules.
 They run GitHub tools, including writes, without asking. `/github-status` and the `/github` dialog list them under
-"Agents without default rules", and the next step names them. An agent whose own rules already ask for or deny
+"Agents without default rules", followed by the default block, and the next step reads: "Put the default rules shown by /github-status first in each listed agent's own permissions, in opencode.json or the agent's Markdown file, followed by your top-level rules for GitHub tools." An agent whose own rules already ask for or deny
 GitHub's tools, such as one that ends with `{ "action": "*", "resource": "*", "effect": "ask" }`, needs no fix and is
 not listed.
 
@@ -343,8 +343,9 @@ GHE.com (data residency) is not supported yet; `host` refuses `*.ghe.com`.
 
 The plugin supports OpenCode `>=2.2.3 <2.3.0` and is tested on 2.2.3, 2.2.4 and 2.2.5. On a later 2.2 release it
 loads and works; the status shows `OpenCode: 2.2.6 (untested; supported range >=2.2.3 <2.3.0)`, and the status RPC
-`host.tested: false`. GitHub does not use the `host_untested` state: its state stays the connection's. Outside the
-range, including prereleases and development builds, it refuses to load:
+`host.tested: false`, and the state and next step stay those of the connection. Outside the range, including
+prereleases and development builds, it refuses to load, so there is no `/github-status`, `/github` dialog or status
+RPC, and no state `host_untested`:
 
 ```text
 HOST_UNTESTED: OpenCode 2.3.0 is outside the supported range >=2.2.3 <2.3.0. Next step: Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true.
