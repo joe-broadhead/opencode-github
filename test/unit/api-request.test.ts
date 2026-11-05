@@ -256,7 +256,7 @@ describe("callRest", () => {
   })
 
   it("relies on Node's fetch returning a manual redirect with its Location, not following it", async () => {
-    const server = createServer((request, response) => {
+    const server = createServer((_request, response) => {
       response.writeHead(302, { location: "https://blob.example.net/x" }).end()
     })
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))

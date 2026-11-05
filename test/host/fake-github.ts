@@ -29,7 +29,7 @@ const FAKE_TOOLS: readonly FakeTool[] = [
   { name: "brand_new_tool", readOnly: true },
 ]
 
-export interface FakeRequest {
+interface FakeRequest {
   readonly method: string
   readonly path: string
   readonly authorized: boolean

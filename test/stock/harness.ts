@@ -18,7 +18,7 @@ import { OpenCode, type OpenCodeClient } from "@opencode/client"
 import { TESTED_HOSTS } from "../../src/host-version.js"
 import { scratchDir } from "../host/scratch.js"
 
-export const REPO = realpathSync(fileURLToPath(new URL("../..", import.meta.url)))
+const REPO = realpathSync(fileURLToPath(new URL("../..", import.meta.url)))
 const PROBE = join(REPO, "test", "stock", "probe")
 const PLUGIN_ID = "github.platform"
 
