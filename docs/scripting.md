@@ -118,7 +118,7 @@ A refusal or failure is the RPC error `failed`, with a message `CODE: what happe
 | --- | --- |
 | `SESSION_UNKNOWN` | OpenCode says the session does not exist. Any other failure to look the session up is OpenCode's own error. |
 | `SESSION_AGENT_REQUIRED` | The session names no agent, or an agent that does not exist. |
-| `PERMISSION_DENIED` | The agent's or the session's rules deny the tool, or ask for an approval. |
+| `PERMISSION_DENIED` | The agent's or the session's rules deny the tool, or ask for an approval. A deny names the action it refused, and the next step says to remove or narrow that deny rule, add a later allow rule to the session, or use another agent. |
 | `SERVER_CONFLICT` | Your config or another plugin defines its own MCP server named github, which this plugin does not manage (`conflict` in `/github-status`). |
 | `AUTH_REQUIRED`, `CONNECTING`, `CONNECTION_FAILED`, `DISABLED`, `NOT_REGISTERED` | The github server needs a sign-in, is still connecting, could not connect, is disabled, or is not registered, as with the `host` option. `/github-status` gives the details. `api` gives `AUTH_REQUIRED` when there is no GitHub sign-in. |
 | `TOOL_UNAVAILABLE` | The server is connected, but GitHub does not list the tool, for example because its toolset is off. `describe`'s `detail` for the method names its toolset, and says whether the `toolsets` option turns it on. |
