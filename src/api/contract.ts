@@ -47,7 +47,24 @@ export const GraphqlInput = z.strictObject({
   }).describe("A GraphQL request, instead of method and path."),
 })
 
-export const ApiInput = z.union([RestInput, GraphqlInput])
+const EITHER = "Pass either { method, path, … } for REST or { graphql: { query } }"
+
+/**
+ * The union's own message, instead of "Invalid input": for an input with both forms or neither, what to pass; for one
+ * form, that form's own problems, such as a missing path.
+ */
+function unionError(issue: { readonly code?: string; readonly input?: unknown; readonly errors?: ReadonlyArray<ReadonlyArray<{ readonly path: readonly PropertyKey[]; readonly message: string }>> }) {
+  if (issue.code !== "invalid_union") return undefined
+  const input = issue.input && typeof issue.input === "object" ? issue.input : {}
+  const rest = "method" in input || "path" in input
+  const graphql = "graphql" in input
+  if (rest && graphql) return `${EITHER}, not both.`
+  const own = rest ? issue.errors?.[0] : graphql ? issue.errors?.[1] : undefined
+  if (!own?.length) return `${EITHER}.`
+  return own.map((problem) => `${problem.path.map(String).join(".") || "input"}: ${problem.message}`).join("; ")
+}
+
+export const ApiInput = z.union([RestInput, GraphqlInput], { error: unionError })
 
 /** What a script may send: a REST GET or HEAD without a body or a file, or one GraphQL document. */
 const ScriptRestInput = z.strictObject({
@@ -60,14 +77,12 @@ export type RestInput = z.output<typeof RestInput>
 export type GraphqlInput = z.output<typeof GraphqlInput>
 
 export const ApiOutput = z.strictObject({
-  /** A 2xx status, and for GraphQL no errors. */
-  ok: z.boolean(),
+  ok: z.boolean().describe("A 2xx status, and for GraphQL no errors. A 4xx is a result with ok: false, not an error."),
   status: z.number().int(),
-  /** Parsed JSON, or text for diff, patch and raw. Untrusted GitHub content. */
-  data: z.unknown().optional(),
+  data: z.unknown().optional().describe("Parsed JSON, or text for diff, patch and raw. Untrusted GitHub content."),
   contentType: z.string().optional(),
-  truncated: z.boolean(),
-  nextStep: z.string().optional(),
+  truncated: z.boolean().describe("True when data was cut at 100,000 bytes: a list to whole items, anything else to a string."),
+  nextStep: z.string().optional().describe("What to do after a failure or a cut result."),
   rateLimit: z.strictObject({ limit: z.number(), remaining: z.number(), resetAt: z.string() }).optional(),
   pagination: z.strictObject({ pages: z.number().int(), items: z.number().int(), more: z.boolean() }).optional(),
   download: z.strictObject({ path: z.string(), bytes: z.number().int(), sha256: z.string() }).optional(),
