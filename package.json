@@ -1,6 +1,6 @@
 {
   "name": "@joe-broadhead/opencode-github",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "Unofficial OpenCode plugin for GitHub",
   "keywords": [
     "opencode",
@@ -680,7 +680,11 @@
         "id": "github",
         "label": "GitHub",
         "server": "github",
-        "group": "github"
+        "group": "github",
+        "hostClient": {
+          "id": "github",
+          "option": "clientId"
+        }
       },
       {
         "id": "github-enterprise",
