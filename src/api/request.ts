@@ -43,6 +43,10 @@ export type CallDeps = {
   readonly root: string
   /** The download cap; MAX_DOWNLOAD_BYTES unless a test sets a smaller one. */
   readonly maxDownloadBytes?: number
+  /** A script's call through the tools RPC, which cannot download: next steps name what it can do. */
+  readonly script?: boolean
+  /** GitHub Enterprise Server: no MCP tools, so next steps never name one. */
+  readonly enterprise?: boolean
 }
 
 /** How a request may follow redirects: never for a change; for a read, within the API base; a download also to storage hosts. */
@@ -253,10 +257,22 @@ async function send(
       throw new GitHubPluginError(
         "API_REDIRECT_OFF_HOST",
         `GitHub redirected ${policy.what} outside its API, to ${next.host}, and a read follows redirects only within the API.`,
-        "Pass download: { path } to save the response; a download follows GitHub's storage redirects, without the token.",
+        offHostStep(deps),
       )
     }
   }
+}
+
+/** Job logs have GitHub's get_job_logs; other files need a download, which only the model can make. */
+function offHostStep(deps: Pick<CallDeps, "script" | "enterprise">): string {
+  if (deps.script) {
+    return deps.enterprise
+      ? "Save the file with github_api's download in an OpenCode session; scripts never write files."
+      : "For job logs, call the get_job_logs method; other files need github_api's download in an OpenCode session."
+  }
+  return deps.enterprise
+    ? "Pass download: { path } to save the response; a download follows GitHub's storage redirects, without the token."
+    : "For job logs, call get_job_logs with return_content: true; for other files, pass download: { path }, which follows GitHub's storage redirects without the token."
 }
 
 const quietly = <T>(make: () => T): T | undefined => {
@@ -405,7 +421,8 @@ function finish(response: Response, body: Body, deps: CallDeps): ApiOutput {
   const output: ApiOutput = { ...base(response), ...(body.contentType ? { contentType: body.contentType } : {}), truncated: body.truncated }
   const nextStep = failureStep(response, deps, body.data)
   if (body.binary !== undefined) {
-    return { ...output, truncated: false, nextStep: nextStep ?? `The response is ${body.binary} bytes of ${body.contentType}; pass download: { path } to save it.` }
+    const save = deps.script ? "save it with github_api's download in an OpenCode session, as scripts never write files" : "pass download: { path } to save it"
+    return { ...output, truncated: false, nextStep: nextStep ?? `The response is ${body.binary} bytes of ${body.contentType}; ${save}.` }
   }
   if (body.data === undefined) return { ...output, ...(nextStep ? { nextStep } : {}) }
   const capped = capInline(body.data)
@@ -417,7 +434,7 @@ function finish(response: Response, body: Body, deps: CallDeps): ApiOutput {
     ...(nextStep
       ? { nextStep }
       : truncated
-        ? { nextStep: "The result was cut. Narrow it with query parameters such as per_page or filters, or save it with download." }
+        ? { nextStep: `The result was cut at 100,000 bytes. Narrow it with query parameters such as per_page${deps.enterprise ? "" : ", or read one file with get_file_contents"}.` }
         : {}),
   }
 }
@@ -432,7 +449,11 @@ function failureStep(response: Response, deps: CallDeps, data: unknown): string 
   const accepted = scopes(response.headers.get("x-accepted-oauth-scopes"))
   const granted = scopes(response.headers.get("x-oauth-scopes"))
   if (response.status === 403 && accepted.length > 0 && !accepted.some((scope) => granted.includes(scope))) {
-    return `The sign-in lacks the scope ${accepted.join(" or ")}. Add it to the plugin option scopes, then run /connect and choose ${deps.service} to sign in again.`
+    const scope = accepted.join(" or ")
+    // The scopes option only shapes device sign-in; a pasted token carries the scopes it was created with.
+    return deps.deviceSignIn
+      ? `The sign-in lacks the scope ${scope}. Add it to the plugin option scopes, then run /connect and choose ${deps.service} to sign in again.`
+      : `The token lacks the scope ${scope}. Create a token with it on GitHub (Settings, Developer settings, Personal access tokens), then run /connect and choose ${deps.service} to replace it.`
   }
   // A fine-grained token without the permission an endpoint needs. GitHub names it in X-Accepted-GitHub-Permissions.
   const message = (data as { message?: unknown } | undefined)?.message

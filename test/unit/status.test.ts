@@ -245,7 +245,7 @@ describe("registerStatus", () => {
     await registerStatus(ctx, deps())
     await registered.commands[0]!.execute({ sessionID: "ses_1", delivery: "queue", prompt: {} })
     const text = (calls.synthetic[0] as { text: string }).text
-    expect(text).toBe("STATUS_UNAVAILABLE: GitHub status is unavailable right now. Next step: Run /github-status again.")
+    expect(text).toBe("STATUS_UNAVAILABLE: GitHub status is unavailable right now. Next step: Try again in a few seconds; if it persists, restart OpenCode.")
   })
 
   it("answers the status RPC, and reports failures as unavailable without raw error text", async () => {

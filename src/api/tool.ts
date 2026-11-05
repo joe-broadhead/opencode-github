@@ -55,6 +55,9 @@ export type ApiDeps = {
 
 export type Call = { readonly sessionID: string; readonly agent: string; readonly messageID: string; readonly id: string; readonly signal?: AbortSignal }
 
+/** Who runs the call: a script (the tools RPC) cannot download, so its next steps differ. */
+export type Caller = { readonly script?: boolean }
+
 /** The input, checked against github_api's schema. */
 export function parseInput(raw: unknown): ApiInput {
   const parsed = InputSchema.safeParse(raw)
@@ -107,7 +110,7 @@ function bodySummary(body: unknown): { keys?: string[]; bytes: number } {
 export async function registerApiTool(
   ctx: ApiContext,
   deps: ApiDeps,
-): Promise<{ dispose(): Promise<void>; run(input: ApiInput, call: Call): Promise<ApiOutput>; signedIn(): Promise<boolean> }> {
+): Promise<{ dispose(): Promise<void>; run(input: ApiInput, call: Call, caller?: Caller): Promise<ApiOutput>; signedIn(): Promise<boolean> }> {
   const send: Fetch = deps.fetch ?? ((url, init) => fetch(url, init))
 
   const assert = (call: Call, resource: string, metadata: Record<string, unknown>) =>
@@ -129,14 +132,15 @@ export async function registerApiTool(
     return { integrationID, connection, credential }
   }
 
-  const run = async (input: ApiInput, call: Call): Promise<ApiOutput> => {
+  const run = async (input: ApiInput, call: Call, caller: Caller = {}): Promise<ApiOutput> => {
     const described = describeCall(input, deps.endpoints)
     if (described.kind === "write") {
       if (deps.readOnly) {
         throw new GitHubPluginError(
           "READ_ONLY",
           `${described.resource} changes GitHub, and the plugin is read-only.`,
-          "Set the plugin option readOnly: false to allow changes; each one asks first.",
+          // The reader is the model: it tells the user, rather than editing the config to raise its own access.
+          "Tell the user that this needs the plugin option readOnly: false, which they set in opencode.json; each change then asks first.",
         )
       }
       await assert(call, described.resource, described.metadata)
@@ -158,6 +162,8 @@ export async function registerApiTool(
       deviceSignIn: deps.deviceSignIn === true,
       fetch: send,
       root: deps.root,
+      script: caller.script === true,
+      enterprise: deps.enterprise === true,
       ...(call.signal ? { signal: call.signal } : {}),
     }
     const output =

@@ -11,7 +11,7 @@ import { GithubRpc, NOTHING_TO_DO, SERVER_NAME, type Status, formatStatus } from
 import { PLUGIN_VERSION } from "./version.js"
 
 export const STATUS_COMMAND = "github-status"
-const UNAVAILABLE = new GitHubPluginError("STATUS_UNAVAILABLE", "GitHub status is unavailable right now.", "Run /github-status again.").message
+const UNAVAILABLE = new GitHubPluginError("STATUS_UNAVAILABLE", "GitHub status is unavailable right now.", "Try again in a few seconds; if it persists, restart OpenCode.").message
 
 type StatusContext = {
   readonly mcp: Pick<Plugin.Context["mcp"], "list">

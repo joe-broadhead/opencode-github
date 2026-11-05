@@ -61,7 +61,7 @@ export const NEXT_STEPS: NextSteps = {
   CONNECTION_FAILED: "Run /github-status and follow its next step.",
   DISABLED: "Turn the github server back on in /mcps.",
   NOT_REGISTERED: "Run /github-status and follow its next step; with the host option (GitHub Enterprise Server) there is no MCP server, so call the api method instead.",
-  TOOL_UNAVAILABLE: `Add the method's toolset to the plugin's toolsets option and run opencode reload (off by default: ${OFF_BY_DEFAULT.join(", ")}); describe shows which methods run now.`,
+  TOOL_UNAVAILABLE: `Add the method's toolset to the plugin's toolsets option and run opencode reload (off by default: ${OFF_BY_DEFAULT.join(", ")}); describe's detail names the method's toolset, or the feature flag that hides it.`,
   UPSTREAM_ERROR: "Check the input against the method's schema from describe, and run /github-status if it keeps failing.",
   CANCELLED: "Call the method again if you still need the result.",
 }

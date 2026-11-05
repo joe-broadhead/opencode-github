@@ -366,7 +366,7 @@ passed through unchanged.
 | `OPTIONS_INVALID` | An option is unknown or has a wrong value. The message names the option. | Fix the options for @joe-broadhead/opencode-github in opencode.json. |
 | `HOST_UNTESTED` | OpenCode is outside `>=2.2.3 <2.3.0` and `allowUntestedHost` is not set. | Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true. |
 | `SKILLS_INVALID` | A skill file shipped with the plugin is missing or malformed. | Reinstall the plugin. |
-| `STATUS_UNAVAILABLE` | OpenCode did not report the `github` server's state. | Run /github-status again. |
+| `STATUS_UNAVAILABLE` | OpenCode did not report the `github` server's state. | Try again in a few seconds; if it persists, restart OpenCode. |
 | `SIGN_IN_EXPIRED` | The device code expired before it was entered. | Start the sign-in again. |
 | `SIGN_IN_CANCELLED` | The sign-in was cancelled on GitHub. | Start the sign-in again. |
 | `SIGN_IN_CODE_UNKNOWN` | GitHub did not recognise the device code. | Start the sign-in again. |
@@ -382,7 +382,7 @@ passed through unchanged.
 | `TOKEN_CHECK_TIMEOUT` | GitHub did not answer the token check within 10 seconds. | Try again. |
 | `TOKEN_CHECK_UNREACHABLE` | api.github.com could not be reached. | Check your network, then try again. |
 | `TOKEN_CHECK_FAILED` | GitHub could not check the token, or returned no account name. | Try again later. |
-| `READ_ONLY` | A `github_api` call would change GitHub, and `readOnly` is `true`. | Set the plugin option readOnly: false to allow changes; each one asks first. |
+| `READ_ONLY` | A `github_api` call would change GitHub, and `readOnly` is `true`. | Tell the user that this needs the plugin option readOnly: false, which they set in opencode.json; each change then asks first. |
 | `AUTH_REQUIRED` | `github_api` has no GitHub sign-in to use. | Run /connect and choose GitHub (GitHub Enterprise with `host`). |
 | `API_INPUT_INVALID` | The `github_api` input does not fit, for example `download` with a method other than GET. | Fix the github_api input and call it again. |
 | `API_PATH_INVALID` | The path is not a relative API path, has a `.` or `..` segment (also percent-encoded), or percent-encodes a character it can hold as itself. | Pass a relative API path such as /repos/OWNER/REPO/pulls. |
@@ -395,7 +395,7 @@ passed through unchanged.
 | `API_REDIRECT_LOOP` | GitHub redirected more than 5 times. | Try again later. |
 | `API_REDIRECT_INSECURE` | GitHub redirected to a non-HTTPS address. | Try again later. |
 | `API_REDIRECTED` | GitHub redirected a change, which is never followed. The message names the new path. | Call github_api again with path <the new path>, so the change is checked for that path. |
-| `API_REDIRECT_OFF_HOST` | GitHub redirected a read outside its API. | Pass download: { path } to save the response; a download follows GitHub's storage redirects, without the token. |
+| `API_REDIRECT_OFF_HOST` | GitHub redirected a read outside its API. | For job logs, call get_job_logs with return_content: true; for other files, pass download: { path }, which follows GitHub's storage redirects without the token. A script gets the get_job_logs method instead, and with `host` the step names only download. |
 | `SCRIPT_READ_ONLY` | A script's `api` call could change GitHub, or would download or upload a file. | Call api with GET, HEAD or a single GraphQL query; make changes from an OpenCode session, where they ask first. |
 
 A script's calls through the tools RPC, `github.platform.tools`, have more codes for sessions, permissions and the
