@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { isAbsolute } from "node:path"
 import { describe, expect, it } from "vitest"
 import { SKILL_IDS, parseSkill, registerSkills, skillPath } from "../../src/skills.js"
+import { API_TOOL_NAME, toolKind } from "../../src/tools.js"
 import { jargonIn } from "./jargon.js"
 
 const read = (id: string) => readFileSync(skillPath(id), "utf8")
@@ -16,6 +17,23 @@ describe("the shipped skills", () => {
     expect(skill.name).toBe(id)
     expect(skill.description.length).toBeGreaterThan(40)
     expect(skill.description).not.toContain("\n")
+  })
+
+  // Baseline evals: descriptions that only said what a skill does loaded in 3 of 9 cases.
+  it.each(SKILL_IDS)("%s says in its description when to use it", (id) => {
+    expect(parseSkill(id, read(id)).description).toMatch(/ Use (it )?when /)
+  })
+
+  // GITHUB-R19: a renamed upstream tool fails here instead of in a user's session.
+  it.each(SKILL_IDS)("%s names only tools that exist", (id) => {
+    const named = [...read(id).matchAll(/\b(?:github_|tools\.github\.)([a-z][a-z0-9_]*)/g)].map((match) => match[1]!)
+    expect(named.length).toBeGreaterThan(3)
+    expect(named.filter((name) => name !== API_TOOL_NAME && toolKind(name) === undefined)).toEqual([])
+  })
+
+  // TRIAGE decision 3: the package ships no docs/, so a skill links to them only by absolute URL.
+  it.each(SKILL_IDS)("%s points at no file the package does not ship", (id) => {
+    expect(read(id)).not.toMatch(/(?<!https:\/\/github\.com\/[^\s)]*)\bdocs\/[a-z-]+\.md/)
   })
 
   it.each(SKILL_IDS)("%s is short, plain and points to /github-status", (id) => {
