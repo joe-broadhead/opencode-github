@@ -131,6 +131,7 @@ export const PINNED = [
   "search_issues",
   "list_label",
   "issue_read",
+  "list_pull_requests",
   "pull_request_read",
   "get_job_logs",
 ] as const

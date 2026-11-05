@@ -65,6 +65,7 @@ export default Plugin.define({
           endpoints: api,
           service: options.host ? ENTERPRISE_NAME : "GitHub",
           enterprise: options.host !== undefined,
+          toolsets: options.toolsets,
           deviceSignIn: options.clientId !== undefined,
           root: ctx.location.directory,
           integrationID: source.integrationID,
