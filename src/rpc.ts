@@ -133,9 +133,9 @@ export const STATE_LABELS: Record<Status["state"], string> = {
 
 export const NOTHING_TO_DO = "Nothing to do."
 
-/** The fix for agents without the default rules, after their names. */
-export const AGENT_FIX =
-  'These agents run GitHub tools, including writes, without asking. Put the rules below first in each one\'s own "permissions" list, in opencode.json or in its Markdown file, followed by your top-level rules for github_ tools.'
+/** The next step for agents without the default rules: one fixed sentence across the plugins, with no names. */
+export const AGENT_STEP =
+  "Put the default rules shown by /github-status first in each listed agent's own permissions, in opencode.json or the agent's Markdown file, followed by your top-level rules for GitHub tools."
 
 /** The value of a row that has nothing to show. */
 export const NONE = "none"
@@ -187,7 +187,7 @@ export function formatStatus(status: Status): string {
   const lines: string[] = [STATUS_TITLE]
   for (const row of statusRows(status)) {
     lines.push(`${row.label}: ${row.value}`)
-    if (row.label === "Agents without default rules" && status.unguardedAgents.length > 0) lines.push(AGENT_FIX, formatRules(status.permissionsBlock ?? []))
+    if (row.label === "Agents without default rules" && status.unguardedAgents.length > 0) lines.push(formatRules(status.permissionsBlock ?? []))
   }
   return lines.join("\n")
 }

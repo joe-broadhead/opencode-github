@@ -83,9 +83,7 @@ describe(`defaults on OpenCode ${SDK_VERSION}`, () => {
     expect(fromRpc.nextStep).toBe("Run /connect and choose GitHub.")
     const text = await statusCommand(host, await session(host))
     expect(text).toStartWith("GitHub status\nConnection: sign-in required\nAccount: none\n")
-    expect(text).toContain("Agents without default rules: reviewer\n")
-    expect(text).toContain(`Put the rules below first in each one's own "permissions" list`)
-    expect(text).toContain(formatRules(defaultRules()))
+    expect(text).toContain(`Agents without default rules: reviewer\n${formatRules(defaultRules())}\n`)
   })
 
   test("token sign-in connects github, and later MCP requests carry the token", async () => {

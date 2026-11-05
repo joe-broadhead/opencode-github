@@ -127,10 +127,12 @@ describe("computeStatus", () => {
     for (const state of STATES) expect(state).toMatch(/^[a-z_]+$/)
   })
 
-  it("on a release in the range that is not tested, says so in the next step when nothing else is needed", async () => {
+  // S13 and TRIAGE decision 2: an untested release inside the range works normally, and its next step is unchanged.
+  it("on a release in the range that is not tested, reports the working state and leaves the next step alone", async () => {
     const status = await computeStatus(fakeCtx({ server: "connected", label: "octocat" }).ctx, deps({ hostVersion: "2.2.6" }))
-    expect(status.host).toEqual({ version: "2.2.6", range: ">=2.2.3 <2.3.0", tested: false })
-    expect(status.nextStep).toBe("If GitHub misbehaves, use OpenCode 2.2.3, 2.2.4 or 2.2.5, where it is tested.")
+    expect(status).toMatchObject({ state: "connected", host: { version: "2.2.6", range: ">=2.2.3 <2.3.0", tested: false }, nextStep: "Nothing to do." })
+    const outside = await computeStatus(fakeCtx({ server: "connected", label: "octocat" }).ctx, deps({ hostVersion: "2.3.0", hostWarning: "x" }))
+    expect(outside.nextStep).toBe("If GitHub misbehaves, use OpenCode 2.2.3, 2.2.4 or 2.2.5, where it is tested.")
   })
 
   // QA LIVE-1: an agent whose own rules already ask or deny for GitHub's tools needs no fix.
@@ -149,19 +151,18 @@ describe("computeStatus", () => {
     expect(status.unguardedAgents).toEqual(["open", "allows-github"])
   })
 
-  // QA LIVE-2: the next step is never "Nothing to do." while agents are listed.
-  it("names the unguarded agents and the fix in the next step once the connection needs nothing", async () => {
+  // QA LIVE-2: the next step is never "Nothing to do." while agents are listed. TRIAGE decision 1: one fixed sentence, no names.
+  it("gives the one fixed agent fix in the next step once the connection needs nothing", async () => {
     const open = (id: string) => ({ id, permissions: [BASE] })
+    const fix = "Put the default rules shown by /github-status first in each listed agent's own permissions, in opencode.json or the agent's Markdown file, followed by your top-level rules for GitHub tools."
     const one = await computeStatus(fakeCtx({ server: "connected", label: "octocat", agents: [open("reviewer")] }).ctx, deps())
-    expect(one.nextStep).toBe("Add the default rules to reviewer: first in the agent's own permissions, followed by your top-level rules for github_ tools.")
-    const two = await computeStatus(fakeCtx({ server: "connected", label: "octocat", agents: [open("reviewer"), open("docs")] }).ctx, deps())
-    expect(two.nextStep).toBe("Add the default rules to reviewer and docs: first in each agent's own permissions, followed by your top-level rules for github_ tools.")
+    expect(one.nextStep).toBe(fix)
     const many = await computeStatus(fakeCtx({ server: "connected", label: "octocat", agents: ["a", "b", "c", "d", "e", "f", "g"].map(open) }).ctx, deps())
-    expect(many.nextStep).toBe("Add the default rules to a, b, c, d, e and 2 more: first in each agent's own permissions, followed by your top-level rules for github_ tools.")
+    expect(many.nextStep).toBe(fix)
     // A connection problem comes first; on GitHub Enterprise Server the agents count too.
     expect((await computeStatus(fakeCtx({ server: "needs_auth", agents: [open("reviewer")] }).ctx, deps())).nextStep).toBe("Run /connect and choose GitHub.")
     const enterprise = await computeStatus(fakeCtx({ label: "octocat", agents: [open("reviewer")] }).ctx, deps({ enterprise: "ghe.example.com" }))
-    expect(enterprise.nextStep).toMatch(/^Add the default rules to reviewer: /)
+    expect(enterprise.nextStep).toBe(fix)
     expect(formatStatus(one).match(/Next step: .*/g)).toEqual([`Next step: ${one.nextStep}`])
   })
 

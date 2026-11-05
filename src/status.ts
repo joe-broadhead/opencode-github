@@ -7,7 +7,7 @@ import { HOST_RANGE, TESTED_HOSTS, isTestedHost } from "./host-version.js"
 import { lowerResource, neverMatches } from "./api/names.js"
 import { API_ACTION } from "./api/tool.js"
 import { type Rule, defaultRules, matches, unguardedAgents } from "./permissions.js"
-import { GithubRpc, NOTHING_TO_DO, SERVER_NAME, type Status, formatStatus } from "./rpc.js"
+import { AGENT_STEP, GithubRpc, NOTHING_TO_DO, SERVER_NAME, type Status, formatStatus } from "./rpc.js"
 import { PLUGIN_VERSION } from "./version.js"
 
 export const STATUS_COMMAND = "github-status"
@@ -64,7 +64,12 @@ export async function computeStatus(ctx: StatusContext, deps: StatusDeps): Promi
     host: { version: deps.hostVersion, range: HOST_RANGE, tested },
     ...(deps.hostWarning ? { hostWarning: deps.hostWarning } : {}),
     ...(deps.enterprise ? { enterprise: deps.enterprise } : {}),
-    nextStep: (deps.enterprise ? enterpriseStep(state) : connectionStep(state)) ?? ruleStep(unmatched) ?? agentStep(unguarded) ?? hostStep(tested) ?? NOTHING_TO_DO,
+    nextStep:
+      (deps.enterprise ? enterpriseStep(state) : connectionStep(state)) ??
+      ruleStep(unmatched) ??
+      (unguarded.length > 0 ? AGENT_STEP : undefined) ??
+      hostStep(deps.hostWarning !== undefined) ??
+      NOTHING_TO_DO,
   }
 }
 
@@ -84,21 +89,9 @@ function ruleStep(unmatched: readonly string[]): string | undefined {
   return `Write the github_api rule "${first}"${more} with lower-case owner and repo names, as "${lowerResource(first)}": as written it never matches.`
 }
 
-/** Agent names in a next step: at most this many, then a count. */
-const NAMED_AGENTS = 5
-
-/** The fix for agents without the default rules, naming them (QA LIVE-2). */
-function agentStep(unguarded: readonly string[]): string | undefined {
-  if (unguarded.length === 0) return undefined
-  const shown = unguarded.slice(0, NAMED_AGENTS)
-  const rest = unguarded.length - shown.length
-  const names = rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.length > 1 ? `${shown.slice(0, -1).join(", ")} and ${shown.at(-1)}` : shown[0]
-  const where = unguarded.length === 1 ? "the agent's" : "each agent's"
-  return `Add the default rules to ${names}: first in ${where} own permissions, followed by your top-level rules for github_ tools.`
-}
-
-function hostStep(tested: boolean): string | undefined {
-  return tested ? undefined : `If GitHub misbehaves, use OpenCode ${TESTED_HOSTS.slice(0, -1).join(", ")} or ${TESTED_HOSTS.at(-1)}, where it is tested.`
+/** Only outside the supported range (allowUntestedHost); an untested release inside it leaves the next step alone (S13). */
+function hostStep(outsideRange: boolean): string | undefined {
+  return outsideRange ? `If GitHub misbehaves, use OpenCode ${TESTED_HOSTS.slice(0, -1).join(", ")} or ${TESTED_HOSTS.at(-1)}, where it is tested.` : undefined
 }
 
 type ServerState = "connected" | "pending" | "disabled" | "failed" | "needs_auth"

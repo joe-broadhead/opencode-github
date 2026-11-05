@@ -242,14 +242,14 @@ without default rules, OpenCode and Next step, with `none` where a row is empty.
 
 A **Rules that never match** row lists `github_api` rules with an upper-case owner or repo name (see
 [Permissions](#permissions)), and the next step gives the lower-case form. Otherwise, when the connection needs
-nothing, the next step names the agents without default rules and how to fix them (see
-[Permissions](#permissions)); on an untested OpenCode release it names the tested ones. Otherwise it is "Nothing to do."
+nothing and agents are listed, the next step reads: "Put the default rules shown by /github-status first in each listed agent's own permissions, in opencode.json or the agent's Markdown file, followed by your top-level rules for GitHub tools." (see [Permissions](#permissions)). With `allowUntestedHost` outside the supported
+range, it names the tested OpenCode releases. Otherwise it is "Nothing to do."
 
 Error codes:
 
 | Code | What to do |
 | --- | --- |
-| `HOST_UNTESTED` | OpenCode is outside the supported range `>=2.2.3 <2.3.0`. Update OpenCode or the plugin, or set the option `allowUntestedHost: true` to load it anyway, with a warning in the status. |
+| `HOST_UNTESTED` | OpenCode is outside the supported range `>=2.2.3 <2.3.0`, so the plugin does not load: there is no `/github-status`, `/github` dialog or status RPC. Update OpenCode or the plugin, or set the option `allowUntestedHost: true` to load it anyway, with a warning in the status. |
 | `OPTIONS_INVALID` | An option is unknown or has a wrong value; the message names it. Fix that option for the plugin in `opencode.json`. |
 | `SIGN_IN_…`, `TOKEN_…`, `DEVICE_…`, `CLIENT_ID_UNKNOWN` | Sign-in failed. The message ends with the next step; [the error codes](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/configuration.md#errors) list them all. |
 
