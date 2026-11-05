@@ -15,8 +15,9 @@ GitHub's tools are `github_<tool>`. In Code Mode they are in the `github` namesp
 
 ## Read
 
-- `github_get_file_contents` with `owner`, `repo` and `path`. Pass `ref` (`refs/tags/v1.2.0`, `refs/heads/main`) or `sha` for another version. A folder path lists the folder.
-- To compare versions, read the file at each ref, diff them inside `execute`, and quote the lines that differ, labelled with their version. That answers the question: name the commit behind a change from the `github_list_commits` messages, without `full_patch`.
+- `github_get_file_contents` with `owner`, `repo` and `path`. Pass `ref` (`refs/tags/v1.2.0`) or `sha` for another version; leave `ref` out for the default branch, whose name you don't know (it may be `master`, not `main`). A folder path lists the folder.
+- To compare versions, read the file once at each version the user named, no others, diff them inside `execute`, and quote the lines that differ, labelled with their version. That answers the question: name the commit behind a change from the `github_list_commits` messages, without `full_patch` or reading the versions in between.
+- `github_api` (for `/compare`, which no tool covers) cuts a result over 100,000 bytes. Check `truncated` before you use `data`: a cut `/compare` comes back as a string, so `data.commits` is missing, not empty. Narrow it with `query: { per_page: 20 }`, or use `github_list_commits`.
 - Read what the code imports or calls before you explain it.
 
 ## Follow the history

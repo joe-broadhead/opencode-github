@@ -21,7 +21,7 @@ GitHub's tools are `github_<tool>`. In Code Mode they are in the `github` namesp
 ## Check for duplicates
 
 1. Read the issue with `get` first, so you search for its problem, not its title.
-2. Call `github_search_issues` with `owner` and `repo` and the problem in plain words, such as `"login fails after token refresh"`. It ranks by meaning, so plain words beat keywords. Leave out `is:open`, so closed issues count too; try a second wording if the first finds nothing.
+2. Call `github_search_issues` once, with `owner` and `repo` and the problem in plain words, such as `"login fails after token refresh"`. It ranks by meaning, so plain words beat keywords, and one wording finds the close matches. Leave out `is:open`, so closed issues count too. Run a second wording only when the first returns nothing besides the issue itself.
 3. Drop the issue itself from the results. List each candidate with its number, state and why it matches, or say that none was found.
 
 One search is better than reading every issue's comments.

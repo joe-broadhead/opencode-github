@@ -16,6 +16,10 @@ All notable changes to this project are documented here. The format follows [Kee
   created for it (`opencode api post /api/session` with an agent; keep `data.id`), never one found through history or a
   session list, which would run as that session's agent. The namespace links the plain guide on
   `raw.githubusercontent.com`, which an agent can read, instead of the GitHub page.
+- The skills: `github-code-research` leaves `ref` out for the default branch instead of guessing `refs/heads/main`,
+  reads only the versions the user named, and checks `github_api`'s `truncated` before using `data` (a cut `/compare`
+  was read as "0 commits"). `github-issue-triage` runs one duplicate search, and a second wording only when the first
+  finds nothing but the issue itself.
 
 ## [0.0.5] - 2026-11-05
 
