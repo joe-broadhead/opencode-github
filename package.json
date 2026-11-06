@@ -680,11 +680,7 @@
         "id": "github",
         "label": "GitHub",
         "server": "github",
-        "group": "github",
-        "hostClient": {
-          "id": "github",
-          "option": "clientId"
-        }
+        "group": "github"
       },
       {
         "id": "github-enterprise",
