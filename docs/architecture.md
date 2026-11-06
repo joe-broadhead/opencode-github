@@ -62,7 +62,9 @@ checks on every `integration.updated` event, and polls every 250 ms for the firs
 When GitHub refuses the saved token, OpenCode keeps the credential and marks the server `needs_auth`.
 `registerSignInStatus` (`src/sign-in-status.ts`) follows `mcp.status.changed` and then reports `needs_auth` on the
 active account with `ctx.integration.connection.status`, so `/connect` shows that the account needs a new sign-in. It
-clears the report once the server connects again.
+clears the report once the server connects again. `connection.active` returns the credential alone, so the plugin reads
+the status it set back from `integration.get`, which projects it as `connections[].status`; the same read clears the
+`github_api` mark after a call that works (`src/api/tool.ts`).
 
 ## Tool catalog
 

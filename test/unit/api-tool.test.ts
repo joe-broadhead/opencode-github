@@ -40,9 +40,11 @@ function setUp(input: { readOnly?: boolean; enterprise?: boolean; toolsets?: rea
       },
     },
     integration: {
+      // `active` returns the credential alone; the status the plugin sets is projected by `get`, as on the host.
+      get: async () => ({ data: { id: ID, name: "GitHub", connections: [{ type: "credential", id: "cred_1", label: "octocat", method: "oauth", ...(reported ? { status: reported } : {}) }] } }),
       connection: {
         active: async () =>
-          input.signedIn === false ? undefined : { type: "credential", id: "cred_1", label: "octocat", method: "oauth", ...(reported ? { status: reported } : {}) },
+          input.signedIn === false ? undefined : { type: "credential", id: "cred_1", label: "octocat", method: "oauth" },
         resolve: async () => ({ type: "oauth", methodID: "github-token", access: TOKEN, refresh: "", expires: 0 }),
         status: async (value: { status: unknown }) => {
           statuses.push(value.status)

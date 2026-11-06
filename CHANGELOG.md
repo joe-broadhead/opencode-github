@@ -4,9 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.0.7] - 2026-11-06
 
-### Added
+### Fixed
 
-- The `jelly` declaration's `github` sign-in declares `"hostClient": { "id": "github", "option": "clientId" }`: a Jelly host that holds a deployment's GitHub OAuth App writes its client ID into `clientId`, read from this declaration, so the device flow is offered and Jelly keeps no GitHub code of its own. It needs Jelly 0.3.2 or later; an older Jelly refuses the declaration's new key.
+- The `/connect` "needs a new sign-in" mark on the GitHub account now clears. The plugin read the mark back from
+  `integration.connection.active`, which returns the credential without its status, so it never saw its own report: after
+  a rejected token the account kept asking for a sign-in, and a `github_api` call that worked never cleared it. Both now
+  read the status from `integration.get`, which projects it.
 
 ## [0.0.6] - 2026-11-05
 
