@@ -41,7 +41,7 @@
     "test:tui": "npm run build && bun test test/tui",
     "test:host": "npm run build && node scripts/host-tests.mjs",
     "test:stock": "npm run build && bun test test/stock",
-    "lint": "node scripts/check-forbidden.mjs --self-test && node scripts/check-forbidden.mjs",
+    "lint": "node scripts/check-forbidden.mjs --self-test && node scripts/check-forbidden.mjs && node scripts/check-copies.mjs",
     "test:pack": "npm run build && node scripts/pack-smoke.mjs",
     "check": "npm run typecheck && npm test && npm run build && npm run lint && npm run test:pack && npm run test:tui && npm run test:host && npm run test:stock",
     "e2e": "npm run build && bun scripts/e2e-live.mjs",
@@ -70,7 +70,7 @@
   },
   "jelly": {
     "title": "GitHub",
-    "summary": "Repositories, issues, pull requests and Actions, read-only unless you choose.",
+    "summary": "Your GitHub repositories, issues, pull requests and Actions.",
     "icon": "assets/icon.svg",
     "tools": [
       {
