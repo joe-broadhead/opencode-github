@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.8] - 2026-11-06
+
+### Added
+
+- The `jelly` declaration's `github` sign-in declares `"hostClient": { "id": "github", "option": "clientId" }`: a Jelly host that holds a deployment's GitHub OAuth App writes its client ID into `clientId`, read from this declaration, so the device flow is offered and Jelly keeps no GitHub code of its own. It needs Jelly 0.3.2 or later; an older Jelly refuses the declaration's new key.
+
 ## [0.0.7] - 2026-11-06
 
 ### Fixed
