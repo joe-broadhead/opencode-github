@@ -50,6 +50,10 @@ None: `jelly.views` and `jelly.rpc` are empty.
 - `github-enterprise`, the plugin's own integration for GitHub Enterprise Server. With the `host` option set, the
   plugin registers no MCP server, and this integration carries the same two methods against that server.
 
+The `github` sign-in declares `"hostClient": { "id": "github", "option": "clientId" }`: a Jelly host that holds an
+OAuth App by the name `github` (a deployment's own) writes its client ID into `clientId` in each agent's engine
+document, never over one the agent's own options set. A Jelly before 0.3.2 refuses this declaration's new key.
+
 Token sign-in is always offered. Device sign-in appears only when you or your organisation set `clientId`; then
 Jelly offers it first: it shows the code with Copy code and connects once the person approves, which works from a
 web tab too, because nothing returns to a loopback port. With the token, Jelly opens the pre-filled token page, and
@@ -61,3 +65,5 @@ Jelly folds the declared sign-ins into this plugin's one card, which shows each 
 
 Jelly's curated catalogue pins an exact version. Each release is published under a new version, so a review in
 Jelly can tell the two apart.
+
+The declaration test runs the shared kit, `test/support/jelly-kit.ts`, which checks the declaration and this page against Jelly's plugin authors' standard. `scripts/check-copies.mjs` holds the kit, and the shared part of the tools RPC (`src/host/tools-rpc.ts`), equal to the copy every plugin carries.
