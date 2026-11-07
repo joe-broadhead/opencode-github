@@ -79,9 +79,6 @@ export type ApiDeps = {
 
 export type Call = { readonly sessionID: string; readonly agent: string; readonly messageID: string; readonly id: string; readonly signal?: AbortSignal }
 
-/** Who runs the call: a script (the tools RPC) cannot download, so its next steps differ. */
-export type Caller = { readonly script?: boolean }
-
 /** The input, checked against github_api's schema. */
 export function parseInput(raw: unknown): ApiInput {
   const parsed = InputSchema.safeParse(raw)
@@ -151,7 +148,7 @@ async function statusShown(ctx: ApiContext, integrationID: string, connectionID:
 export async function registerApiTool(
   ctx: ApiContext,
   deps: ApiDeps,
-): Promise<{ dispose(): Promise<void>; run(input: ApiInput, call: Call, caller?: Caller): Promise<ApiOutput>; signedIn(): Promise<boolean> }> {
+): Promise<{ dispose(): Promise<void>; run(input: ApiInput, call: Call): Promise<ApiOutput>; signedIn(): Promise<boolean> }> {
   const send: Fetch = deps.fetch ?? ((url, init) => fetch(url, init))
 
   const assert = (call: Call, resource: string, metadata: Record<string, unknown>) =>
@@ -173,7 +170,7 @@ export async function registerApiTool(
     return { integrationID, connection, credential }
   }
 
-  const run = async (input: ApiInput, call: Call, caller: Caller = {}): Promise<ApiOutput> => {
+  const run = async (input: ApiInput, call: Call): Promise<ApiOutput> => {
     const described = describeCall(input, deps.endpoints)
     if (described.kind === "write") {
       if (deps.readOnly) {
@@ -203,11 +200,10 @@ export async function registerApiTool(
       deviceSignIn: deps.deviceSignIn === true,
       fetch: send,
       root: deps.root,
-      script: caller.script === true,
       enterprise: deps.enterprise === true,
       ...(call.signal ? { signal: call.signal } : {}),
     }
-    const output = "graphql" in input ? await callGraphql(input, callDeps) : withHint(await callRest(input as RestInput, described.target!, callDeps), input, described.target!.path, caller)
+    const output = "graphql" in input ? await callGraphql(input, callDeps) : withHint(await callRest(input as RestInput, described.target!, callDeps), input, described.target!.path)
 
     // Keep /connect in step: a rejected token needs a new sign-in; a working one clears that.
     if (output.status === 401) {
@@ -221,10 +217,10 @@ export async function registerApiTool(
   }
 
   /** A working read that one of GitHub's tools covers names that tool in nextStep, after any next step it has. */
-  const withHint = (output: ApiOutput, input: RestInput, path: string, caller: Caller): ApiOutput => {
+  const withHint = (output: ApiOutput, input: RestInput, path: string): ApiOutput => {
     const tool = deps.enterprise || !output.ok || input.download ? undefined : toolFor(input.method, path, deps.toolsets)
     if (!tool) return output
-    const hint = toolHint(tool, caller.script === true)
+    const hint = toolHint(tool)
     return { ...output, nextStep: output.nextStep ? `${output.nextStep} ${hint}` : hint }
   }
 

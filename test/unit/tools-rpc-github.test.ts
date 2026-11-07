@@ -5,7 +5,7 @@ import { SCRIPT_API_METHOD, scriptApi } from "../../src/api/script.js"
 import { API_ACTION, registerApiTool } from "../../src/api/tool.js"
 import { DEFAULT_TOOLSETS, GITHUB_COM } from "../../src/config.js"
 import { GitHubPluginError } from "../../src/errors.js"
-import { KNOWN_READS, NEXT_STEPS, PLUGIN_ID, pluginError, registerToolsRpc, TOOLS_RPC_ID, type ToolCall } from "../../src/host/tools-rpc.js"
+import { METHODS, NEXT_STEPS, PLUGIN_ID, pluginError, registerToolsRpc, TOOLS_RPC_ID, type ToolCall } from "../../src/host/tools-rpc.js"
 import { HIDDEN, KNOWN_TOOLS, allReadTools } from "../../src/tools.js"
 
 type Rule = { action: string; resource: string; effect: "allow" | "deny" | "ask" }
@@ -14,7 +14,9 @@ type Handler = (input: unknown, context: { signal: AbortSignal; error: (type: st
 const TOKEN = "gho_" + "t".repeat(36)
 const LOCATION = { directory: "/workspace" }
 const rule = (action: string, effect: Rule["effect"]): Rule => ({ action, resource: "*", effect })
-const BASE = [rule("*", "allow"), rule("github_*", "ask")]
+// The plugin's default rules in miniature: every github tool asks, and the known reads are allowed. v2 refuses an ask
+// before dispatch, so a read needs its allow beside the blanket ask.
+const BASE = [rule("*", "allow"), rule("github_*", "ask"), ...allReadTools().map((name) => rule(`github_${name}`, "allow")), rule("github_api", "allow")]
 const writes = Object.values(KNOWN_TOOLS).flatMap((toolset) => [...toolset.write] as string[])
 
 /**
@@ -89,8 +91,8 @@ async function setUp(
       return input.answers?.[url]?.() ?? Response.json({ full_name: "octo/repo" })
     },
   })
-  const spy = { ...api, run: (...[value, call, caller]: Parameters<typeof api.run>) => (runs.push(call as ToolCall), api.run(value, call, caller)) }
-  await registerToolsRpc(ctx as never, { mcp: { server: "github", managed: () => input.managed ?? true }, owned: [scriptApi(spy, GITHUB_COM)] })
+  const spy = { ...api, run: (...[value, call]: Parameters<typeof api.run>) => (runs.push(call as ToolCall), api.run(value, call)) }
+  await registerToolsRpc(ctx as never, { methods: [...METHODS, scriptApi(spy)], mcp: { server: "github", managed: () => input.managed ?? true } })
   const call = (method: string, value: unknown, agent = "build") =>
     handlers[method]!({ sessionID: `ses_${agent}`, input: value }, { signal: new AbortController().signal, error: (type, message, data) => ({ type, message, data }) })
   return { contract: contract!, handlers, call, requests, asserts, runs }
@@ -102,16 +104,18 @@ describe("GitHub's tools RPC", () => {
     expect(TOOLS_RPC_ID).toBe("github.platform.tools")
   })
 
-  it("makes every known read of every toolset a method, and never ui_get, a write or an unknown tool", async () => {
-    expect(KNOWN_READS).toEqual(allReadTools())
-    expect(KNOWN_READS).toHaveLength(61)
-    expect(KNOWN_READS).toContain("check_dependency_vulnerabilities")
+  it("makes every known tool a method, with its class, and never ui_get or an unknown tool", async () => {
+    expect(METHODS.filter((method) => method.kind === "mcp" && method.class === "read").map((method) => method.name)).toEqual(allReadTools())
+    expect(METHODS).toHaveLength(98)
+    expect(METHODS.filter((method) => method.class === "read")).toHaveLength(61)
+    expect(METHODS.filter((method) => method.class === "write")).toHaveLength(37)
+    expect(METHODS.map((method) => method.name)).toContain("check_dependency_vulnerabilities")
     // QA GITHUB-8: github-mcp-server v2.1.0's issue artifact tools.
-    expect(KNOWN_READS).toContain("issue_artifact_read")
+    expect(METHODS.map((method) => method.name)).toContain("issue_artifact_read")
     expect(writes).toContain("issue_artifact_write")
-    const { contract } = await setUp({ listed: [...KNOWN_READS, ...writes, ...HIDDEN, "brand_new_tool"] })
-    expect(Object.keys(contract.methods).sort()).toEqual(["describe", SCRIPT_API_METHOD, ...KNOWN_READS].sort())
-    for (const excluded of [...writes, ...HIDDEN, "brand_new_tool"]) expect(contract.methods).not.toHaveProperty(excluded)
+    const { contract } = await setUp({ listed: [...METHODS.map((method) => method.name), ...HIDDEN, "brand_new_tool"] })
+    expect(Object.keys(contract.methods).sort()).toEqual(["describe", SCRIPT_API_METHOD, ...METHODS.map((method) => method.name)].sort())
+    for (const excluded of [...HIDDEN, "brand_new_tool"]) expect(contract.methods).not.toHaveProperty(excluded)
     expect(writes).toHaveLength(37)
   })
 
@@ -131,15 +135,18 @@ describe("GitHub's tools RPC", () => {
     expect(pluginError(new Error("other"))).toBeUndefined()
   })
 
-  it("describes api as github_api for reads, with the read-only input schema", async () => {
+  it("describes api as a write, with github_api's whole input schema", async () => {
     const { handlers } = await setUp()
     const description = await handlers["describe"]!({}, { signal: new AbortController().signal, error: () => undefined })
     const method = description.methods.find((entry: { name: string }) => entry.name === SCRIPT_API_METHOD)
-    expect(method).toMatchObject({ tool: SCRIPT_API_METHOD, kind: "plugin", action: API_ACTION, available: true })
+    expect(method).toMatchObject({ tool: SCRIPT_API_METHOD, kind: "plugin", class: "write", action: API_ACTION, available: true })
     const rest = method.input.anyOf[0]
-    expect(rest.properties.method.enum).toEqual(["GET", "HEAD"])
-    expect(Object.keys(rest.properties).sort()).toEqual(["accept", "maxItems", "maxPages", "method", "paginate", "path", "query"])
+    expect(rest.properties.method.enum).toEqual(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])
+    expect(Object.keys(rest.properties).sort()).toEqual(["accept", "body", "download", "maxItems", "maxPages", "method", "paginate", "path", "query", "upload"])
     expect(method.input.anyOf[1].properties).toHaveProperty("graphql")
+    // describe reports each MCP method's class too.
+    expect(description.methods.find((entry: { name: string }) => entry.name === "issue_write")).toMatchObject({ kind: "mcp", class: "write" })
+    expect(description.methods.find((entry: { name: string }) => entry.name === "issue_read")).toMatchObject({ kind: "mcp", class: "read" })
   })
 
   it("describes api as unavailable without a GitHub sign-in, and a read then fails with AUTH_REQUIRED", async () => {
@@ -166,7 +173,7 @@ describe("the api method", () => {
   it("names the method that covers a read in nextStep, and still answers", async () => {
     const h = await setUp()
     const output = await h.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/octo/repo/pulls" })
-    expect(output).toMatchObject({ ok: true, data: { full_name: "octo/repo" }, nextStep: "The list_pull_requests method covers this read: call it instead of api." })
+    expect(output).toMatchObject({ ok: true, data: { full_name: "octo/repo" }, nextStep: "GitHub's list_pull_requests tool covers this read: call it instead of github_api." })
     expect(h.requests).toHaveLength(1)
   })
 
@@ -177,20 +184,39 @@ describe("the api method", () => {
   })
 
   it.each([
-    ["a REST write", { method: "POST", path: "/repos/octo/repo/issues", body: { title: "x" } }, "POST /repos/octo/repo/issues changes GitHub"],
-    ["a DELETE", { method: "DELETE", path: "/repos/octo/repo" }, "DELETE /repos/octo/repo changes GitHub"],
-    ["a GraphQL mutation", { graphql: { query: "mutation { addStar(input: {starrableId: \"x\"}) { clientMutationId } }" } }, "not a single query"],
-    ["two GraphQL operations", { graphql: { query: "query A { viewer { login } } query B { viewer { id } }" } }, "not a single query"],
-    ["a download", { method: "GET", path: "/repos/octo/repo/zipball", download: { path: "repo.zip" } }, "scripts never write files"],
-    ["an upload", { method: "POST", path: "/repos/octo/repo/releases/1/assets", upload: { path: "a.zip", contentType: "application/zip" } }, "upload sends a file"],
-    ["POST /markdown, a read with a body", { method: "POST", path: "/markdown", body: { text: "x" } }, "POST /markdown is not a GET or HEAD"],
-  ])("refuses %s with SCRIPT_READ_ONLY before any request, even when the agent allows github_api", async (_name, input, what) => {
-    const h = await setUp({ agents: { build: [...BASE, rule("github_api", "allow")] } })
+    ["a REST write", { method: "POST", path: "/repos/octo/repo/issues", body: { title: "x" } }],
+    ["a DELETE", { method: "DELETE", path: "/repos/octo/repo" }],
+    ["a GraphQL mutation", { graphql: { query: "mutation { addStar(input: {starrableId: \"x\"}) { clientMutationId } }" } }],
+  ])("refuses %s before dispatch when the rule would ask, with no request and no assert", async (_name, input) => {
+    const h = await setUp({ agents: { build: [...BASE.filter((entry) => entry.action !== "github_api"), rule("github_api", "ask")] } })
     const result = await h.call(SCRIPT_API_METHOD, input)
-    expect(result).toMatchObject({ type: "failed", data: { code: "SCRIPT_READ_ONLY", next: expect.stringContaining("GET, HEAD or a single GraphQL query") } })
-    expect(result.message).toContain(what)
+    expect(result).toMatchObject({ type: "failed", data: { code: "PERMISSION_DENIED" } })
+    expect(result.message).toContain("would ask for this session's agent")
     expect(h.requests).toEqual([])
     expect(h.asserts).toEqual([])
+  })
+
+  it("runs a write the rules allow, asserting github_api with the script call's own source", async () => {
+    const h = await setUp()
+    expect(await h.call(SCRIPT_API_METHOD, { method: "POST", path: "/repos/octo/repo/issues", body: { title: "x" } })).toMatchObject({ ok: true, status: 200 })
+    expect(h.requests).toEqual([{ url: "https://api.github.com/repos/octo/repo/issues", method: "POST" }])
+    expect(h.asserts).toMatchObject([{ action: API_ACTION, resources: ["POST /repos/octo/repo/issues"], source: { type: "tool", messageID: "msg_script", id: expect.stringMatching(/^script:/) } }])
+  })
+
+  it("runs POST /markdown, a read with a body, and a GraphQL query with variables, under an allow", async () => {
+    const h = await setUp()
+    expect(await h.call(SCRIPT_API_METHOD, { method: "POST", path: "/markdown", body: { text: "x" } })).toMatchObject({ ok: true })
+    expect(await h.call(SCRIPT_API_METHOD, { graphql: { query: "query { viewer { login } }", variables: { a: 1 } } })).toMatchObject({ ok: true })
+    // Neither changes GitHub, so neither asserts.
+    expect(h.asserts).toEqual([])
+    expect(h.requests).toHaveLength(2)
+  })
+
+  it("refuses a download when the rule would ask, before any request", async () => {
+    const asked = await setUp({ agents: { build: [...BASE.filter((entry) => entry.action !== "github_api"), rule("github_api", "ask")] } })
+    expect(await asked.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/octo/repo/zipball", download: { path: "repo.zip" } })).toMatchObject({ type: "failed", data: { code: "PERMISSION_DENIED" } })
+    expect(asked.requests).toEqual([])
+    expect(asked.asserts).toEqual([])
   })
 
   // GITHUB-R2: a script's read follows a redirect within the API with no assert, as the model's does; never one off the API.
@@ -205,13 +231,12 @@ describe("the api method", () => {
     expect(h.requests.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name", "https://api.github.com/repositories/10"])
     expect(await h.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/o/r/actions/jobs/1/logs" })).toMatchObject({
       type: "failed",
-      data: { code: "API_REDIRECT_OFF_HOST", next: "For job logs, call the get_job_logs method; other files need github_api's download in an OpenCode session." },
+      data: { code: "API_REDIRECT_OFF_HOST", next: "For job logs, call get_job_logs with return_content: true; for other files, pass download: { path }, which follows GitHub's storage redirects without the token." },
     })
   })
 
-  it("refuses a read with a body, and an input github_api would not take, as API_INPUT_INVALID", async () => {
+  it("refuses an input github_api would not take as API_INPUT_INVALID", async () => {
     const h = await setUp()
-    expect(await h.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/octo/repo", body: {} })).toMatchObject({ type: "failed", data: { code: "API_INPUT_INVALID" } })
     expect(await h.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/octo/repo", extra: 1 })).toMatchObject({ type: "failed", data: { code: "API_INPUT_INVALID" } })
     expect(await h.call(SCRIPT_API_METHOD, { method: "GET", path: "https://example.com/x" })).toMatchObject({ type: "failed", data: { code: "API_PATH_INVALID" } })
     expect(h.requests).toEqual([])

@@ -26,9 +26,8 @@ export function toolFor(method: string, path: string, toolsets: readonly Toolset
   return hint && toolsetsOf(hint.tool).some((toolset) => toolsets.includes(toolset)) ? hint.tool : undefined
 }
 
-/** The hint for the model (`github_api`) or a script (the tools RPC's `api` method). */
-export function toolHint(tool: string, script: boolean): string {
+/** The hint for a working read, naming GitHub's own tool instead of `github_api`. */
+export function toolHint(tool: string): string {
   const method = HINTS.find((entry) => entry.tool === tool)?.method
-  const call = `call it${method ? ` with method "${method}"` : ""} instead of ${script ? "api" : "github_api"}.`
-  return script ? `The ${tool} method covers this read: ${call}` : `GitHub's ${tool} tool covers this read: ${call}`
+  return `GitHub's ${tool} tool covers this read: call it${method ? ` with method "${method}"` : ""} instead of github_api.`
 }

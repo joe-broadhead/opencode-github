@@ -91,12 +91,13 @@ Three skills come with it:
 
 Each skill reports findings and changes nothing on GitHub unless you ask.
 
-**Scripts.** A script or a cron job can call GitHub's read tools and `github_api`'s reads with no model, through
-`opencode api`. It runs as a session and its agent, under that agent's permission rules and the session's own.
-Scripts can never change anything on GitHub:
+**Scripts.** A script or a cron job can call GitHub's tools and `github_api` with no model, through `opencode api`.
+It runs as a session and its agent, and every call needs a rule that resolves to `allow`: the 61 known reads run on
+the default rules, while a write, a download or an upload needs a prior explicit `allow` in the session's or the
+agent's rules. An `ask` is refused, and a saved "Always allow" is not enough.
 
 ```sh
-opencode api post /api/rpc/github.platform.tools/pull_request_read \
+opencode api post /api/rpc/github.platform.tools/pull_request_read -H "x-opencode-directory:$PWD" \
   -d '{"input":{"sessionID":"ses_…","input":{"method":"get","owner":"OWNER","repo":"REPO","pullNumber":42}}}'
 ```
 
@@ -285,8 +286,8 @@ still stores its token.
 
 - [Configuration](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/configuration.md): options,
   toolsets, permission rules and error codes.
-- [Scripting](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/scripting.md): calling GitHub's reads
-  from scripts, with no model.
+- [Scripting](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/scripting.md): calling GitHub's tools
+  from scripts, with no model, under a prior allow.
 - [Security](https://github.com/joe-broadhead/opencode-github/blob/HEAD/SECURITY.md): network endpoints,
   credentials, untrusted content and reporting a vulnerability.
 - [Contributing](https://github.com/joe-broadhead/opencode-github/blob/HEAD/CONTRIBUTING.md): development, checks

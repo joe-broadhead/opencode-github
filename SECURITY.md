@@ -81,23 +81,28 @@ See [docs/configuration.md](docs/configuration.md#permissions).
 
 ## Scripts
 
-The tools RPC (`github.platform.tools`, see [docs/scripting.md](docs/scripting.md)) runs GitHub's read tools and
-`github_api`'s reads for a script, with no model. It adds no authority:
+The tools RPC (`github.platform.tools`, see [docs/scripting.md](docs/scripting.md)) calls GitHub's tools for a script,
+with no model. Every known tool is a method, with its class, but a method is not a grant:
 
-- A script names a session that names an agent, and runs as them. A tool that the agent's or the session's rules hide
-  from the model is refused. OpenCode's own executor then checks each MCP call against the agent's rules, the
-  session's rules and saved approvals, as it does for the model. An `api` read asserts nothing, as for the model.
-- An ask on a script's call is denied, not prompted: no one is there to answer it. The plugin's one permission hook
-  changes only an ask on one of its own script calls in flight, only to a deny, and leaves every other call alone. The
-  default rules themselves still use no hook.
-- Only the known reads are methods. GitHub's write tools, `ui_get` and any tool that GitHub adds later are never
-  methods, even with an allow rule. `api` refuses every call that could change GitHub, every GraphQL document that is
-  not one query, `download` and `upload` with `SCRIPT_READ_ONLY` before any request, whatever `readOnly` and the rules
-  say.
+- A script names a session that names an agent, and runs as them. Before any call, the plugin resolves that method's
+  permission action against the agent's rules and then the session's rules, the host's own order. Only `allow` runs: a
+  rule that resolves to `ask` is refused because no one can answer it, and a `deny` is refused. Neither makes a call.
+  The default rules allow the 61 known reads and ask for every write, so a script changes GitHub, downloads or
+  uploads only with a prior explicit `allow` for `github_api` or for the write's own action.
+- A saved "Always allow" is **not** consulted: it lives outside the agent's and session's rules, so an old click does
+  not authorize a new script. A grant is reviewable in config, or in a Jobs one-off's approval.
+- After the resolve, an MCP call runs through OpenCode's own executor, which checks the action again, as for the
+  model. `api` runs `github_api`'s own spec, so a write, a download or an upload asserts `github_api` itself with the
+  call's own source, and `readOnly: true` still refuses every change. The plugin's permission hook still changes only
+  an `ask` on one of its own script calls in flight, only to a deny, and leaves every other call alone. The default
+  rules themselves use no hook.
+- `ui_get` is hidden from every agent's tools, and it and any tool GitHub adds later are not methods.
 - MCP calls go through OpenCode's own connection and sign-in, and `api` uses the same sign-in, hosts and redirect
   handling as `github_api`. No token is returned.
 - GitHub's MCP error text reaches the script only as the first line, at most 300 characters, with tokens and URL query
   strings removed. Results are GitHub content, which is untrusted, as for the model.
+- A session in another location is `SESSION_UNKNOWN`, and a call that names no location reaches the service's default
+  location: send `x-opencode-directory` with each call.
 - OpenCode's `execute.before` and `execute.after` tool hooks, from any plugin, do not run for a script's call, so
   another plugin's policy hook does not see it. A script's calls are not recorded in the session; GitHub records API
   calls in its audit logs.

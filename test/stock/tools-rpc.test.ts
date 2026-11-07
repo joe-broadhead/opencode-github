@@ -4,7 +4,7 @@
 // script's ask, and a plain JSON Schema contract with a strict validator refuses a bad envelope.
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { SCRIPT_API_METHOD } from "../../src/api/script.js"
-import { KNOWN_READS, TOOLS_RPC_ID } from "../../src/host/tools-rpc.js"
+import { METHODS, TOOLS_RPC_ID } from "../../src/host/tools-rpc.js"
 import { FAKE_INPUT, type FakeGitHub, FIXTURE_PAT, PAT_LOGIN, startFakeGitHub, UPSTREAM_FAILURE } from "../host/fake-github.js"
 import { cleanupStock, startStock, STOCK_VERSIONS, type StockHost, until } from "./harness.js"
 
@@ -12,9 +12,10 @@ import { cleanupStock, startStock, STOCK_VERSIONS, type StockHost, until } from 
 setDefaultTimeout(300_000)
 afterAll(cleanupStock)
 
-/** Two known reads, two writes, the hidden ui_get and one tool the plugin does not know. */
+/** Two known reads, two known writes, the hidden ui_get and one tool the plugin does not know. */
 const READS = ["get_me", "issue_read"]
-const EXCLUDED = ["issue_write", "create_pull_request", "ui_get", "brand_new_tool"]
+const WRITES = ["issue_write", "create_pull_request"]
+const EXCLUDED = [...WRITES, "ui_get", "brand_new_tool"]
 
 const rule = (action: string, effect: "allow" | "deny" | "ask") => ({ action, resource: "*", effect })
 
@@ -59,16 +60,18 @@ for (const version of STOCK_VERSIONS)
       // Session rules come after the agent's: one narrows build, the other reopens one tool for locked.
       sessions["narrow"] = await create({ agent: "build", permissions: [rule("github_get_me", "deny")] })
       sessions["reopen"] = await create({ agent: "locked", permissions: [rule("github_get_me", "allow")] })
+      // A script's own grant for one write, and github_api, which asks by default.
+      sessions["granted"] = await create({ agent: "build", permissions: [rule("github_issue_write", "allow"), rule("github_api", "allow")] })
     })
     afterAll(async () => {
       await host?.close()
       await fake?.close()
     })
 
-    test("describes the known reads and api; the listed reads are available with their live schemas", async () => {
+    test("describes every known tool with its class, and api; the listed reads are available with their live schemas", async () => {
       const { value } = await script(host, "describe", {})
       expect(value.id).toBe(TOOLS_RPC_ID)
-      expect(value.methods.map((method: { name: string }) => method.name)).toEqual([...KNOWN_READS, SCRIPT_API_METHOD])
+      expect(value.methods.map((method: { name: string }) => method.name)).toEqual([...METHODS.map((method) => method.name), SCRIPT_API_METHOD])
       const byName = new Map(value.methods.map((method: { name: string }) => [method.name, method]))
       for (const name of READS) expect(byName.get(name)).toMatchObject({ kind: "mcp", tool: `github_${name}`, action: `github_${name}`, available: true, input: FAKE_INPUT })
       // QA LIVE-9: describe says why: the toolset, and whether the toolsets option turns it on (issues is on by default).
@@ -84,19 +87,33 @@ for (const version of STOCK_VERSIONS)
       })
       for (const name of READS) expect(byName.get(name)).not.toHaveProperty("detail")
       // The probe's server has no sign-in of its own, so github_api has none.
-      expect(byName.get(SCRIPT_API_METHOD)).toMatchObject({ kind: "plugin", action: "github_api", available: false, reason: "AUTH_REQUIRED" })
+      expect(byName.get(SCRIPT_API_METHOD)).toMatchObject({ kind: "plugin", class: "write", action: "github_api", available: false, reason: "AUTH_REQUIRED" })
+      for (const name of WRITES) expect(byName.get(name)).toMatchObject({ kind: "mcp", class: "write", available: true })
+      expect(byName.get("get_me")).toMatchObject({ class: "read" })
     })
 
-    test("never makes a write, ui_get or an unknown tool a method, though GitHub lists them", async () => {
+    test("never makes ui_get or an unknown tool a method, though GitHub lists them", async () => {
       // The status RPC counts what the server lists: the two reads, the two writes and the unknown tool (ui_get is removed).
       expect((await status(host)).tools).toEqual({ visible: 5, unknown: ["github_brand_new_tool"], mode: "ask" })
       const from = fake.calls().length
-      for (const name of EXCLUDED) {
+      for (const name of ["ui_get", "brand_new_tool"]) {
         const refused = await call("build", name, {})
         expect(refused.type).not.toBe("failed")
         expect(refused.message).toMatch(/not.?found|unknown/i)
       }
       expect(calls(from)).toEqual([])
+    })
+
+    test("refuses a write the rules do not allow before dispatch, and runs the one a session allows", async () => {
+      const from = fake.calls().length
+      for (const name of WRITES) {
+        const refused = await call("build", name, { query: "q" })
+        expect({ name, code: refused.code }).toEqual({ name, code: "PERMISSION_DENIED" })
+        expect(refused.message).toContain("would ask for this session's agent")
+      }
+      expect(calls(from)).toEqual([])
+      expect((await call("granted", "issue_write", { query: "q" })).value).toMatchObject({ output: { tool: "issue_write" } })
+      expect(fake.calls().slice(from)).toEqual(["issue_write"])
     })
 
     test("runs a known read as a session whose agent allows it, through the github server, with no model turn", async () => {
@@ -121,7 +138,7 @@ for (const version of STOCK_VERSIONS)
       const started = Date.now()
       const result = await call("careful", "get_me", { query: "q" })
       expect(result).toMatchObject({ type: "failed", code: "PERMISSION_DENIED" })
-      expect(result.message).toMatch(/cannot answer an approval prompt/)
+      expect(result.message).toMatch(/would ask for this session's agent, and a script cannot answer/)
       expect(Date.now() - started).toBeLessThan(5000)
       const { data: pending } = await host.client.permission.request.list({ location: host.location })
       expect(pending.filter((request) => JSON.stringify(request).includes(sessions["careful"]!))).toEqual([])
@@ -145,16 +162,22 @@ for (const version of STOCK_VERSIONS)
       expect(UPSTREAM_FAILURE).toContain("fake-signature-123")
     })
 
-    test("refuses api writes, downloads and GraphQL mutations before any request; a read reaches github_api's sign-in check", async () => {
+    test("refuses api writes and downloads before dispatch, and a write the session allows stops at github_api's sign-in check", async () => {
       const refusals = [
         { method: "POST", path: "/repos/octo/hello/issues", body: { title: "x" } },
         { method: "GET", path: "/repos/octo/hello/zipball", download: { path: "hello.zip" } },
         { graphql: { query: "mutation { addStar(input: {starrableId: \"x\"}) { clientMutationId } }" } },
       ]
-      for (const input of refusals) expect(await call("build", SCRIPT_API_METHOD, input)).toMatchObject({ type: "failed", code: "SCRIPT_READ_ONLY" })
-      // The probe's server has no sign-in of its own, so github_api's read stops at its sign-in check.
-      expect(await call("build", SCRIPT_API_METHOD, { method: "GET", path: "/user" })).toMatchObject({ type: "failed", code: "AUTH_REQUIRED" })
+      for (const input of refusals) {
+        const refused = await call("build", SCRIPT_API_METHOD, input)
+        expect(refused).toMatchObject({ type: "failed", code: "PERMISSION_DENIED" })
+        expect(refused.message).toContain("would ask for this session's agent")
+      }
+      // The probe's server has no sign-in of its own, so an allowed write and a read stop at the sign-in check.
+      expect(await call("granted", SCRIPT_API_METHOD, { method: "POST", path: "/repos/octo/hello/issues", body: { title: "x" } })).toMatchObject({ type: "failed", code: "AUTH_REQUIRED" })
+      expect(await call("granted", SCRIPT_API_METHOD, { method: "GET", path: "/user" })).toMatchObject({ type: "failed", code: "AUTH_REQUIRED" })
       expect(host.attempts.filter((line) => line.includes("api.github.com"))).toEqual([])
+      expect(await host.client.permission.request.list({ location: host.location }).then(({ data }) => data.filter((request) => JSON.stringify(request).includes(sessions["granted"]!)))).toEqual([])
     })
 
     test("names an unknown session, a session without an agent, and rejects an envelope with extra keys", async () => {

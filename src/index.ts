@@ -10,7 +10,7 @@ import { registerAuth } from "./auth.js"
 import { endpoints, loadOptions } from "./config.js"
 import { ENTERPRISE_NAME, registerEnterpriseAuth } from "./enterprise.js"
 import { checkHost } from "./host-version.js"
-import { registerToolsRpc } from "./host/tools-rpc.js"
+import { METHODS, registerToolsRpc } from "./host/tools-rpc.js"
 import { observeMcp, registerMcp } from "./mcp.js"
 import { registerPermissionDefaults } from "./permissions.js"
 import { SERVER_NAME } from "./rpc.js"
@@ -80,15 +80,16 @@ export default Plugin.define({
           ...source,
         }),
       )
-      // Scripts call the known reads and github_api's reads with no model, as a session and its agent. A read GitHub
-      // does not list gets describe's detail: its toolset, and whether the toolsets option turns that on.
+      // Scripts call every known tool and github_api with no model, as a session and its agent: a write, a download or
+      // an upload needs a prior allow rule for its action. A method GitHub does not list gets describe's detail: its
+      // toolset, and whether the toolsets option turns that on.
       const stopTools = await registerToolsRpc(ctx, {
+        methods: [...METHODS, scriptApi(apiTool)],
         mcp: {
           server: SERVER_NAME,
           managed: () => managed(),
           unavailableDetail: (method, code) => (code === "TOOL_UNAVAILABLE" ? unavailableDetail(method, options.toolsets) : undefined),
         },
-        owned: [scriptApi(apiTool, api)],
       })
       keep({ dispose: stopTools })
       keep(await registerSkills(ctx))

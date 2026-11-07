@@ -152,30 +152,31 @@ so no `.tsx` runs from `node_modules`. OpenTUI and Solid come from the host.
 
 ## Tools RPC
 
-`github.platform.tools` lets a script call GitHub's reads with no model; [Scripting](scripting.md) is the user's view.
-Its methods are `describe`, one per known read in `allReadTools()` (`src/tools.ts`, every toolset, without `ui_get`),
-named after the upstream tool, and `api`. The MCP list is an allowlist: a write or a tool that GitHub adds later is
-never a method.
+`github.platform.tools` lets a script call GitHub's tools with no model; [Scripting](scripting.md) is the user's view.
+Its methods are `describe`, one per known tool in `allReadTools()` and `allWriteTools()` (`src/tools.ts`, every
+toolset, without `ui_get`), each named after the upstream tool and carrying its class, and `api` (class `write`). The
+table is an allowlist: a tool that GitHub adds later is never a method, and `describe` lists it as unclassified.
 
 A call is `{ sessionID, input }`. The shared module (`src/host/tools-rpc.ts`):
 
 1. looks up the session with `ctx.session.get`, and its agent's rules with `ctx.agent.get` in the session's location
    (`SESSION_UNKNOWN`, `SESSION_AGENT_REQUIRED`);
-2. refuses the tool when the last rule that matches its permission action (`github_<tool>`, or `github_api`) on `*`, in
-   the agent's rules followed by the session's, is a deny: OpenCode hides such a tool from the model
-   (`PERMISSION_DENIED`);
+2. resolves the method's permission action (`github_<tool>`, or `github_api`) against the agent's rules and then the
+   session's, and refuses anything but `allow` (`PERMISSION_DENIED`): an `ask` cannot be answered, and a `deny` is
+   hidden; either refuses before any tool call;
 3. for an MCP method: refuses with `SERVER_CONFLICT` while the plugin does not own the `github` server (another server
    of that name, also with `host`); finds the tool's executor in `ctx.tool.list()`, or names the server's state
    (`AUTH_REQUIRED` and so on, `NOT_REGISTERED` with `host`) or `TOOL_UNAVAILABLE` (a toolset that is off; `describe`
    adds `unavailableDetail`'s `detail`, naming the toolset and the `toolsets` option); calls
    `execute(input, { sessionID, agent, messageID, id, signal, progress })` with a new call id, so OpenCode checks
    `github_<tool>` on `*` itself and sends its own credential; and returns `{ output?, text }`;
-4. for `api`: runs `scriptApi` (`src/api/script.ts`), which checks the input with `github_api`'s schema, refuses with
-   `SCRIPT_READ_ONLY` anything `describeCall` classifies as a write, `download` and `upload`, then runs `github_api`'s
-   own `run` with the call's context. A read asserts nothing, exactly as on the model path.
+4. for `api`: runs `scriptApi` (`src/api/script.ts`), which checks the input with `github_api`'s whole schema and runs
+   `github_api`'s own `run` with the call's context. A read asserts nothing; a write, a `download` and an `upload`
+   assert `github_api` themselves, with the script call's source, so they run only under the prior `allow` the module
+   resolved.
 
 While a call runs, its id is live. A `permission.hook("evaluate")` turns an `ask` whose source id is live into a deny,
-so the script gets `PERMISSION_DENIED` at once and no prompt waits. It changes nothing else; the forbidden-API scan
+so an inner action a method needs is named in the refusal and no prompt waits. It changes nothing else; the forbidden-API scan
 allows exactly this one.
 
 A `Tool.Error` with a cause is a permission refusal; one without a cause is GitHub's own error (`isError`), which

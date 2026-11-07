@@ -283,6 +283,16 @@ describe("writes, lockdown and the user's own rules", () => {
     expect(await effect(host, "auditor", "github_api")).toBe("deny")
   })
 
+  // Permission audit G2: the assert lives in `run`, so the path a model reaches in Code Mode is covered too.
+  test("github_api inside Code Mode asks before a POST unattended: refused, and nothing is sent", async () => {
+    const sessionID = await session(host)
+    const before = host.fake.requests.length
+    const code = `return tools.github.api({ method: "POST", path: "/repos/octo/hello/releases", body: { tag_name: "v1" } })`
+    expect(await unattended(host, sessionID, code)).toEqual({ ok: false, error: nobodyPresent("github_api") })
+    expect(host.fake.requests.slice(before).map((request) => `${request.method} ${request.path}`)).toEqual([])
+    expect(await host.client.permission.list({ sessionID })).toEqual([])
+  })
+
   test("the per-agent fix guards a config-only agent and keeps the user's rules winning", async () => {
     const sessionID = await session(host, "reviewer")
     expect(await attempt(host, sessionID, "reviewer", "github_brand_new_tool")).toMatchObject({ asked: "github_brand_new_tool", ok: false })
@@ -401,14 +411,16 @@ describe(`GitHub Enterprise Server on OpenCode ${SDK_VERSION}`, () => {
   })
 
   test("a script reads through api with the GitHub Enterprise sign-in; GitHub's MCP methods are not registered", async () => {
-    const sessionID = await session(host)
+    // v2: api is class write, and its action asks by default, so a script grants it for that session.
+    const sessionID = await session(host, "build", [allow("github_api")])
     const before = host.fake.requests.length
     const read = await script(host, "api", { sessionID, input: { method: "GET", path: "/repos/octo/hello" } })
     expect(read.value).toMatchObject({ ok: true, status: 200, data: { full_name: "octo/hello" } })
-    // readOnly is off, and a script's write is still refused before any request.
-    expect(await script(host, "api", { sessionID, input: { method: "POST", path: "/repos/octo/hello/releases", body: { tag_name: "v1" } } })).toMatchObject({
+    // readOnly is off, but a session without the grant still cannot answer github_api's ask: refused before any request.
+    const unallowed = await session(host)
+    expect(await script(host, "api", { sessionID: unallowed, input: { method: "POST", path: "/repos/octo/hello/releases", body: { tag_name: "v1" } } })).toMatchObject({
       type: "failed",
-      code: "SCRIPT_READ_ONLY",
+      code: "PERMISSION_DENIED",
     })
     expect(host.fake.requests.slice(before).map((request) => `${request.method} ${request.path} ${request.authorized}`)).toEqual(["GET /repos/octo/hello true"])
     const refused = await script(host, "get_me", { sessionID, input: {} })
@@ -437,19 +449,24 @@ describe(`the tools RPC on OpenCode ${SDK_VERSION}`, () => {
   })
 
   test("api reads GitHub's REST and GraphQL API with the same sign-in, and refuses a write before any request", async () => {
-    const sessionID = await session(host)
+    const sessionID = await session(host, "build", [allow("github_api")])
     const description = await script(host, "describe", {})
-    expect(description.value.methods.find((method: { name: string }) => method.name === "api")).toMatchObject({ kind: "plugin", action: "github_api", available: true })
+    expect(description.value.methods.find((method: { name: string }) => method.name === "api")).toMatchObject({ kind: "plugin", class: "write", action: "github_api", available: true })
     const before = host.fake.requests.length
     const read = await script(host, "api", { sessionID, input: { method: "GET", path: "/repos/octo/hello" } })
     expect(read.value).toMatchObject({ ok: true, status: 200, data: { full_name: "octo/hello" }, trust: { githubContent: "untrusted" } })
     expect(JSON.stringify(read)).not.toContain(FIXTURE_PAT)
+    // A session that grants github_api lets these run; one without it refuses each before any request.
+    const unallowed = await session(host)
     for (const input of [
       { method: "DELETE", path: "/repos/octo/hello" },
       { method: "GET", path: "/repos/octo/hello/zipball", download: { path: "hello.zip" } },
       { graphql: { query: "mutation { addStar(input: {starrableId: \"x\"}) { clientMutationId } }" } },
-    ])
-      expect(await script(host, "api", { sessionID, input })).toMatchObject({ type: "failed", code: "SCRIPT_READ_ONLY" })
+    ]) {
+      const refused = await script(host, "api", { sessionID: unallowed, input })
+      expect(refused).toMatchObject({ type: "failed", code: "PERMISSION_DENIED" })
+      expect(refused.message).toContain("would ask for this session's agent")
+    }
     expect(host.fake.requests.slice(before).map((request) => `${request.method} ${request.path} ${request.authorized}`)).toEqual(["GET /repos/octo/hello true"])
   })
 

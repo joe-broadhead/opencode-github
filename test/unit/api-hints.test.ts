@@ -54,9 +54,8 @@ describe("github_api's tool hints", () => {
   })
 
   it("words the hint for the model and for a script, with the method where a tool needs one", () => {
-    expect(toolHint("list_tags", false)).toBe("GitHub's list_tags tool covers this read: call it instead of github_api.")
-    expect(toolHint("list_tags", true)).toBe("The list_tags method covers this read: call it instead of api.")
-    expect(toolHint("actions_list", false)).toBe(`GitHub's actions_list tool covers this read: call it with method "list_workflow_runs" instead of github_api.`)
-    expect(toolHint("pull_request_read", true)).toBe(`The pull_request_read method covers this read: call it with method "get" instead of api.`)
+    expect(toolHint("list_tags")).toBe("GitHub's list_tags tool covers this read: call it instead of github_api.")
+    expect(toolHint("actions_list")).toBe(`GitHub's actions_list tool covers this read: call it with method "list_workflow_runs" instead of github_api.`)
+    expect(toolHint("pull_request_read")).toBe(`GitHub's pull_request_read tool covers this read: call it with method "get" instead of github_api.`)
   })
 })

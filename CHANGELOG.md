@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- The tools RPC is v2: every known tool is a method with its class (`read` for the 61 catalogued reads, `write` for the 37 catalogued writes and for `api`), and a call runs only with a prior explicit `allow` in the agent's or the session's rules. An `ask` is refused before the tool runs, so no prompt waits, and a saved "Always allow" does not authorize an ad-hoc script. `api` now takes `github_api`'s whole input: a write, a download and an upload run under an allow and assert `github_api` themselves, and `readOnly: true` still refuses every change; `SCRIPT_READ_ONLY` is gone. `ui_get` and unknown tools are still not methods.
+
 ## [0.0.8] - 2026-11-06
 
 ### Added

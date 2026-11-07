@@ -146,6 +146,11 @@ export function allReadTools(): string[] {
   return [...reads].filter((name) => !hidden.has(name)).sort()
 }
 
+/** Every catalogued write tool across all toolsets, sorted, without the server prefix. */
+export function allWriteTools(): string[] {
+  return [...writes].sort()
+}
+
 /** The toolsets a known tool (without the prefix) belongs to, in catalog order; most have one. */
 export function toolsetsOf(name: string): Toolset[] {
   return (Object.entries(KNOWN_TOOLS) as [Toolset, { readonly read: readonly string[]; readonly write: readonly string[] }][])

@@ -186,7 +186,8 @@ export const tool = (host: Host, id: string) =>
 
 export const toolIDs = async (host: Host) => (await host.probe().tool.list()).map((item) => item.id).filter((id) => id.startsWith("github_")).sort()
 
-export const session = async (host: Host, agent = "build") => (await host.client.sessions.create({ agent, location: host.location })).id
+export const session = async (host: Host, agent = "build", permissions?: readonly { action: string; resource: string; effect: "allow" | "ask" | "deny" }[]) =>
+  (await host.client.sessions.create({ agent, location: host.location, ...(permissions ? { permissions: [...permissions] } : {}) } as never)).id
 
 let calls = 0
 

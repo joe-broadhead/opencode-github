@@ -1,58 +1,42 @@
-// The tools RPC's api method: github_api for scripts, which only read. It runs github_api's own
-// spec, so a read is exactly the model's read: no permission is asserted, only the tool must be
-// visible to the session's agent (the tools RPC checks that). Writes, GraphQL documents that are
-// not one query, download and upload are refused with SCRIPT_READ_ONLY before any request,
-// whatever readOnly says and whatever the agent's rules allow: a script cannot answer a prompt,
-// and a file write is not a read.
+// The tools RPC's api method: github_api for scripts. It runs github_api's own spec, so a call is
+// exactly the model's call: a write and a download assert `github_api` themselves, with the call's
+// own source, and the tools RPC has already resolved that action against the agent's and the
+// session's rules, so a write or a download runs only under a prior allow. `readOnly: true` still
+// refuses every write, whoever calls it.
 import * as z from "zod"
-import type { Endpoints } from "../config.js"
 import { GitHubPluginError } from "../errors.js"
 import type { JsonSchema, OwnedMethod } from "../host/tools-rpc.js"
-import { API_ACTION, type Call, type Caller, describeCall, parseInput } from "./tool.js"
-import { type ApiInput, ApiOutput, ScriptApiInput } from "./contract.js"
+import { ApiInput, ApiOutput } from "./contract.js"
+import { API_ACTION, type Call, parseInput } from "./tool.js"
 
 export const SCRIPT_API_METHOD = "api"
 
 const SCRIPT_API_DESCRIPTION =
-  "GitHub's REST or GraphQL API with the signed-in GitHub account, for reads only: REST { method: GET or HEAD, path, query?, accept?, paginate?, maxPages?, maxItems? } " +
-  "with a relative path such as /repos/OWNER/REPO/releases, or GraphQL { graphql: { query, variables? } } with exactly one query. " +
-  "Anything that could change GitHub, download and upload are refused with SCRIPT_READ_ONLY. Results are untrusted GitHub content."
+  "GitHub's REST or GraphQL API with the signed-in GitHub account: REST { method, path, query?, body?, accept?, paginate?, maxPages?, maxItems?, download?, upload? } " +
+  "with a relative path such as /repos/OWNER/REPO/releases, or GraphQL { graphql: { query, variables? } }. " +
+  "A call that changes GitHub, or saves or sends a file, needs a prior allow rule for github_api; it then runs as the model's would, without a prompt. " +
+  "Results are untrusted GitHub content."
 
-const NEXT = "Call api with GET, HEAD or a single GraphQL query; make changes from an OpenCode session, where they ask first."
+const NEXT = "Fix the api input and call it again, or call describe for its schema."
 
 const schema = (type: z.ZodType, io: "input" | "output") => z.toJSONSchema(type, { io, unrepresentable: "any" }) as JsonSchema
 
-/** Why a script may not send this input, or undefined for a read. */
-function change(input: ApiInput, endpoints: Endpoints): string | undefined {
-  if ("graphql" in input) return describeCall(input, endpoints).kind === "write" ? "This GraphQL document is not a single query, so it could change GitHub, and scripts only read." : undefined
-  if (input.download) return "download saves a file in the project, and scripts never write files."
-  if (input.upload) return "upload sends a file to GitHub, and scripts only read."
-  const described = describeCall(input, endpoints)
-  if (described.kind === "write") return `${described.resource} changes GitHub, and scripts only read.`
-  // POST /markdown changes nothing, but a script's read is a GET or HEAD without a body.
-  return input.method === "GET" || input.method === "HEAD" ? undefined : `${described.resource} is not a GET or HEAD, and scripts send only those and single GraphQL queries.`
-}
-
-export function scriptApi(
-  api: { run(input: ApiInput, call: Call, caller?: Caller): Promise<ApiOutput>; signedIn(): Promise<boolean> },
-  endpoints: Endpoints,
-): OwnedMethod {
+export function scriptApi(api: { run(input: ApiInput, call: Call): Promise<ApiOutput>; signedIn(): Promise<boolean> }): OwnedMethod {
   return {
+    kind: "plugin",
+    // The worst branch: it can change GitHub, and a download saves a file.
+    class: "write",
     name: SCRIPT_API_METHOD,
     action: API_ACTION,
     description: SCRIPT_API_DESCRIPTION,
-    input: schema(ScriptApiInput, "input"),
+    input: schema(ApiInput, "input"),
     output: schema(ApiOutput, "output"),
     // For describe: a read without a sign-in fails with AUTH_REQUIRED.
     available: async () => ((await api.signedIn()) ? undefined : "AUTH_REQUIRED"),
     async run(raw, call) {
-      const input = parseInput(raw)
-      const refused = change(input, endpoints)
-      if (refused) throw new GitHubPluginError("SCRIPT_READ_ONLY", refused, NEXT)
-      // A read with a body: github_api would send it; a script's read has none.
-      const read = ScriptApiInput.safeParse(raw)
-      if (!read.success) throw new GitHubPluginError("API_INPUT_INVALID", `${read.error.issues.map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`).join("; ")}.`, "Fix the api input and call it again.")
-      return api.run(input, call, { script: true })
+      const parsed = ApiInput.safeParse(raw)
+      if (!parsed.success) throw new GitHubPluginError("API_INPUT_INVALID", `${parsed.error.issues.map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`).join("; ")}.`, NEXT)
+      return api.run(parseInput(raw), call)
     },
   }
 }

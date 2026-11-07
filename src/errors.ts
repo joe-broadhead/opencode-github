@@ -36,7 +36,6 @@ type ErrorCode =
   | "API_REDIRECT_INSECURE"
   | "API_REDIRECT_OFF_HOST"
   | "API_REDIRECTED"
-  | "SCRIPT_READ_ONLY"
 
 export class GitHubPluginError extends Error {
   readonly code: ErrorCode
