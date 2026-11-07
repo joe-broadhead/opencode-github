@@ -112,7 +112,7 @@ describe("formatStatus", () => {
     expect(text).toContain("Tools: 1 available, 2 unknown (hidden): github_a, github_b")
     expect(text).toContain("OpenCode: 2.3.0 (untested: Untested OpenCode.)")
     // QA INSTALL-4: a release in the range that is not tested says so, with the range.
-    expect(formatStatus(status({ host: { version: "2.2.6", range, tested: false } }))).toContain("OpenCode: 2.2.6 (untested; supported range >=2.2.3 <2.3.0)")
+    expect(formatStatus(status({ host: { version: "2.2.99", range, tested: false } }))).toContain("OpenCode: 2.2.99 (untested; supported range >=2.2.3 <2.3.0)")
     expect(formatStatus(status({ host: { version: "2.2.5", range, tested: true } }))).toContain("OpenCode: 2.2.5 (tested)")
     expect(formatStatus(status({ tools: { visible: 3, unknown: ["github_a"], mode: "ask" } }))).toContain("(they ask first): github_a")
   })

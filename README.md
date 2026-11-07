@@ -7,7 +7,7 @@ Unofficial; not affiliated with GitHub. GitHub is a trademark of GitHub, Inc.
 
 ## Requirements
 
-- OpenCode `>=2.2.3 <2.3.0`, tested on 2.2.3, 2.2.4 and 2.2.5. A later 2.2 release loads too, and the status marks it
+- OpenCode `>=2.2.3 <2.3.0`, tested on 2.2.3, 2.2.4, 2.2.5 and 2.2.6. A later 2.2 release loads too, and the status marks it
   untested. Outside `>=2.2.3 <2.3.0` the plugin does not load, unless you set
   [`allowUntestedHost`](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/configuration.md#allowuntestedhost).
 - macOS or Linux.

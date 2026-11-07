@@ -140,10 +140,10 @@ describe("computeStatus", () => {
 
   // S13 and TRIAGE decision 2: an untested release inside the range works normally, and its next step is unchanged.
   it("on a release in the range that is not tested, reports the working state and leaves the next step alone", async () => {
-    const status = await computeStatus(fakeCtx({ server: "connected", label: "octocat" }).ctx, deps({ hostVersion: "2.2.6" }))
-    expect(status).toMatchObject({ state: "connected", host: { version: "2.2.6", range: ">=2.2.3 <2.3.0", tested: false }, nextStep: "Nothing to do." })
+    const status = await computeStatus(fakeCtx({ server: "connected", label: "octocat" }).ctx, deps({ hostVersion: "2.2.99" }))
+    expect(status).toMatchObject({ state: "connected", host: { version: "2.2.99", range: ">=2.2.3 <2.3.0", tested: false }, nextStep: "Nothing to do." })
     const outside = await computeStatus(fakeCtx({ server: "connected", label: "octocat" }).ctx, deps({ hostVersion: "2.3.0", hostWarning: "x" }))
-    expect(outside.nextStep).toBe("If GitHub misbehaves, use OpenCode 2.2.3, 2.2.4 or 2.2.5, where it is tested.")
+    expect(outside.nextStep).toBe("If GitHub misbehaves, use OpenCode 2.2.3, 2.2.4, 2.2.5 or 2.2.6, where it is tested.")
   })
 
   // QA LIVE-1: an agent whose own rules already ask or deny for GitHub's tools needs no fix.

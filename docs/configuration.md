@@ -356,8 +356,8 @@ GHE.com (data residency) is not supported yet; `host` refuses `*.ghe.com`.
 
 ## `allowUntestedHost`
 
-The plugin supports OpenCode `>=2.2.3 <2.3.0` and is tested on 2.2.3, 2.2.4 and 2.2.5. On a later 2.2 release it
-loads and works; the status shows `OpenCode: 2.2.6 (untested; supported range >=2.2.3 <2.3.0)`, and the status RPC
+The plugin supports OpenCode `>=2.2.3 <2.3.0` and is tested on 2.2.3, 2.2.4, 2.2.5 and 2.2.6. On a later 2.2 release it
+loads and works; the status shows `OpenCode: 2.2.99 (untested; supported range >=2.2.3 <2.3.0)`, and the status RPC
 `host.tested: false`, and the state and next step stay those of the connection. Outside the range, including
 prereleases and development builds, it refuses to load, so there is no `/github-status`, `/github` dialog or status
 RPC, and no state `host_untested`:

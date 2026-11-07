@@ -40,8 +40,8 @@ describe("checkHost", () => {
 describe("isTestedHost", () => {
   // QA X1: 2.2.5 is a tested host; the list is the one the host, pack and stock tests run on.
   it("is true only for the tested releases", () => {
-    expect(TESTED_HOSTS).toEqual(["2.2.3", "2.2.4", "2.2.5"])
+    expect(TESTED_HOSTS).toEqual(["2.2.3", "2.2.4", "2.2.5", "2.2.6"])
     for (const version of TESTED_HOSTS) expect(isTestedHost(version)).toBe(true)
-    for (const version of ["2.2.6", "2.2.2", "2.3.0", "2.2.5-beta.1", ""]) expect(isTestedHost(version)).toBe(false)
+    for (const version of ["2.2.99", "2.2.2", "2.3.0", "2.2.5-beta.1", ""]) expect(isTestedHost(version)).toBe(false)
   })
 })

@@ -47,7 +47,7 @@ One command runs every local check, in this order. It must pass before every com
 | Host | `npm run test:host` | Loads the built plugin into an embedded OpenCode host from the public `@opencode/sdk` under Bun, once per tested release, with GitHub replaced by a loopback fake. |
 | Stock | `npm run test:stock` | Runs each tested stock `opencode serve` release with the built plugin and a test probe plugin (`test/stock/probe`) that points the `github` server at the loopback fake, and calls the tools RPC as a script: known reads, denies, refused asks, session rules, excluded tools, upstream errors and `api` refusals. |
 
-The tested releases are `TESTED_HOSTS` in `src/host-version.ts`: 2.2.3, 2.2.4 and 2.2.5. The host, pack and stock
+The tested releases are `TESTED_HOSTS` in `src/host-version.ts`: 2.2.3, 2.2.4, 2.2.5 and 2.2.6. The host, pack and stock
 stages, and so CI, all run on that one list. The pack check and the stock test take the stock OpenCode binaries from
 `OPENCODE_BIN_2_2_3`, `OPENCODE_BIN_2_2_4` and `OPENCODE_BIN_2_2_5`. When one is unset, each installs `@opencode/cli`
 at that version into a temporary folder, once per run. The host tests (`scripts/host-tests.mjs`) run 2.2.3 on the
@@ -68,7 +68,7 @@ tests on one other 2.2.x release only, install its SDK in a separate folder, out
 
 ```sh
 dir=$(mktemp -d /tmp/github-sdk-XXXXXX)
-(cd "$dir" && echo '{"private":true}' > package.json && npm install --ignore-scripts --no-audit --no-fund @opencode/sdk@2.2.6)
+(cd "$dir" && echo '{"private":true}' > package.json && npm install --ignore-scripts --no-audit --no-fund @opencode/sdk@2.2.99)
 npm run build
 HOST_SDK_DIR="$dir" node scripts/host-tests.mjs
 ```
