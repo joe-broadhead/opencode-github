@@ -19,7 +19,8 @@ describe("loadOptions", () => {
     for (const raw of [undefined, {}]) {
       expect(loadOptions(raw)).toEqual({
         toolsets: ["context", "repos", "issues", "pull_requests", "users", "actions", "git", "labels", "code_quality", "code_security", "secret_protection", "dependabot", "security_advisories", "discussions", "orgs"],
-        readOnly: true,
+        access: "all",
+        readOnly: false,
         lockdown: false,
         unknownTools: "ask",
         scopes: ["repo", "read:org"],
@@ -31,14 +32,30 @@ describe("loadOptions", () => {
   it("accepts every option", () => {
     const options = {
       toolsets: ["context", "actions", "gists"],
-      readOnly: false,
+      access: "ask-changes",
       lockdown: true,
       unknownTools: "hide",
       clientId: "Ov23li.Abc_123-x",
       scopes: ["repo", "read:org", "gist"],
       allowUntestedHost: true,
     }
-    expect(loadOptions(options)).toEqual(options)
+    expect(loadOptions(options)).toEqual({ ...options, readOnly: false })
+  })
+
+  // R18: the old switch is the same one, mapped onto access, with a note for status.
+  it("maps the deprecated readOnly option onto access, with a note", () => {
+    expect(loadOptions({ readOnly: true })).toMatchObject({ access: "read-only", readOnly: true })
+    expect(loadOptions({ readOnly: true }).deprecation).toContain('maps to access "read-only"')
+    expect(loadOptions({ readOnly: false })).toMatchObject({ access: "all", readOnly: false })
+    expect(loadOptions({ readOnly: false }).deprecation).toContain('maps to access "all"')
+    // An explicit access wins, and the old option adds no note.
+    expect(loadOptions({ readOnly: true, access: "all" })).toMatchObject({ access: "all", readOnly: false })
+    expect(loadOptions({ readOnly: true, access: "all" }).deprecation).toBeUndefined()
+    expect(loadOptions({ access: "all" }).deprecation).toBeUndefined()
+  })
+
+  it.each(["all", "ask-changes", "read-only"] as const)("accepts access %s", (access) => {
+    expect(loadOptions({ access })).toMatchObject({ access, readOnly: access === "read-only" })
   })
 
   it("does not share the default lists between calls", () => {
@@ -52,6 +69,7 @@ describe("loadOptions", () => {
     [{ toolsets: [] }, 'Invalid plugin option "toolsets": list at least one toolset.'],
     [{ toolsets: ["repos", "repos"] }, 'Invalid plugin option "toolsets": list each toolset once.'],
     [{ readOnly: "yes" }, 'Invalid plugin option "readOnly"'],
+    [{ access: "write" }, 'Invalid plugin option "access"'],
     [{ lockdown: 1 }, 'Invalid plugin option "lockdown"'],
     [{ unknownTools: "allow" }, 'Invalid plugin option "unknownTools"'],
     [{ clientId: "has spaces" }, `Invalid plugin option "clientId": use the OAuth App's client ID`],

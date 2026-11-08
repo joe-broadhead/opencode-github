@@ -1,6 +1,7 @@
 // Plugin options and the constants they default to.
 import * as z from "zod"
 import { GitHubPluginError } from "./errors.js"
+import { ACCESS } from "./rpc.js"
 
 export const MCP_URL = "https://api.githubcopilot.com/mcp/"
 
@@ -83,13 +84,22 @@ const DEFAULT_SCOPES: readonly string[] = ["repo", "read:org"]
 
 const unique = (values: readonly string[]) => new Set(values).size === values.length
 
+/** What the generated default rules allow. `all` is the default; the other two are how a user restricts the plugin. */
+export type Access = (typeof ACCESS)[number]
+
 const OptionsSchema = z.strictObject({
   toolsets: z
     .array(z.enum(TOOLSETS))
     .min(1, "list at least one toolset")
     .refine(unique, "list each toolset once")
     .default([...DEFAULT_TOOLSETS]),
-  readOnly: z.boolean().default(true),
+  /** What the generated default rules allow: everything, changes ask, or read-only. */
+  access: z.enum(ACCESS).optional(),
+  /**
+   * Deprecated: `true` means `access: "read-only"` and `false` means `access: "all"`. Kept so an existing config keeps
+   * working; status says so.
+   */
+  readOnly: z.boolean().optional(),
   lockdown: z.boolean().default(false),
   unknownTools: z.enum(["ask", "hide"]).default("ask"),
   /** An OAuth App for device sign-in, set by the user or an organisation; without it only token sign-in is offered. */
@@ -110,17 +120,40 @@ const OptionsSchema = z.strictObject({
     .optional(),
 })
 
-export type Options = z.output<typeof OptionsSchema>
+type ParsedOptions = z.output<typeof OptionsSchema>
+
+export type Options = ParsedOptions & {
+  /** The one switch the default rules follow: `access`, or the deprecated `readOnly` mapped onto it. */
+  readonly access: Access
+  /** Read-only means every change is refused and GitHub's own server lists no write tools: `access === "read-only"`. */
+  readonly readOnly: boolean
+  /** The note status shows when the deprecated `readOnly` option set the access. */
+  readonly deprecation?: string
+}
+
+
 
 export function loadOptions(raw: unknown): Options {
   const result = OptionsSchema.safeParse(raw ?? {})
-  if (result.success) return result.data
-  const issue = result.error.issues[0]
-  const path = issue?.code === "unrecognized_keys" ? issue.keys[0] : issue?.path.join(".")
-  const message = issue?.code === "unrecognized_keys" ? "this option does not exist" : (issue?.message ?? "invalid value")
-  throw new GitHubPluginError(
-    "OPTIONS_INVALID",
-    path ? `Invalid plugin option "${path}": ${message}.` : `Invalid plugin options: ${message}.`,
-    "Fix the options for @joe-broadhead/opencode-github in opencode.json.",
-  )
+  if (!result.success) {
+    const issue = result.error.issues[0]
+    const path = issue?.code === "unrecognized_keys" ? issue.keys[0] : issue?.path.join(".")
+    const message = issue?.code === "unrecognized_keys" ? "this option does not exist" : (issue?.message ?? "invalid value")
+    throw new GitHubPluginError(
+      "OPTIONS_INVALID",
+      path ? `Invalid plugin option "${path}": ${message}.` : `Invalid plugin options: ${message}.`,
+      "Fix the options for @joe-broadhead/opencode-github in opencode.json.",
+    )
+  }
+  const { readOnly, ...rest } = result.data
+  // The old option is the same switch: `readOnly: true` is read-only and `readOnly: false` is everything allowed.
+  const access: Access = rest.access ?? (readOnly === true ? "read-only" : "all")
+  return {
+    ...rest,
+    access,
+    readOnly: access === "read-only",
+    ...(readOnly === undefined || rest.access !== undefined
+      ? {}
+      : { deprecation: `The readOnly option is deprecated: it maps to access "${access}". Set the access option instead, and remove readOnly.` }),
+  }
 }

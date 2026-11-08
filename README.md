@@ -57,8 +57,8 @@ permissions above.
 **The browser.** In the TUI, press `o` or Enter to open the link in your browser (`c` copies a device code). The CLI,
 `opencode auth login GitHub`, opens the browser automatically.
 
-A fine-grained token reaches only the repositories you select, and GitHub enforces that. For writes
-(`readOnly: false`), give the token write access to what those tools change, for example Issues or Pull requests.
+A fine-grained token reaches only the repositories you select, and GitHub enforces that. For writes, give the token
+write access to what those tools change, for example Issues or Pull requests.
 
 To sign out, run `opencode auth logout GitHub <login>`, where `<login>` is the account's label, your GitHub login,
 or remove the account in `/connect` → **GitHub**.
@@ -112,52 +112,182 @@ status into the session as a note, without starting a model turn.
 
 ## Permissions
 
-The plugin adds default rules to every agent that has OpenCode's base "allow everything" rule:
+**Every tool is allowed by default.** An agent can read any repository, issue and pull request the signed-in account
+can see, and change them: comment, push, open and merge pull requests, create releases, delete files and repositories,
+run workflows. `github_api` is allowed too, so an agent can make any REST or GraphQL call the token permits. Nothing
+asks first. Restrict it in any of these three ways:
 
-- Known GitHub read tools run without a prompt, also in `opencode run`.
-- Writes (only present with `readOnly: false`) and GitHub tools the plugin does not know yet ask first. In
-  `opencode run`, nobody can answer, so they are denied.
+1. **The `access` option**, which drives the default rules the plugin inserts:
 
-Your own rules and saved approvals still win:
+   | Value | What runs | What asks |
+   | --- | --- | --- |
+   | `"all"` (the default) | every tool, and any tool GitHub adds later | nothing |
+   | `"ask-changes"` | the read tools | every write, and new tools |
+   | `"read-only"` | the read tools | nothing: every write is **denied**, and GitHub's own server lists no write tools |
 
-- A rule in the top-level `permissions` of your config overrides the defaults. For example, this lets
-  `github_create_pull_request` run without a prompt, and blocks merges:
+   ```json
+   { "plugins": [{ "package": "@joe-broadhead/opencode-github", "options": { "access": "read-only" } }] }
+   ```
 
-  ```json
-  {
-    "permissions": [
-      { "action": "github_create_pull_request", "resource": "*", "effect": "allow" },
-      { "action": "github_merge_pull_request", "resource": "*", "effect": "deny" }
-    ]
-  }
-  ```
+   `readOnly: true` and `false` still work: they mean `"read-only"` and `"all"`, and `/github-status` says they are
+   deprecated. An explicit `access` wins over them.
 
-  Every rule needs a `"resource"`. OpenCode skips a rule without it.
-- `github_api` rules match `METHOD /path`, and `*` matches any text, slashes included. **Write owner and repo names
-  in lower case**: GitHub reads them without regard to case, so the plugin checks `/repos/Owner/Prod/…` as
-  `/repos/owner/prod/…`, and a rule with an upper-case name never matches (the status warns about it). The same holds
-  for organisation, user and team names, and environment, label, secret and variable names. This lets the agent change
-  one owner's repositories without a prompt, and never delete anything:
+2. **An agent that is read-only or asks**, with rules of its own, later than the plugin's:
 
-  ```json
-  {
-    "permissions": [
-      { "action": "github_api", "resource": "POST /repos/my-org/*", "effect": "allow" },
-      { "action": "github_api", "resource": "DELETE *", "effect": "deny" }
-    ]
-  }
-  ```
+   ```json
+   { "agents": { "reviewer": { "permissions": [
+     { "action": "github_*", "resource": "*", "effect": "ask" },
+     { "action": "github_get_me", "resource": "*", "effect": "allow" }
+   ] } } }
+   ```
 
-  A GraphQL change is `POST /graphql`, and saving a download is `download <file>`. A deny on
-  `{ "action": "github_api", "resource": "*" }` removes the tool from the agent.
-- Choosing **Always allow** at a prompt saves the approval for the whole project, for every agent, including Plan.
-- Stricter agents stay strict: Plan keeps its own rules, and Explore still cannot run GitHub tools.
+3. **A rule per tool**, with the exact names: `github_<tool>`, listed in the [toolsets table](docs/configuration.md#toolsets).
+   A later rule wins:
 
-**Agents defined only in your config miss the defaults.** OpenCode creates them after plugins load, so they run
-GitHub tools, including writes, without asking. `/github-status` and the `/github` dialog name these agents and show
-the rules to copy. Put them **first** in **that agent's own** `permissions` list, in `opencode.json` or in the
-agent's Markdown file, followed by your top-level rules for `github_` tools, so yours keep winning. Do not put these rules in the top-level `permissions`: that would weaken Explore
-and any other agent that denies by default.
+   ```json
+   { "permissions": [
+     { "action": "github_merge_pull_request", "resource": "*", "effect": "deny" },
+     { "action": "github_issue_write", "resource": "*", "effect": "ask" }
+   ] }
+   ```
+
+   Every rule needs a `"resource"`. OpenCode skips a rule without it.
+
+The plugin inserts this block directly after each agent's base rule that allows everything, generated from
+`defaultRules("all")` in `src/permissions.ts`:
+
+```json
+[
+  {"action":"github_*","resource":"*","effect":"allow"},
+  {"action":"github_actions_get","resource":"*","effect":"allow"},
+  {"action":"github_actions_list","resource":"*","effect":"allow"},
+  {"action":"github_check_dependency_vulnerabilities","resource":"*","effect":"allow"},
+  {"action":"github_custom_properties_read","resource":"*","effect":"allow"},
+  {"action":"github_get_code_quality_finding","resource":"*","effect":"allow"},
+  {"action":"github_get_code_scanning_alert","resource":"*","effect":"allow"},
+  {"action":"github_get_commit","resource":"*","effect":"allow"},
+  {"action":"github_get_copilot_space","resource":"*","effect":"allow"},
+  {"action":"github_get_dependabot_alert","resource":"*","effect":"allow"},
+  {"action":"github_get_discussion","resource":"*","effect":"allow"},
+  {"action":"github_get_discussion_comments","resource":"*","effect":"allow"},
+  {"action":"github_get_file_contents","resource":"*","effect":"allow"},
+  {"action":"github_get_gist","resource":"*","effect":"allow"},
+  {"action":"github_get_global_security_advisory","resource":"*","effect":"allow"},
+  {"action":"github_get_job_logs","resource":"*","effect":"allow"},
+  {"action":"github_get_label","resource":"*","effect":"allow"},
+  {"action":"github_get_latest_release","resource":"*","effect":"allow"},
+  {"action":"github_get_me","resource":"*","effect":"allow"},
+  {"action":"github_get_notification_details","resource":"*","effect":"allow"},
+  {"action":"github_get_release_by_tag","resource":"*","effect":"allow"},
+  {"action":"github_get_repository_tree","resource":"*","effect":"allow"},
+  {"action":"github_get_secret_scanning_alert","resource":"*","effect":"allow"},
+  {"action":"github_get_tag","resource":"*","effect":"allow"},
+  {"action":"github_get_team_members","resource":"*","effect":"allow"},
+  {"action":"github_get_teams","resource":"*","effect":"allow"},
+  {"action":"github_github_support_docs_search","resource":"*","effect":"allow"},
+  {"action":"github_issue_artifact_read","resource":"*","effect":"allow"},
+  {"action":"github_issue_read","resource":"*","effect":"allow"},
+  {"action":"github_list_branches","resource":"*","effect":"allow"},
+  {"action":"github_list_code_scanning_alerts","resource":"*","effect":"allow"},
+  {"action":"github_list_commits","resource":"*","effect":"allow"},
+  {"action":"github_list_copilot_spaces","resource":"*","effect":"allow"},
+  {"action":"github_list_dependabot_alerts","resource":"*","effect":"allow"},
+  {"action":"github_list_discussion_categories","resource":"*","effect":"allow"},
+  {"action":"github_list_discussions","resource":"*","effect":"allow"},
+  {"action":"github_list_gists","resource":"*","effect":"allow"},
+  {"action":"github_list_global_security_advisories","resource":"*","effect":"allow"},
+  {"action":"github_list_issue_fields","resource":"*","effect":"allow"},
+  {"action":"github_list_issue_types","resource":"*","effect":"allow"},
+  {"action":"github_list_issues","resource":"*","effect":"allow"},
+  {"action":"github_list_label","resource":"*","effect":"allow"},
+  {"action":"github_list_notifications","resource":"*","effect":"allow"},
+  {"action":"github_list_org_repository_security_advisories","resource":"*","effect":"allow"},
+  {"action":"github_list_pull_requests","resource":"*","effect":"allow"},
+  {"action":"github_list_releases","resource":"*","effect":"allow"},
+  {"action":"github_list_repository_collaborators","resource":"*","effect":"allow"},
+  {"action":"github_list_repository_security_advisories","resource":"*","effect":"allow"},
+  {"action":"github_list_secret_scanning_alerts","resource":"*","effect":"allow"},
+  {"action":"github_list_starred_repositories","resource":"*","effect":"allow"},
+  {"action":"github_list_tags","resource":"*","effect":"allow"},
+  {"action":"github_projects_get","resource":"*","effect":"allow"},
+  {"action":"github_projects_list","resource":"*","effect":"allow"},
+  {"action":"github_pull_request_read","resource":"*","effect":"allow"},
+  {"action":"github_repository_ruleset_read","resource":"*","effect":"allow"},
+  {"action":"github_search_code","resource":"*","effect":"allow"},
+  {"action":"github_search_commits","resource":"*","effect":"allow"},
+  {"action":"github_search_issues","resource":"*","effect":"allow"},
+  {"action":"github_search_orgs","resource":"*","effect":"allow"},
+  {"action":"github_search_pull_requests","resource":"*","effect":"allow"},
+  {"action":"github_search_repositories","resource":"*","effect":"allow"},
+  {"action":"github_search_users","resource":"*","effect":"allow"},
+  {"action":"github_actions_run_trigger","resource":"*","effect":"allow"},
+  {"action":"github_add_comment_to_pending_review","resource":"*","effect":"allow"},
+  {"action":"github_add_issue_comment","resource":"*","effect":"allow"},
+  {"action":"github_add_reply_to_pull_request_comment","resource":"*","effect":"allow"},
+  {"action":"github_assign_copilot_to_issue","resource":"*","effect":"allow"},
+  {"action":"github_assign_copilot_to_issue_with_intent","resource":"*","effect":"allow"},
+  {"action":"github_create_branch","resource":"*","effect":"allow"},
+  {"action":"github_create_gist","resource":"*","effect":"allow"},
+  {"action":"github_create_or_update_file","resource":"*","effect":"allow"},
+  {"action":"github_create_pull_request","resource":"*","effect":"allow"},
+  {"action":"github_create_pull_request_with_copilot","resource":"*","effect":"allow"},
+  {"action":"github_create_repository","resource":"*","effect":"allow"},
+  {"action":"github_create_repository_ruleset","resource":"*","effect":"allow"},
+  {"action":"github_custom_properties_write","resource":"*","effect":"allow"},
+  {"action":"github_delete_file","resource":"*","effect":"allow"},
+  {"action":"github_delete_repository","resource":"*","effect":"allow"},
+  {"action":"github_discussion_comment_write","resource":"*","effect":"allow"},
+  {"action":"github_dismiss_notification","resource":"*","effect":"allow"},
+  {"action":"github_fork_repository","resource":"*","effect":"allow"},
+  {"action":"github_issue_artifact_write","resource":"*","effect":"allow"},
+  {"action":"github_issue_write","resource":"*","effect":"allow"},
+  {"action":"github_label_write","resource":"*","effect":"allow"},
+  {"action":"github_manage_notification_subscription","resource":"*","effect":"allow"},
+  {"action":"github_manage_repository_notification_subscription","resource":"*","effect":"allow"},
+  {"action":"github_mark_all_notifications_read","resource":"*","effect":"allow"},
+  {"action":"github_merge_pull_request","resource":"*","effect":"allow"},
+  {"action":"github_projects_write","resource":"*","effect":"allow"},
+  {"action":"github_pull_request_review_write","resource":"*","effect":"allow"},
+  {"action":"github_push_files","resource":"*","effect":"allow"},
+  {"action":"github_request_copilot_review","resource":"*","effect":"allow"},
+  {"action":"github_star_repository","resource":"*","effect":"allow"},
+  {"action":"github_sub_issue_write","resource":"*","effect":"allow"},
+  {"action":"github_unstar_repository","resource":"*","effect":"allow"},
+  {"action":"github_update_gist","resource":"*","effect":"allow"},
+  {"action":"github_update_issue_comment","resource":"*","effect":"allow"},
+  {"action":"github_update_pull_request","resource":"*","effect":"allow"},
+  {"action":"github_update_pull_request_branch","resource":"*","effect":"allow"}
+]
+```
+
+`github_api` rules match `METHOD /path`, and `*` matches any text, slashes included. **Write owner and repo names in
+lower case**: GitHub reads them without regard to case, so the plugin checks `/repos/Owner/Prod/…` as
+`/repos/owner/prod/…`, and a rule with an upper-case name never matches (the status warns about it). The same holds for
+organisation, user and team names, and environment, label, secret and variable names. This lets an agent change one
+owner's repositories without a prompt, and never delete anything:
+
+```json
+{
+  "permissions": [
+    { "action": "github_api", "resource": "POST /repos/my-org/*", "effect": "allow" },
+    { "action": "github_api", "resource": "DELETE *", "effect": "deny" }
+  ]
+}
+```
+
+A GraphQL change is `POST /graphql`, and saving a download is `download <file>`. A deny on
+`{ "action": "github_api", "resource": "*" }` removes the tool from the agent. A script's `api` call resolves its own
+`METHOD /path`, so a rule for another method does not cover it.
+
+Your own rules still win over the defaults: a later rule, a saved **Always allow** (for the model), and a stricter
+agent's own rules (Plan keeps its rules, and Explore still cannot run GitHub tools).
+
+**Agents defined only in your config miss the defaults.** OpenCode creates them after plugins load, so they get no
+block; their own rules decide, and if they have none a GitHub tool runs. `/github-status` and the `/github` dialog name
+these agents and show the block to copy. Put it **first** in **that agent's own** `permissions` list, in
+`opencode.json` or in the agent's Markdown file, followed by your top-level rules for `github_` tools, so yours keep
+winning. Do not put these rules in the top-level `permissions`: that would weaken Explore and any other agent that
+denies by default.
 
 ### If you have `gh` installed
 
@@ -185,8 +315,8 @@ Options go in the plugin's entry in `opencode.json`:
 }
 ```
 
-The options are `toolsets`, `readOnly`, `lockdown`, `unknownTools`, `clientId`, `scopes`, `allowUntestedHost` and
-`host`.
+The options are `toolsets`, `access`, `lockdown`, `unknownTools`, `clientId`, `scopes`, `allowUntestedHost` and
+`host`. `readOnly` is deprecated: it maps onto `access`.
 
 **GitHub Enterprise Server.** Set `host` to the server's host name, such as `"host": "github.example.com"`. GitHub's
 hosted MCP server does not support GitHub Enterprise Server, so the plugin then registers no MCP tools and
@@ -211,7 +341,7 @@ overrides user and project config, so members only sign in:
         "clientId": "<your organisation's OAuth App client ID>",
         "scopes": ["repo", "read:org"],
         "toolsets": ["context", "repos", "issues", "pull_requests", "actions"],
-        "readOnly": true
+        "access": "read-only"
       }
     }
   ]
@@ -271,8 +401,9 @@ Error codes:
 | `TOKEN_CHECK_TIMEOUT` | GitHub did not answer the token check within 10 seconds. Try again. |
 | `TOKEN_CHECK_UNREACHABLE` | api.github.com could not be reached. Check your network, then try again. |
 | `TOKEN_CHECK_FAILED` | GitHub could not check the token, or returned no account name. Try again later. |
-| `READ_ONLY` | A `github_api` call would change GitHub while `readOnly` is set. Tell the user that this needs the plugin option `readOnly: false`; each change then asks first. |
+| `READ_ONLY` | A `github_api` call would change GitHub while `access` is `"read-only"` (or the deprecated `readOnly: true`). Tell the user that this needs the plugin option `access: "all"`; each change then runs without asking, unless they keep `ask-changes`. |
 | `AUTH_REQUIRED` | There is no GitHub sign-in to use. Run /connect and choose GitHub (GitHub Enterprise with `host`). |
+| `PERMISSION_DENIED` | A rule asks or denies the call. In a script an `ask` cannot be answered; for `github_api` the rule must name the call's own `METHOD /path`. Add or narrow the rule for the session or its agent. |
 | `API_INPUT_INVALID` | The `github_api` input does not fit, for example `download` with a method other than GET. Fix the input and call it again. |
 | `API_PATH_INVALID` | The path is not a relative API path, has a `.` or `..` segment (also percent-encoded), or percent-encodes a character it can hold as itself. Pass a path such as `/repos/OWNER/REPO/pulls`. |
 | `API_GRAPHQL_PATH` | `/graphql` was called through method and path. Pass `{ graphql: { query, variables } }` instead. |

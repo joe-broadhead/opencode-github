@@ -35,7 +35,7 @@ export default Plugin.define({
       for (const registration of registrations.splice(0).reverse()) await registration.dispose()
     }
     try {
-      keep(await registerPermissionDefaults(ctx))
+      keep(await registerPermissionDefaults(ctx, options.access))
       const api = endpoints(options)
       const signIn = { ...(options.clientId ? { clientId: options.clientId } : {}), scopes: options.scopes, endpoints: api }
       let source: Pick<StatusDeps, "conflict" | "integrationID" | "tools" | "enterprise">
@@ -61,6 +61,7 @@ export default Plugin.define({
       }
       const apiTool = keep(
         await registerApiTool(ctx, {
+          access: options.access,
           readOnly: options.readOnly,
           endpoints: api,
           service: options.host ? ENTERPRISE_NAME : "GitHub",

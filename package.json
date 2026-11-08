@@ -477,229 +477,229 @@
       {
         "name": "github.actions_run_trigger",
         "permission": "github_actions_run_trigger",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.add_comment_to_pending_review",
         "permission": "github_add_comment_to_pending_review",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.add_issue_comment",
         "permission": "github_add_issue_comment",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.add_reply_to_pull_request_comment",
         "permission": "github_add_reply_to_pull_request_comment",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.assign_copilot_to_issue",
         "permission": "github_assign_copilot_to_issue",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.assign_copilot_to_issue_with_intent",
         "permission": "github_assign_copilot_to_issue_with_intent",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.create_branch",
         "permission": "github_create_branch",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.create_gist",
         "permission": "github_create_gist",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.create_or_update_file",
         "permission": "github_create_or_update_file",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.create_pull_request",
         "permission": "github_create_pull_request",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.create_pull_request_with_copilot",
         "permission": "github_create_pull_request_with_copilot",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.create_repository",
         "permission": "github_create_repository",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.create_repository_ruleset",
         "permission": "github_create_repository_ruleset",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.custom_properties_write",
         "permission": "github_custom_properties_write",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.delete_file",
         "permission": "github_delete_file",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.delete_repository",
         "permission": "github_delete_repository",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.discussion_comment_write",
         "permission": "github_discussion_comment_write",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.dismiss_notification",
         "permission": "github_dismiss_notification",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.fork_repository",
         "permission": "github_fork_repository",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.issue_artifact_write",
         "permission": "github_issue_artifact_write",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.issue_write",
         "permission": "github_issue_write",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.label_write",
         "permission": "github_label_write",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.manage_notification_subscription",
         "permission": "github_manage_notification_subscription",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.manage_repository_notification_subscription",
         "permission": "github_manage_repository_notification_subscription",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.mark_all_notifications_read",
         "permission": "github_mark_all_notifications_read",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.merge_pull_request",
         "permission": "github_merge_pull_request",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.projects_write",
         "permission": "github_projects_write",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.pull_request_review_write",
         "permission": "github_pull_request_review_write",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.push_files",
         "permission": "github_push_files",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.request_copilot_review",
         "permission": "github_request_copilot_review",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.star_repository",
         "permission": "github_star_repository",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.sub_issue_write",
         "permission": "github_sub_issue_write",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.unstar_repository",
         "permission": "github_unstar_repository",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.update_gist",
         "permission": "github_update_gist",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.update_issue_comment",
         "permission": "github_update_issue_comment",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.update_pull_request",
         "permission": "github_update_pull_request",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.update_pull_request_branch",
         "permission": "github_update_pull_request_branch",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       },
       {
         "name": "github.api",
         "permission": "github_api",
-        "effect": "ask",
+        "effect": "allow",
         "readOnly": false
       }
     ],

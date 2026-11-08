@@ -43,7 +43,7 @@ describe("registerMcp", () => {
       github: {
         type: "remote",
         url: "https://api.githubcopilot.com/mcp/",
-        headers: { "X-MCP-Toolsets": "context,repos,issues,pull_requests,users,actions,git,labels,code_quality,code_security,secret_protection,dependabot,security_advisories,discussions,orgs", "X-MCP-Readonly": "true" },
+        headers: { "X-MCP-Toolsets": "context,repos,issues,pull_requests,users,actions,git,labels,code_quality,code_security,secret_protection,dependabot,security_advisories,discussions,orgs", "X-MCP-Readonly": "false" },
       },
     })
     expect(mcp.conflict()).toBe(false)
@@ -51,7 +51,7 @@ describe("registerMcp", () => {
 
   it("maps toolsets, read-only and lockdown to GitHub's headers", async () => {
     const host = fakeMcp()
-    await registerMcp(host.ctx, loadOptions({ toolsets: ["actions", "gists"], readOnly: false, lockdown: true }))
+    await registerMcp(host.ctx, loadOptions({ toolsets: ["actions", "gists"], access: "all", lockdown: true }))
     expect(host.build().github).toEqual({
       type: "remote",
       url: "https://api.githubcopilot.com/mcp/",

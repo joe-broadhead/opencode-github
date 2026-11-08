@@ -7,7 +7,7 @@
 // `--tarball <file>` checks that tarball instead of packing; the release workflow uses it on the
 // tarball it publishes.
 //
-// The stock binaries come from OPENCODE_BIN_2_2_3, OPENCODE_BIN_2_2_4 and OPENCODE_BIN_2_2_5. When one is
+// The stock binaries come from OPENCODE_BIN_2_2_3 to OPENCODE_BIN_2_2_6. When one is
 // unset, @opencode/cli and its platform package are installed into the temp folder with scripts disabled,
 // once per version. Each host runs in its own temporary profile under /tmp, on its own free port, with a
 // proxy that refuses every outbound request.

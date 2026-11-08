@@ -5,8 +5,9 @@
 // read-only. Saving a download asks too.
 import type { Plugin } from "@opencode/plugin"
 import { Error as ToolError } from "@opencode/plugin/promise/tool"
-import type { Endpoints, Toolset } from "../config.js"
+import type { Access, Endpoints, Toolset } from "../config.js"
 import { GitHubPluginError } from "../errors.js"
+import { type Rule, effectOf } from "../permissions.js"
 import { SERVER_NAME } from "../rpc.js"
 import { API_TOOL_NAME } from "../tools.js"
 import { graphqlKind, graphqlOperations, restKind } from "./classify.js"
@@ -37,15 +38,18 @@ export function apiDescription(enterprise: boolean): string {
  * The Code Mode namespace github_api shares with GitHub's MCP tools: what it holds, where the rest is, whether changes
  * can happen now, and how scripts reach GitHub without a model.
  */
-export function namespaceDescription(input: { readonly enterprise: boolean; readonly readOnly: boolean }): string {
+export function namespaceDescription(input: { readonly enterprise: boolean; readonly access: Access }): string {
   const head = input.enterprise
     ? "GitHub Enterprise Server through api, its REST and GraphQL API; GitHub's hosted MCP tools do not serve it."
     : "GitHub's MCP tools (repositories, code, issues, pull requests, Actions, security alerts) and api, GitHub's REST and GraphQL API, for what the tools cannot do. " +
       'The core reads are shown; search({ namespace: "github", query }) finds the others. ' +
       "The github-pr-review, github-issue-triage and github-code-research skills teach the workflows."
-  const mode = input.readOnly
-    ? `Read-only now: ${input.enterprise ? "" : "GitHub lists no write tools and "}api refuses changes; a change needs the plugin option readOnly: false, which the user sets.`
-    : "Reads run without asking; every change asks the user first."
+  const mode =
+    input.access === "read-only"
+      ? `Read-only now: ${input.enterprise ? "" : "GitHub lists no write tools and "}api refuses changes; a change needs the plugin option access: "all", which the user sets.`
+      : input.access === "ask-changes"
+        ? "Reads run without asking; every change asks the user first."
+        : "Reads run without asking, and so does every change."
   const scripts =
     `Scripts and cron jobs without a model only read, through opencode api post /api/rpc/github.platform.tools/<${input.enterprise ? "api" : "tool"}> ` +
     `with {"input":{"sessionID":"<id>","input":{…}}}, where <id> is a session created for the script (opencode api post /api/session with an agent; keep data.id), ` +
@@ -57,9 +61,14 @@ type ApiContext = {
   readonly tool: Pick<Plugin.Context["tool"], "transform">
   readonly permission: Pick<Plugin.Context["permission"], "assert">
   readonly integration: Pick<Plugin.Context["integration"], "get" | "connection">
+  /** The session's and the agent's rules, for a script's change: the tools RPC resolves the method, this the resource. */
+  readonly session: Pick<Plugin.Context["session"], "get">
+  readonly agent: Pick<Plugin.Context["agent"], "get">
 }
 
 export type ApiDeps = {
+  /** What the default rules allow; `read-only` refuses every change here too. */
+  readonly access: Access
   readonly readOnly: boolean
   readonly endpoints: Endpoints
   /** The name /connect shows for the sign-in: GitHub, or GitHub Enterprise. */
@@ -77,7 +86,20 @@ export type ApiDeps = {
   readonly fetch?: Fetch
 }
 
-export type Call = { readonly sessionID: string; readonly agent: string; readonly messageID: string; readonly id: string; readonly signal?: AbortSignal }
+export type Call = {
+  readonly sessionID: string
+  readonly agent: string
+  readonly messageID: string
+  readonly id: string
+  readonly signal?: AbortSignal
+  /**
+   * Set by the tools RPC's `api` method: a script, so an inner ask has nobody to answer it. A change then needs a
+   * prior explicit `allow` for its own resource, not a prompt and not a saved approval.
+   */
+  readonly script?: boolean
+  /** The rules that decide for a script: the agent's, then the session's. Only the RPC path passes them. */
+  readonly rules?: readonly Rule[]
+}
 
 /** The input, checked against github_api's schema. */
 export function parseInput(raw: unknown): ApiInput {
@@ -162,6 +184,35 @@ export async function registerApiTool(
       source: { type: "tool", messageID: call.messageID, id: call.id },
     })
 
+  /**
+   * A script's rules: the agent's, then the session's, which is the order OpenCode resolves in. A saved approval is not
+   * part of them, so it never authorizes a change here.
+   */
+  const scriptRules = async (call: Call): Promise<readonly Rule[]> => {
+    const [info, agent] = await Promise.all([
+      ctx.session.get({ sessionID: call.sessionID as never }),
+      ctx.agent.get({ agentID: call.agent as never }),
+    ])
+    return [...agent.data.permissions, ...(info.permissions ?? [])]
+  }
+
+  /**
+   * R3: a script's change resolves the same write permission the direct path asserts — `github_api` on the call's own
+   * `METHOD /path` — from a prior explicit `allow` only. The tools RPC has resolved the method's action already; this is
+   * the change's own resource, so an allow scoped to GETs cannot authorise a POST. An ask has nobody to answer it, and
+   * a saved approval is not part of the rules, so both are refused before anything is sent.
+   */
+  const allowChange = (rules: readonly Rule[], resource: string) => {
+    const effect = effectOf(rules, API_ACTION, resource)
+    if (effect === "allow") return
+    const why = effect === "ask" ? "the rules ask, and a script cannot answer an approval prompt" : "a deny rule refuses it"
+    throw new GitHubPluginError(
+      "PERMISSION_DENIED",
+      `${resource} needs a prior allow rule for ${API_ACTION}, and ${why}.`,
+      `Add { "action": "${API_ACTION}", "resource": "${resource}", "effect": "allow" } to the session or to its agent, before the rule that asks or denies.`,
+    )
+  }
+
   /** The sign-in github_api uses: the integration's active connection and its credential. */
   const signIn = async () => {
     const integrationID = deps.integrationID()
@@ -172,22 +223,25 @@ export async function registerApiTool(
 
   const run = async (input: ApiInput, call: Call): Promise<ApiOutput> => {
     const described = describeCall(input, deps.endpoints)
+    // An existing file is refused before the prompt, so the user never approves a call that cannot save.
+    const download = !("graphql" in input) && input.download ? await downloadTarget(deps.root, input.download.path, input.download.overwrite === true) : undefined
+    if (call.script) {
+      const rules = await scriptRules(call)
+      if (described.kind === "write") allowChange(rules, described.resource)
+      if (download) allowChange(rules, `download ${download.relative}`)
+    }
     if (described.kind === "write") {
       if (deps.readOnly) {
         throw new GitHubPluginError(
           "READ_ONLY",
           `${described.resource} changes GitHub, and the plugin is read-only.`,
           // The reader is the model: it tells the user, rather than editing the config to raise its own access.
-          "Tell the user that this needs the plugin option readOnly: false, which they set in opencode.json; each change then asks first.",
+          "Tell the user that this needs the plugin option access: \"all\", which they set in opencode.json; each change then runs without asking, unless they keep ask-changes.",
         )
       }
       await assert(call, described.resource, described.metadata)
     }
-    if (!("graphql" in input) && input.download) {
-      // An existing file is refused before the prompt, so the user never approves a call that cannot save.
-      const file = await downloadTarget(deps.root, input.download.path, input.download.overwrite === true)
-      await assert(call, `download ${file.relative}`, { ...described.metadata, download: file.relative })
-    }
+    if (download) await assert(call, `download ${download.relative}`, { ...described.metadata, download: download.relative })
 
     const { integrationID, connection, credential } = await signIn()
     if (!integrationID || !connection || credential?.type !== "oauth") {
@@ -225,7 +279,7 @@ export async function registerApiTool(
   }
 
   const registration = await ctx.tool.transform((editor) => {
-    editor.namespace({ name: SERVER_NAME, description: namespaceDescription({ enterprise: deps.enterprise === true, readOnly: deps.readOnly }) })
+    editor.namespace({ name: SERVER_NAME, description: namespaceDescription({ enterprise: deps.enterprise === true, access: deps.access }) })
     editor.add({
       name: API_TOOL_NAME,
       description: apiDescription(deps.enterprise === true),

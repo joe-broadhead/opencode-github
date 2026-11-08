@@ -4,8 +4,33 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- `access`, the plugin option every OpenCode plugin of this family has: `"all"` (the default), `"ask-changes"` and
+  `"read-only"`. It generates the default permission block from the tool classes, and `/github-status` shows it, with a
+  note when the deprecated `readOnly` option set it. `readOnly` still works: `true` means `"read-only"` and `false`
+  means `"all"`.
+- `assets/icon-128.png` and `assets/icon-256.png`, with `opencode.icons` and `opencode.vendor` in `package.json`, and
+  `scripts/check-icons.mjs`, the family icon contract's check.
+
 ### Changed
 
+- **Every GitHub tool is allowed by default.** The generated block allows every known tool and the `github_*` pattern,
+  so a tool GitHub adds later runs without a prompt too, and `github_api` may change GitHub without asking. Restrict it
+  with `access`, with an agent's own rules, or with a rule per tool; the README's Permissions section and SECURITY say
+  what an all-allow default means here.
+- **A script's `api` change resolves the same write permission the direct path asserts:** `github_api` on the call's
+  own `METHOD /path`, from a prior explicit `allow` only. An allow scoped to GETs cannot POST, and a rule for another
+  method does not cover it, with nothing sent.
+- `docs/scripting.md` is the family's scripting contract: the strict envelope, the location section and its unload
+  note, the result wording, and the refusal table, with an example-parsing test that fails when a doc example names a
+  method that does not exist, omits the location header, or uses an input the tool does not take.
+- One typed code table, `PLUGIN_CODES` and `RPC_CODES` in `src/errors.ts`, with a test that fails when a code in `src`
+  is in neither, and when the README's Troubleshooting table, the configuration guide's Errors table or the scripting
+  doc's refusal table drifts from it in either direction.
+- The README's Troubleshooting table lists every error code with its next step. The docs' tested-release sentences are
+  checked against `TESTED_HOSTS`: 2.2.3, 2.2.4, 2.2.5 and 2.2.6. The README prints the default block in full.
+- The CI has an `actionlint` job, and `npm run check` runs `actionlint` and the icon check.
 - The tools RPC is v2: every known tool is a method with its class (`read` for the 61 catalogued reads, `write` for the 37 catalogued writes and for `api`), and a call runs only with a prior explicit `allow` in the agent's or the session's rules. An `ask` is refused before the tool runs, so no prompt waits, and a saved "Always allow" does not authorize an ad-hoc script. `api` now takes `github_api`'s whole input: a write, a download and an upload run under an allow and assert `github_api` themselves, and `readOnly: true` still refuses every change; `SCRIPT_READ_ONLY` is gone. `ui_get` and unknown tools are still not methods.
 
 ## [0.0.8] - 2026-11-06

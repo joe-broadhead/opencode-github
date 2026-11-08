@@ -32,6 +32,13 @@ const RULES = [
   { name: "machine-local path", scope: "all", pattern: /\/Users\//, sample: ["const home = \"", "Users", "someone\""].join("/") },
   { name: "machine-local path", scope: "all", pattern: /\/private\/var\//, sample: ["const tmp = \"", "private", "var", "folders\""].join("/") },
   { name: "permission hook outside the tools RPC", scope: "all", pattern: HOOK, allow: HOOK_FILES, sample: 'await ctx.permission.hook("evaluate", allowEverything)' },
+  // Shipped text states behaviour, never who decided it or which internal lane changed it.
+  {
+    name: "internal process wording",
+    scope: "all",
+    pattern: /\bowner(?:'s)? (?:decision|ruling)\b|\bthe lead\b|\blane\s+[A-Z]\d*\b|\bhey-jelly\s*#\d+|\bG[1-4] lane\b|\breconcile lane\b/i,
+    sample: "The owner's decision was to allow it",
+  },
   { name: ".tsx import in built output", scope: "dist", pattern: /from\s*["'][^"']+\.tsx["']/, sample: 'import View from "./view.tsx"' },
   { name: "relative import in built output", scope: "dist", pattern: /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\(\s*)["']\.{1,2}\//, sample: 'import { Status } from "./rpc.js"' },
   { name: "node: import in the TUI entry", scope: "tui", pattern: /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\(\s*)["']node:/, sample: 'import { readFileSync } from "node:fs"' },

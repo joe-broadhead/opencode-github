@@ -49,7 +49,7 @@ One command runs every local check, in this order. It must pass before every com
 
 The tested releases are `TESTED_HOSTS` in `src/host-version.ts`: 2.2.3, 2.2.4, 2.2.5 and 2.2.6. The host, pack and stock
 stages, and so CI, all run on that one list. The pack check and the stock test take the stock OpenCode binaries from
-`OPENCODE_BIN_2_2_3`, `OPENCODE_BIN_2_2_4` and `OPENCODE_BIN_2_2_5`. When one is unset, each installs `@opencode/cli`
+`OPENCODE_BIN_2_2_3`, `OPENCODE_BIN_2_2_4`, `OPENCODE_BIN_2_2_5` and `OPENCODE_BIN_2_2_6`. When one is unset, each installs `@opencode/cli`
 at that version into a temporary folder, once per run. The host tests (`scripts/host-tests.mjs`) run 2.2.3 on the
 lockfile's SDK, and each other release on `HOST_SDK_DIR_2_2_4` or `HOST_SDK_DIR_2_2_5`, a folder whose
 `node_modules` holds that `@opencode/sdk`; when one is unset, they install it into a temporary folder, once per run.

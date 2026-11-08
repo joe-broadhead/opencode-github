@@ -80,6 +80,7 @@ async function setUp(
     },
   }
   const api = await registerApiTool(ctx as never, {
+    access: "all",
     readOnly: false,
     endpoints: GITHUB_COM,
     service: "GitHub",

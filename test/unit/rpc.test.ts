@@ -7,7 +7,7 @@ import { jargonIn } from "./jargon.js"
 const status = (overrides: Partial<Status> = {}): Status => ({
   version: "0.0.2",
   state: "sign_in_required",
-  readOnly: true,
+  access: "read-only",
   toolsets: ["context", "repos", "issues", "pull_requests"],
   tools: { visible: 26, unknown: [], mode: "ask" },
   unguardedAgents: [],
@@ -61,9 +61,9 @@ describe("isStatus and the JSON Schema", () => {
 
   it("states the same fields and required fields in its JSON Schema", () => {
     expect(Object.keys(STATUS_SCHEMA.properties).sort()).toEqual(
-      ["account", "enterprise", "host", "hostWarning", "nextStep", "permissionsBlock", "readOnly", "shadowedSkills", "state", "tools", "toolsets", "unguardedAgents", "unmatchedRules", "version"],
+      ["access", "account", "deprecation", "enterprise", "host", "hostWarning", "nextStep", "permissionsBlock", "shadowedSkills", "state", "tools", "toolsets", "unguardedAgents", "unmatchedRules", "version"],
     )
-    expect([...STATUS_SCHEMA.required].sort()).toEqual(["host", "nextStep", "readOnly", "state", "tools", "toolsets", "unguardedAgents", "version"])
+    expect([...STATUS_SCHEMA.required].sort()).toEqual(["access", "host", "nextStep", "state", "tools", "toolsets", "unguardedAgents", "version"])
     expect(STATUS_SCHEMA.additionalProperties).toBe(false)
   })
 })
@@ -75,7 +75,7 @@ describe("formatStatus", () => {
         "GitHub status",
         "Connection: connected",
         "Account: octocat",
-        "Access: read-only",
+        "Access: reads run without asking; every change and every new tool is denied",
         "Toolsets: context, repos, issues, pull_requests",
         "Host: github.com",
         "Tools: 26 available",
@@ -107,8 +107,8 @@ describe("formatStatus", () => {
 
   it("names unknown tools, writes and an untested OpenCode when they apply", () => {
     const range = ">=2.2.3 <2.3.0"
-    const text = formatStatus(status({ readOnly: false, tools: { visible: 1, unknown: ["github_a", "github_b"], mode: "hide" }, host: { version: "2.3.0", range, tested: false }, hostWarning: "Untested OpenCode." }))
-    expect(text).toContain("Access: reads and writes (writes ask first)")
+    const text = formatStatus(status({ access: "all", tools: { visible: 1, unknown: ["github_a", "github_b"], mode: "hide" }, host: { version: "2.3.0", range, tested: false }, hostWarning: "Untested OpenCode." }))
+    expect(text).toContain("Access: every tool runs without asking, reads and new tools included")
     expect(text).toContain("Tools: 1 available, 2 unknown (hidden): github_a, github_b")
     expect(text).toContain("OpenCode: 2.3.0 (untested: Untested OpenCode.)")
     // QA INSTALL-4: a release in the range that is not tested says so, with the range.

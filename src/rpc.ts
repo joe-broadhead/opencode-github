@@ -13,6 +13,9 @@ export const SERVER_NAME = "github"
  */
 export const STATES = ["connected", "sign_in_required", "connecting", "failed", "disabled", "not_configured", "conflict"] as const
 const EFFECTS = ["allow", "ask", "deny"] as const
+/** What the generated default rules allow. The family's one option for restricting a plugin. */
+export const ACCESS = ["all", "ask-changes", "read-only"] as const
+export type Access = (typeof ACCESS)[number]
 const UNKNOWN_TOOL_MODES = ["ask", "hide"] as const
 
 export type Rule = { readonly action: string; readonly resource: string; readonly effect: (typeof EFFECTS)[number] }
@@ -25,7 +28,10 @@ export type Status = {
   readonly state: (typeof STATES)[number]
   /** The GitHub login of the active sign-in. */
   readonly account?: string
-  readonly readOnly: boolean
+  /** What the default rules allow: `all` (the default), `ask-changes` or `read-only`. */
+  readonly access: Access
+  /** Present when the deprecated `readOnly` option set the access: what to write instead. */
+  readonly deprecation?: string
   readonly toolsets: readonly string[]
   /** The github server's tools that agents can use, the ones this plugin does not know yet, and whether those ask first or are hidden. */
   readonly tools: { readonly visible: number; readonly unknown: readonly string[]; readonly mode: (typeof UNKNOWN_TOOL_MODES)[number] }
@@ -59,7 +65,8 @@ export const STATUS_SCHEMA = object(
     version: text,
     state: { enum: STATES },
     account: text,
-    readOnly: { type: "boolean" },
+    access: { enum: ACCESS },
+    deprecation: text,
     toolsets: texts,
     tools: object({ visible: { type: "integer", minimum: 0 }, unknown: texts, mode: { enum: UNKNOWN_TOOL_MODES } }, ["visible", "unknown", "mode"]),
     unguardedAgents: texts,
@@ -71,7 +78,7 @@ export const STATUS_SCHEMA = object(
     enterprise: text,
     nextStep: text,
   },
-  ["version", "state", "readOnly", "toolsets", "tools", "unguardedAgents", "host", "nextStep"],
+  ["version", "state", "access", "toolsets", "tools", "unguardedAgents", "host", "nextStep"],
 )
 
 export const GithubRpc = Rpc.define({
@@ -104,7 +111,8 @@ export function isStatus(value: unknown): value is Status {
     isText(value.version) &&
     (STATES as readonly unknown[]).includes(value.state) &&
     optional(value.account, isText) &&
-    typeof value.readOnly === "boolean" &&
+    (ACCESS as readonly unknown[]).includes(value.access) &&
+    optional(value.deprecation, isText) &&
     isTexts(value.toolsets) &&
     isRecord(tools) &&
     only(tools, ["visible", "unknown", "mode"]) &&
@@ -171,12 +179,20 @@ export function describeHost(status: Pick<Status, "host" | "hostWarning">): stri
   return `${host.version} (untested; supported range ${host.range})`
 }
 
+/** The permission posture, one fixed sentence per access value. */
+const ACCESS_TEXT: Record<Access, string> = {
+  all: "every tool runs without asking, reads and new tools included",
+  "ask-changes": "reads run without asking; every change and every new tool asks first",
+  "read-only": "reads run without asking; every change and every new tool is denied",
+}
+
 /** The status as labelled rows, in the order the dialog and /github-status show them. */
 export function statusRows(status: Status): StatusRow[] {
   return [
     { label: "Connection", value: STATE_LABELS[status.state] },
     { label: "Account", value: status.account ?? NONE },
-    { label: "Access", value: status.readOnly ? "read-only" : "reads and writes (writes ask first)" },
+    { label: "Access", value: ACCESS_TEXT[status.access] },
+    ...(status.deprecation ? [{ label: "Note", value: status.deprecation }] : []),
     ...(status.enterprise ? [] : [{ label: "Toolsets", value: status.toolsets.join(", ") }]),
     { label: "Host", value: status.enterprise ? `${status.enterprise} (GitHub Enterprise Server)` : "github.com" },
     ...(status.unmatchedRules?.length ? [{ label: "Rules that never match", value: status.unmatchedRules.join("; ") }] : []),

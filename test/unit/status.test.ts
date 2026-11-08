@@ -115,14 +115,14 @@ describe("computeStatus", () => {
     const status = await computeStatus(
       fakeCtx({ server: "connected" }).ctx,
       deps({
-        options: loadOptions({ toolsets: ["repos"], readOnly: false, unknownTools: "hide" }),
+        options: loadOptions({ toolsets: ["repos"], access: "read-only", unknownTools: "hide" }),
         tools: () => ({ visible: 12, unknown: ["github_a", "github_b"] }),
         hostVersion: "2.3.0",
         hostWarning: "OpenCode 2.3.0 is outside the supported range.",
       }),
     )
     expect(status).toMatchObject({
-      readOnly: false,
+      access: "read-only",
       toolsets: ["repos"],
       tools: { visible: 12, unknown: ["github_a", "github_b"], mode: "hide" },
       host: { version: "2.3.0", range: ">=2.2.3 <2.3.0", tested: false },
@@ -230,7 +230,7 @@ describe("computeStatus", () => {
 
   it("leaves out empty optional fields", async () => {
     const status = await computeStatus(fakeCtx({ server: "needs_auth" }).ctx, deps())
-    expect(Object.keys(status).sort()).toEqual(["host", "nextStep", "readOnly", "state", "tools", "toolsets", "unguardedAgents", "version"])
+    expect(Object.keys(status).sort()).toEqual(["access", "host", "nextStep", "state", "tools", "toolsets", "unguardedAgents", "version"])
     expect(status.host).toEqual({ version: "2.2.3", range: ">=2.2.3 <2.3.0", tested: true })
   })
 

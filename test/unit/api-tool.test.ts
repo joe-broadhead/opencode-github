@@ -54,6 +54,7 @@ function setUp(input: { readOnly?: boolean; enterprise?: boolean; toolsets?: rea
     },
   } as unknown as Ctx
   const deps: ApiDeps = {
+    access: input.readOnly ? "read-only" : "all",
     readOnly: input.readOnly ?? false,
     endpoints: GITHUB_COM,
     service: "GitHub",
@@ -98,16 +99,16 @@ describe("github_api", () => {
   it("describes the github namespace in Code Mode: the mode now, the skills, and scripts", async () => {
     const api = setUp({ readOnly: true })
     await api.ready
-    expect(api.namespace()).toEqual({ name: "github", description: namespaceDescription({ enterprise: false, readOnly: true }) })
-    const hosted = namespaceDescription({ enterprise: false, readOnly: true })
+    expect(api.namespace()).toEqual({ name: "github", description: namespaceDescription({ enterprise: false, access: "read-only" }) })
+    const hosted = namespaceDescription({ enterprise: false, access: "read-only" })
     expect(hosted).toMatch(/^GitHub's MCP tools .* and api, GitHub's REST and GraphQL API, for what the tools cannot do\. /)
     expect(hosted).toContain('search({ namespace: "github", query })')
     for (const skill of ["github-pr-review", "github-issue-triage", "github-code-research"]) expect(hosted).toContain(skill)
-    expect(hosted).toContain("Read-only now: GitHub lists no write tools and api refuses changes; a change needs the plugin option readOnly: false, which the user sets.")
-    expect(namespaceDescription({ enterprise: false, readOnly: false })).toContain("Reads run without asking; every change asks the user first.")
-    expect(namespaceDescription({ enterprise: true, readOnly: true })).toMatch(/^GitHub Enterprise Server through api, .*hosted MCP tools do not serve it\. /)
+    expect(hosted).toContain('Read-only now: GitHub lists no write tools and api refuses changes; a change needs the plugin option access: "all", which the user sets.')
+    expect(namespaceDescription({ enterprise: false, access: "ask-changes" })).toContain("Reads run without asking; every change asks the user first.")
+    expect(namespaceDescription({ enterprise: true, access: "read-only" })).toMatch(/^GitHub Enterprise Server through api, .*hosted MCP tools do not serve it\. /)
     for (const enterprise of [false, true]) {
-      const text = namespaceDescription({ enterprise, readOnly: true })
+      const text = namespaceDescription({ enterprise, access: "read-only" })
       expect(text).toContain("/api/rpc/github.platform.tools/")
       expect(text).toContain("never gh, curl or a copied token")
       // it3 (Slack): a script test borrowed a session found through history, and so ran as that session's agent.
@@ -281,7 +282,7 @@ describe("github_api", () => {
     const api = setUp({ readOnly: true })
     for (const input of [{ method: "PATCH", path: "/repos/o/r" }, { graphql: { query: "mutation { addStar(input: {}) { clientMutationId } }" } }]) {
       expect(await message(api.run(input))).toMatch(
-        /^READ_ONLY: .* changes GitHub, and the plugin is read-only\. Next step: Tell the user that this needs the plugin option readOnly: false, which they set in opencode\.json; each change then asks first\.$/,
+        /^READ_ONLY: .* changes GitHub, and the plugin is read-only\. Next step: Tell the user that this needs the plugin option access: "all", which they set in opencode\.json; each change then runs without asking, unless they keep ask-changes\.$/,
       )
     }
     expect(api.asserts).toEqual([])

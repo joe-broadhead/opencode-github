@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { type Rule, defaultRules, insertDefaults, registerPermissionDefaults, unguardedAgents } from "../../src/permissions.js"
-import { allReadTools } from "../../src/tools.js"
+import { type Rule, defaultRules, effectOf, insertDefaults, registerPermissionDefaults, unguardedAgents } from "../../src/permissions.js"
+import { allReadTools, allWriteTools } from "../../src/tools.js"
 
 const BASE: Rule = { action: "*", resource: "*", effect: "allow" }
 const ENV: Rule = { action: "read", resource: "*.env", effect: "ask" }
@@ -15,21 +15,52 @@ function evaluate(rules: readonly Rule[], action: string): Rule["effect"] {
 }
 
 describe("defaultRules", () => {
-  it("asks for every GitHub tool, then allows the known reads", () => {
+  // R18: every tool a plugin registers is allowed, and so is the pattern, so a tool GitHub adds later runs at once.
+  it("allows every GitHub tool by default, reads and writes and a tool GitHub adds later alike", () => {
     const rules = defaultRules()
-    expect(rules[0]).toEqual({ action: "github_*", resource: "*", effect: "ask" })
-    expect(rules.slice(1)).toEqual(allReadTools().map((name) => ({ action: `github_${name}`, resource: "*", effect: "allow" })))
-    expect(rules).toHaveLength(allReadTools().length + 1)
+    expect(rules[0]).toEqual({ action: "github_*", resource: "*", effect: "allow" })
+    expect(rules.slice(1)).toEqual([
+      ...allReadTools().map((name) => ({ action: `github_${name}`, resource: "*", effect: "allow" })),
+      ...allWriteTools().map((name) => ({ action: `github_${name}`, resource: "*", effect: "allow" })),
+    ])
+    expect(rules).toHaveLength(allReadTools().length + allWriteTools().length + 1)
+    expect(rules.filter((rule) => rule.effect !== "allow")).toEqual([])
+    const evaluated = [BASE, ...rules]
+    for (const action of ["github_get_me", "github_create_pull_request", "github_brand_new_tool", "bash"]) expect(evaluate(evaluated, action)).toBe("allow")
   })
 
-  it("lets reads run, and makes writes and unknown tools ask", () => {
-    const rules = [BASE, ...defaultRules()]
+  it("ask-changes allows reads and asks for everything else, new tools included", () => {
+    const rules = [BASE, ...defaultRules("ask-changes")]
+    expect(rules[1]).toEqual({ action: "github_*", resource: "*", effect: "ask" })
     expect(evaluate(rules, "github_get_me")).toBe("allow")
     expect(evaluate(rules, "github_pull_request_read")).toBe("allow")
     expect(evaluate(rules, "github_create_pull_request")).toBe("ask")
     expect(evaluate(rules, "github_merge_pull_request")).toBe("ask")
     expect(evaluate(rules, "github_brand_new_tool")).toBe("ask")
     expect(evaluate(rules, "bash")).toBe("allow")
+  })
+
+  it("read-only allows reads and denies everything else, new tools included", () => {
+    const rules = [BASE, ...defaultRules("read-only")]
+    expect(rules[1]).toEqual({ action: "github_*", resource: "*", effect: "deny" })
+    expect(evaluate(rules, "github_get_me")).toBe("allow")
+    expect(evaluate(rules, "github_create_pull_request")).toBe("deny")
+    expect(evaluate(rules, "github_brand_new_tool")).toBe("deny")
+    expect(evaluate(rules, "bash")).toBe("allow")
+  })
+
+  // R3: a github_api call resolves its own resource, not just its action, so an allow scoped to GETs cannot POST.
+  it("resolves a github_api call's own resource, not just its action", () => {
+    const rules: Rule[] = [
+      BASE,
+      { action: "github_*", resource: "*", effect: "ask" },
+      { action: "github_api", resource: "GET *", effect: "allow" },
+    ]
+    expect(effectOf(rules, "github_api", "GET /repos/octo/hello")).toBe("allow")
+    expect(effectOf(rules, "github_api", "POST /repos/octo/hello/releases")).toBe("ask")
+    expect(effectOf(rules, "github_api", "download hello.zip")).toBe("ask")
+    // The resource `*` on the action is the full grant, for every method and path.
+    expect(effectOf([...rules, { action: "github_api", resource: "*", effect: "allow" }], "github_api", "POST /repos/octo/hello/releases")).toBe("allow")
   })
 })
 
@@ -89,7 +120,7 @@ describe("insertDefaults", () => {
     expect(evaluate(rules, "github_create_issue")).toBe("allow")
     expect(evaluate(rules, "github_merge_pull_request")).toBe("deny")
     expect(evaluate(rules, "github_get_me")).toBe("deny")
-    expect(evaluate(rules, "github_issue_write")).toBe("ask")
+    expect(evaluate(rules, "github_issue_write")).toBe("allow")
   })
 })
 
@@ -141,7 +172,7 @@ describe("registerPermissionDefaults", () => {
       return Object.fromEntries([...agents].map(([id, agent]) => [id, agent.permissions]))
     }
 
-    const registration = await registerPermissionDefaults(ctx)
+    const registration = await registerPermissionDefaults(ctx, "all")
     const defaults = defaultRules()
     const first = build()
     expect(first.build).toEqual([BASE, ...defaults, ENV])

@@ -44,8 +44,8 @@ for (const version of STOCK_VERSIONS)
     beforeAll(async () => {
       fake = startFakeGitHub([...READS, ...EXCLUDED].map((name) => ({ name, readOnly: !name.includes("write") && name !== "create_pull_request" })))
       host = await startStock(version, {
-        // With readOnly off GitHub lists the writes too, so the test shows they are no methods even when listed.
-        options: { readOnly: false },
+        // ask-changes asks for every write, so the test shows they are no methods even when listed.
+        options: { access: "ask-changes" },
         fake: { url: `${fake.origin}/mcp/`, token: FIXTURE_PAT },
         // Config-only agents carry exactly these rules after the host's defaults.
         agents: { locked: { mode: "primary", permissions: [rule("github_*", "deny")] }, careful: { mode: "primary", permissions: [rule("github_get_me", "ask")] } },

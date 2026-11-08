@@ -1,17 +1,24 @@
 // Default permission rules for GitHub's tools, inserted into each agent right after its
 // base `* * allow` rule. OpenCode applies the last matching rule, so the agent's own
-// stricter rules (Plan, Explore), the user's `permissions` rules and saved "Always allow"
-// approvals all still win. Writes and unknown tools ask; known reads run without a prompt.
+// stricter rules (Plan, Explore), the user's `permissions` rules and saved approvals all
+// still win. Every tool is allowed by default; the `access` option generates the block.
 import type { Plugin } from "@opencode/plugin"
-import { TOOL_PREFIX, allReadTools } from "./tools.js"
+import type { Access } from "./config.js"
+import { TOOL_PREFIX, allReadTools, allWriteTools } from "./tools.js"
 
 export type Rule = { readonly action: string; readonly resource: string; readonly effect: "allow" | "ask" | "deny" }
 
-export function defaultRules(): Rule[] {
-  return [
-    { action: `${TOOL_PREFIX}*`, resource: "*", effect: "ask" },
-    ...allReadTools().map((name): Rule => ({ action: `${TOOL_PREFIX}${name}`, resource: "*", effect: "allow" })),
-  ]
+const rule = (tool: string, effect: Rule["effect"]): Rule => ({ action: `${TOOL_PREFIX}${tool}`, resource: "*", effect })
+
+/**
+ * Broad first, narrow last, because the last matching rule wins. At `access: "all"` every tool the plugin registers
+ * is allowed, and so is one GitHub adds later through the `github_*` pattern; `ask-changes` asks for anything that is
+ * not a read, and `read-only` denies it. The reads are always allowed, which is why the first rule alone decides an
+ * unknown tool.
+ */
+export function defaultRules(access: Access = "all"): Rule[] {
+  const other: Rule["effect"] = access === "all" ? "allow" : access === "ask-changes" ? "ask" : "deny"
+  return [rule("*", other), ...allReadTools().map((name) => rule(name, "allow")), ...allWriteTools().map((name) => rule(name, other))]
 }
 
 const isBaseAllow = (rule: Rule) => rule.action === "*" && rule.resource === "*" && rule.effect === "allow"
@@ -36,11 +43,11 @@ const UNKNOWN_TOOL = `${TOOL_PREFIX}unknown_tool`
  * receive the block. An agent fixed by hand carries the block in its own rules, after the top-level
  * ones; an agent whose rules already ask for or deny GitHub's tools needs no fix and is not listed.
  */
-export function unguardedAgents(agents: readonly { readonly id: string; readonly permissions: readonly Rule[] }[]): string[] {
-  const defaults = defaultRules()
+export function unguardedAgents(agents: readonly { readonly id: string; readonly permissions: readonly Rule[] }[], access: Access = "all"): string[] {
+  const defaults = defaultRules(access)
   return agents
     .filter((agent) => !hasBlockAfter(agent.permissions, agent.permissions.findIndex(isBaseAllow), defaults))
-    .filter((agent) => evaluate(agent.permissions, UNKNOWN_TOOL) === "allow")
+    .filter((agent) => effectOf(agent.permissions, UNKNOWN_TOOL) === "allow")
     .map((agent) => agent.id)
 }
 
@@ -48,9 +55,12 @@ export function unguardedAgents(agents: readonly { readonly id: string; readonly
 export const matches = (pattern: string, value: string) =>
   new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`).test(value)
 
-/** The effect of `rules` for an MCP tool call (resource `*`): the last matching rule wins, and no match asks. */
-function evaluate(rules: readonly Rule[], action: string): Rule["effect"] {
-  return rules.findLast((rule) => matches(rule.action, action) && matches(rule.resource, "*"))?.effect ?? "ask"
+/**
+ * The effect of `rules` for one call: the last rule whose action and resource both match wins, and no match asks.
+ * An MCP tool call has the resource `*`; a `github_api` call has its `METHOD /path`.
+ */
+export function effectOf(rules: readonly Rule[], action: string, resource = "*"): Rule["effect"] {
+  return rules.findLast((rule) => matches(rule.action, action) && matches(rule.resource, resource))?.effect ?? "ask"
 }
 
 function hasBlockAfter(rules: readonly Rule[], base: number, defaults: readonly Rule[]): boolean {
@@ -69,8 +79,8 @@ function hasDefaultsAt(rules: readonly Rule[], start: number, defaults: readonly
 
 type AgentContext = { readonly agent: Pick<Plugin.Context["agent"], "transform"> }
 
-export async function registerPermissionDefaults(ctx: AgentContext): Promise<{ dispose(): Promise<void> }> {
-  const defaults = defaultRules()
+export async function registerPermissionDefaults(ctx: AgentContext, access: Access): Promise<{ dispose(): Promise<void> }> {
+  const defaults = defaultRules(access)
   return ctx.agent.transform((editor) => {
     for (const agent of editor.list()) {
       editor.update(agent.id, (item) => {

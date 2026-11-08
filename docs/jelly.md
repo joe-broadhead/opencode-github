@@ -13,23 +13,27 @@ declaration, because that schema accepts no unknown keys.
 
 ## Tools and permissions
 
-99 tools are declared (61 read-only). Jelly's agents have no base "allow everything"
-rule, so this plugin's own default rules, which it puts after that rule, never reach them. Jelly
-writes each declared `ask` or `deny` as that tool's default instead (the person's own choice
-replaces it), and denies a read-only helper every tool not marked `readOnly`. A declared `allow`
-changes nothing in Jelly.
+99 tools are declared (61 read-only). Jelly's agents have no base "allow everything" rule, so the
+plugin's own default rules, which it puts after that rule, never reach them. Jelly writes each
+declared `ask` or `deny` as that tool's default instead (the person's own choice replaces it), and
+denies a read-only helper every tool not marked `readOnly`. Every tool is declared `allow`, so a
+Jelly agent runs what the plugin's own default allows; declare a `deny` or an `ask` here, or set
+the plugin's `access` option, to restrict one.
 
-- Ask: `github_actions_run_trigger`, `github_add_comment_to_pending_review`, `github_add_issue_comment`, `github_add_reply_to_pull_request_comment`, `github_assign_copilot_to_issue`, `github_assign_copilot_to_issue_with_intent`, `github_create_branch`, `github_create_gist`, `github_create_or_update_file`, `github_create_pull_request`, `github_create_pull_request_with_copilot`, `github_create_repository`, `github_create_repository_ruleset`, `github_custom_properties_write`, `github_delete_file`, `github_delete_repository`, `github_discussion_comment_write`, `github_dismiss_notification`, `github_fork_repository`, `github_issue_artifact_write`, `github_issue_write`, `github_label_write`, `github_manage_notification_subscription`, `github_manage_repository_notification_subscription`, `github_mark_all_notifications_read`, `github_merge_pull_request`, `github_projects_write`, `github_pull_request_review_write`, `github_push_files`, `github_request_copilot_review`, `github_star_repository`, `github_sub_issue_write`, `github_unstar_repository`, `github_update_gist`, `github_update_issue_comment`, `github_update_pull_request`, `github_update_pull_request_branch`, `github_api`.
+- Ask: none. Every tool is allowed by default, in Jelly as in OpenCode.
 - Off: none.
-- Everything else runs, as the plugin's own rules let it.
+- Everything else runs. A `deny` or `ask` rule of your own replaces it, per tool.
 
-Declared from `KNOWN_TOOLS` (writes too: they exist only with `readOnly: false`), without the
-hidden `ui_get`. That includes `issue_artifact_read` and `issue_artifact_write`, which GitHub lists
-only behind a feature flag the plugin does not turn on. `github_api` asks only for a call that
-changes GitHub; a GET asserts nothing.
+A function that changes GitHub still needs a token that may: GitHub itself refuses a write the
+token cannot make, and `github_api` asserts `github_api` on the call's own `METHOD /path` before
+it sends anything.
 
-A tool the upstream server adds later is not declared, so in Jelly it is not asked about by
-default. Keep `jelly.tools` in step with the known-tool list; `test/unit/jelly.test.ts` checks
+Declared from `KNOWN_TOOLS` (writes too: they exist only with the default `access: "all"`), without
+the hidden `ui_get`. That includes `issue_artifact_read` and `issue_artifact_write`, which GitHub
+lists only behind a feature flag the plugin does not turn on.
+
+A tool the upstream server adds later is not declared, so Jelly sees it only once the plugin
+declares it. Keep `jelly.tools` in step with the known-tool list; `test/unit/jelly.test.ts` checks
 each declared effect against the plugin's own default rules, and the list against `KNOWN_TOOLS`.
 
 ## Skills

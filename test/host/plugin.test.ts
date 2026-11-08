@@ -64,7 +64,7 @@ describe(`defaults on OpenCode ${SDK_VERSION}`, () => {
     expect(await integrationID(host)).toBeString()
     await until("OpenCode has contacted github", async () => mcpRequests(host).length > 0)
     for (const request of mcpRequests(host)) {
-      expect(request).toMatchObject({ toolsets: "context,repos,issues,pull_requests,users,actions,git,labels,code_quality,code_security,secret_protection,dependabot,security_advisories,discussions,orgs", readonly: "true", toolsHeader: false })
+      expect(request).toMatchObject({ toolsets: "context,repos,issues,pull_requests,users,actions,git,labels,code_quality,code_security,secret_protection,dependabot,security_advisories,discussions,orgs", readonly: "false", toolsHeader: false })
       expect(request.lockdown).toBeUndefined()
     }
   })
@@ -78,7 +78,7 @@ describe(`defaults on OpenCode ${SDK_VERSION}`, () => {
   test("signed out, the RPC and /github-status say how to sign in and name the unguarded agent", async () => {
     await until("github needs sign-in", async () => (await githubServer(host))?.status.status === "needs_auth")
     const fromRpc = await status(host)
-    expect(fromRpc).toMatchObject({ state: "sign_in_required", readOnly: true, unguardedAgents: ["reviewer"], permissionsBlock: defaultRules() })
+    expect(fromRpc).toMatchObject({ state: "sign_in_required", access: "all", unguardedAgents: ["reviewer"], permissionsBlock: defaultRules() })
     expect(fromRpc.account).toBeUndefined()
     expect(fromRpc.nextStep).toBe("Run /connect and choose GitHub.")
     const text = await statusCommand(host, await session(host))
@@ -108,22 +108,22 @@ describe(`defaults on OpenCode ${SDK_VERSION}`, () => {
       expect(result.status === "fulfilled" && result.value).toMatchObject({
         state: "connected",
         account: PAT_LOGIN,
-        tools: { visible: 3, unknown: ["github_brand_new_tool"], mode: "ask" },
+        tools: { visible: 5, unknown: ["github_brand_new_tool"], mode: "ask" },
         host: { version: SDK_VERSION, range: ">=2.2.3 <2.3.0", tested: true },
       })
     }
   })
 
-  test("github_api reads without asking, and refuses writes while read-only", async () => {
+  // R18: the default access allows every tool, so a write runs as the read does.
+  test("github_api reads and writes without asking at the default access", async () => {
     const sessionID = await session(host)
     const before = host.fake.requests.length
     expect(await attempt(host, sessionID, "build", "github_api", "reject", { method: "GET", path: "/repos/octo/hello" })).toEqual({ asked: undefined, ok: true })
-    expect(await attempt(host, sessionID, "build", "github_api", "reject", { method: "POST", path: "/repos/octo/hello/releases", body: { tag_name: "v1" } })).toEqual({
-      asked: undefined,
-      ok: false,
-      error: expect.stringContaining("READ_ONLY: POST /repos/octo/hello/releases changes GitHub"),
-    })
-    expect(host.fake.requests.slice(before).map((request) => `${request.method} ${request.path} ${request.authorized}`)).toEqual(["GET /repos/octo/hello true"])
+    expect(await attempt(host, sessionID, "build", "github_api", "reject", { method: "POST", path: "/repos/octo/hello/releases", body: { tag_name: "v1" } })).toMatchObject({ asked: undefined, ok: true })
+    expect(host.fake.requests.slice(before).map((request) => `${request.method} ${request.path} ${request.authorized}`)).toEqual([
+      "GET /repos/octo/hello true",
+      "POST /repos/octo/hello/releases true",
+    ])
   })
 
   test("every built-in agent gets the default block right after its base allow, once", async () => {
@@ -142,7 +142,7 @@ describe(`defaults on OpenCode ${SDK_VERSION}`, () => {
     const plan = (await agentRules(host)).get("plan")!
     expect(plan.findIndex((rule) => rule.action === "edit" && rule.effect === "deny")).toBeGreaterThan(plan.findIndex((rule) => rule.action === "github_*"))
     expect(await effect(host, "plan", "edit")).toBe("deny")
-    expect(await effect(host, "plan", "github_brand_new_tool")).toBe("ask")
+    expect(await effect(host, "plan", "github_brand_new_tool")).toBe("allow")
     const before = host.fake.calls().length
     expect(await attempt(host, await session(host, "explore"), "explore", "github_get_me")).toEqual({
       asked: undefined,
@@ -160,29 +160,25 @@ describe(`defaults on OpenCode ${SDK_VERSION}`, () => {
     expect(host.fake.calls().slice(before)).toEqual(["get_me", "get_me", "issue_read"])
   })
 
-  test("an unknown tool is denied unattended and asks when someone is present", async () => {
-    const sessionID = await session(host)
+  // R2: on the Code Mode path inside `execute`, a deny is refused with nothing sent, and a name that is not a method
+  // is not callable.
+  test("R2 Code Mode: a deny is refused inside execute, and a name that is not a method has none", async () => {
+    const denied = await session(host, "build", [deny("github_get_me")])
     const before = host.fake.calls().length
-    expect(await unattended(host, sessionID, "await tools.github.brand_new_tool({})\nreturn false")).toEqual({
-      ok: false,
-      error: nobodyPresent("github_brand_new_tool"),
-    })
-    expect(await attempt(host, sessionID, "build", "github_brand_new_tool")).toEqual({
-      asked: "github_brand_new_tool",
-      ok: false,
-      error: "Permission.DeclinedError: ",
-    })
+    const refused = await unattended(host, denied, "await tools.github.get_me({})\nreturn false")
+    expect(refused.ok).toBe(false)
+    expect(!refused.ok && refused.error).toMatch(/Permission denied: github_get_me|github_get_me was refused|needs approval/i)
+    expect(await script(host, "no_such_method", { sessionID: denied, input: {} })).toMatchObject({ message: expect.stringMatching(/not.?found|unknown/i) })
     expect(host.fake.calls().slice(before)).toEqual([])
   })
 
-  test("a saved 'Always allow' wins over the default ask, for every agent in the project", async () => {
+  // R18: the namespace pattern allows a tool GitHub adds later, so an unknown tool runs at once.
+  test("an unknown tool runs unattended too, because the pattern allows it", async () => {
     const sessionID = await session(host)
-    expect(await attempt(host, sessionID, "build", "github_brand_new_tool", "always")).toEqual({ asked: "github_brand_new_tool", ok: true })
+    const before = host.fake.calls().length
+    expect(await unattended(host, sessionID, "await tools.github.brand_new_tool({})\nreturn false")).toEqual({ ok: true })
     expect(await attempt(host, sessionID, "build", "github_brand_new_tool")).toEqual({ asked: undefined, ok: true })
-    expect(await attempt(host, await session(host, "plan"), "plan", "github_brand_new_tool")).toEqual({ asked: undefined, ok: true })
-    const { projectID } = await host.client.sessions.get({ sessionID })
-    const saved = await host.client.permission.saved.list({ projectID })
-    expect(saved.map(({ action, resource }) => ({ action, resource }))).toEqual([{ action: "github_brand_new_tool", resource: "*" }])
+    expect(host.fake.calls().slice(before)).toEqual(["brand_new_tool", "brand_new_tool"])
   })
 
   test("the /github-status command and the three skills are registered", async () => {
@@ -224,16 +220,16 @@ describe("writes, lockdown and the user's own rules", () => {
     mkdirSync(join(userSkills, "github-pr-review"), { recursive: true })
     writeFileSync(userSkill, "---\nname: github-pr-review\ndescription: The user's own.\n---\nThe user's own.\n")
     host = await startHost({
-      options: { readOnly: false, lockdown: true, toolsets: ["context", "issues", "pull_requests"] },
+      options: { access: "ask-changes", lockdown: true, toolsets: ["context", "issues", "pull_requests"] },
       config: () => ({
         skills: [userSkills],
         permissions: userRules,
         // The documented fix for an agent defined only in the user's config: the plugin's
         // block in that agent's own list, then the user's top-level rules for GitHub again.
         agents: {
-          reviewer: { description: "Reviews changes", mode: "subagent", permissions: [...defaultRules(), ...userRules] },
+          reviewer: { description: "Reviews changes", mode: "subagent", permissions: [...defaultRules("ask-changes"), ...userRules] },
           // A user deny on github_api hides the tool from that agent.
-          auditor: { description: "Audits", mode: "subagent", permissions: [...defaultRules(), deny("github_api")] },
+          auditor: { description: "Audits", mode: "subagent", permissions: [...defaultRules("ask-changes"), deny("github_api")] },
         },
       }),
     })
@@ -299,7 +295,7 @@ describe("writes, lockdown and the user's own rules", () => {
     expect(await attempt(host, sessionID, "reviewer", "github_issue_write")).toMatchObject({ asked: "github_issue_write", ok: false })
     expect(await attempt(host, sessionID, "reviewer", "github_create_pull_request")).toEqual({ asked: undefined, ok: true })
     expect(await attempt(host, sessionID, "reviewer", "github_issue_read")).toMatchObject({ asked: undefined, ok: false })
-    expect(await status(host)).toMatchObject({ state: "connected", readOnly: false, toolsets: ["context", "issues", "pull_requests"], unguardedAgents: [] })
+    expect(await status(host)).toMatchObject({ state: "connected", access: "ask-changes", toolsets: ["context", "issues", "pull_requests"], unguardedAgents: [] })
   })
 
   // TRIAGE decision 8: OpenCode's public skill list shows which file won.
@@ -340,8 +336,8 @@ describe("device sign-in with a configured client ID, and hidden unknown tools",
 
   test("unknownTools: hide removes GitHub tools the catalog does not know", async () => {
     await until("the unknown tool is listed", async () => (await status(host)).tools.unknown.length === 1)
-    expect(await toolIDs(host)).toEqual(["github_api", "github_get_me", "github_issue_read"])
-    expect(await status(host)).toMatchObject({ tools: { visible: 2, unknown: ["github_brand_new_tool"], mode: "hide" } })
+    expect(await toolIDs(host)).toEqual(["github_api", "github_create_pull_request", "github_get_me", "github_issue_read", "github_issue_write"])
+    expect(await status(host)).toMatchObject({ tools: { visible: 4, unknown: ["github_brand_new_tool"], mode: "hide" } })
   })
 })
 
@@ -383,7 +379,7 @@ describe(`a revoked sign-in on OpenCode ${SDK_VERSION}`, () => {
 describe(`GitHub Enterprise Server on OpenCode ${SDK_VERSION}`, () => {
   let host: Host
   beforeAll(async () => {
-    host = await startHost({ options: { host: "ghe.example.com", readOnly: false } })
+    host = await startHost({ options: { host: "ghe.example.com", access: "all" } })
   })
   afterAll(() => host?.close())
 
@@ -410,15 +406,14 @@ describe(`GitHub Enterprise Server on OpenCode ${SDK_VERSION}`, () => {
     expect(mcpRequests(host)).toEqual([])
   })
 
-  test("a script reads through api with the GitHub Enterprise sign-in; GitHub's MCP methods are not registered", async () => {
-    // v2: api is class write, and its action asks by default, so a script grants it for that session.
-    const sessionID = await session(host, "build", [allow("github_api")])
+  test("a script reads through api with the GitHub Enterprise sign-in, and a rule scoped to the change's resource refuses it", async () => {
+    const sessionID = await session(host, "build")
     const before = host.fake.requests.length
     const read = await script(host, "api", { sessionID, input: { method: "GET", path: "/repos/octo/hello" } })
     expect(read.value).toMatchObject({ ok: true, status: 200, data: { full_name: "octo/hello" } })
-    // readOnly is off, but a session without the grant still cannot answer github_api's ask: refused before any request.
-    const unallowed = await session(host)
-    expect(await script(host, "api", { sessionID: unallowed, input: { method: "POST", path: "/repos/octo/hello/releases", body: { tag_name: "v1" } } })).toMatchObject({
+    // A change resolves github_api on its own METHOD /path: a deny scoped to POST refuses it, with nothing sent.
+    const denied = await session(host, "build", [allow("github_api"), { action: "github_api", resource: "POST *", effect: "deny" }])
+    expect(await script(host, "api", { sessionID: denied, input: { method: "POST", path: "/repos/octo/hello/releases", body: { tag_name: "v1" } } })).toMatchObject({
       type: "failed",
       code: "PERMISSION_DENIED",
     })
@@ -432,7 +427,7 @@ describe(`GitHub Enterprise Server on OpenCode ${SDK_VERSION}`, () => {
 describe(`the tools RPC on OpenCode ${SDK_VERSION}`, () => {
   let host: Host
   beforeAll(async () => {
-    host = await startHost({ config: () => ({ agents: { locked: { mode: "primary", permissions: [deny("github_*")] } } }) })
+    host = await startHost({ options: { access: "ask-changes" }, config: () => ({ agents: { locked: { mode: "primary", permissions: [deny("github_*")] } } }) })
     expect((await signInWithToken(host)).settled).toMatchObject({ status: "complete" })
     await connected(host)
     await tool(host, "github_get_me")
@@ -476,6 +471,83 @@ describe(`the tools RPC on OpenCode ${SDK_VERSION}`, () => {
     expect(await script(host, "get_me", { sessionID, input: {} })).toMatchObject({ type: "failed", code: "PERMISSION_DENIED" })
     expect(await script(host, "api", { sessionID, input: { method: "GET", path: "/repos/octo/hello" } })).toMatchObject({ type: "failed", code: "PERMISSION_DENIED" })
     expect(host.fake.requests.slice(before)).toEqual([])
+  })
+
+  // R3: a change resolves the same write permission the direct path asserts, action github_api on the call's own
+  // METHOD /path, from a prior explicit allow only. An allow scoped to GETs cannot POST.
+  test("a change resolves github_api on its own METHOD /path: an allow scoped to GETs cannot POST", async () => {
+    const before = host.fake.requests.length
+    const write = { method: "POST", path: "/repos/octo/hello/releases", body: { tag_name: "v1" } }
+    // A full allow runs the change.
+    const full = await session(host, "build", [allow("github_api")])
+    expect((await script(host, "api", { sessionID: full, input: write })).value).toMatchObject({ ok: true, status: 201 })
+    // An allow scoped to GETs cannot POST: refused before dispatch, and nothing is sent.
+    const gets = await session(host, "build", [{ action: "github_api", resource: "GET *", effect: "allow" }])
+    expect(await script(host, "api", { sessionID: gets, input: write })).toMatchObject({ type: "failed", code: "PERMISSION_DENIED" })
+    // A rule that allows github_api and then denies one method refuses that method alone, before anything is sent.
+    const narrowed = await session(host, "build", [allow("github_api"), { action: "github_api", resource: "POST /repos/octo/*", effect: "deny" }])
+    const refused = await script(host, "api", { sessionID: narrowed, input: write })
+    expect(refused).toMatchObject({ type: "failed", code: "PERMISSION_DENIED" })
+    expect(refused.message).toContain("POST /repos/octo/hello/releases needs a prior allow rule for github_api")
+    expect(host.fake.requests.slice(before).map((request) => `${request.method} ${request.path} ${request.authorized}`)).toEqual(["POST /repos/octo/hello/releases true"])
+    expect(await host.client.permission.list({ sessionID: narrowed })).toEqual([])
+  })
+})
+
+// R18: the block for each access value, and what a script gets under it, on the tools RPC path.
+describe(`access on OpenCode ${SDK_VERSION}`, () => {
+  for (const access of ["all", "ask-changes", "read-only"] as const) {
+    describe(access, () => {
+      let host: Host
+      beforeAll(async () => {
+        host = await startHost({ options: { access } })
+        expect((await signInWithToken(host)).settled).toMatchObject({ status: "complete" })
+        await connected(host)
+        await tool(host, "github_get_me")
+        // read-only turns GitHub's own read-only mode on, so it lists no write tools: the method is still one this
+        // plugin resolves, and the RPC path refuses it before it looks the tool up.
+        if (access !== "read-only") await tool(host, "github_issue_write")
+      })
+      afterAll(() => host?.close())
+
+      test("the block is generated from defaultRules(access), and a read runs on the tools RPC path", async () => {
+        const rules = (await agentRules(host)).get("build")!
+        expect(rules.slice(1, 1 + defaultRules(access).length)).toEqual(defaultRules(access))
+        const before = host.fake.requests.length
+        const sessionID = await session(host)
+        expect((await script(host, "get_me", { sessionID, input: { query: "hello" } })).value).toMatchObject({ text: expect.stringContaining(PAT_LOGIN) })
+        expect(host.fake.requests.slice(before).filter((request) => request.rpc === "tools/call").map((request) => request.tool)).toEqual(["get_me"])
+      })
+
+      test(`a write on the tools RPC path follows ${access}`, async () => {
+        const sessionID = await session(host)
+        const before = host.fake.calls().length
+        const result = await script(host, "issue_write", { sessionID, input: { query: "q" } })
+        if (access === "all") {
+          // The same rule the plugin's block carries: every tool runs, so the write reaches GitHub.
+          expect(result.value).toMatchObject({ output: { tool: "issue_write" } })
+          expect(host.fake.calls().slice(before)).toEqual(["issue_write"])
+        } else {
+          expect(result).toMatchObject({ type: "failed", code: "PERMISSION_DENIED" })
+          // Nothing reaches GitHub, and no approval prompt is left waiting.
+          expect(host.fake.calls().slice(before)).toEqual([])
+          expect(await host.client.permission.list({ sessionID })).toEqual([])
+        }
+      })
+    })
+  }
+
+  // The deprecated option is the same switch, with a note in status.
+  test("the deprecated readOnly option maps onto access, and status says so", async () => {
+    const host = await startHost({ options: { readOnly: true } })
+    try {
+      const fromRpc = await status(host)
+      expect(fromRpc).toMatchObject({ access: "read-only" })
+      expect(fromRpc.deprecation).toContain('The readOnly option is deprecated: it maps to access "read-only".')
+      expect(await statusCommand(host, await session(host))).toContain('Note: The readOnly option is deprecated: it maps to access "read-only".')
+    } finally {
+      await host.close()
+    }
   })
 })
 

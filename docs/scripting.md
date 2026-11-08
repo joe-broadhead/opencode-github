@@ -138,7 +138,7 @@ only.** An ask is refused with `PERMISSION_DENIED` before dispatch, and a saved 
 change, a `download` (a file write inside the project) and an `upload` each need that rule in the agent's or the
 session's rules. **An allow scoped to GETs cannot POST:** a rule whose resource is `GET …` does not match
 `POST /repos/…`, so the change is refused and nothing is sent. An allow on resource `*` covers every method and path.
-`readOnly: true` still refuses every change, whoever calls it.
+`access: "read-only"` still refuses every change, whoever calls it.
 
 ## Errors
 
@@ -160,7 +160,7 @@ A refusal or failure is the RPC error `failed`, with a message `CODE: what happe
 `api` also reports `github_api`'s own errors: `API_INPUT_INVALID`, `API_PATH_INVALID`, `API_GRAPHQL_PATH`,
 `API_FILE_OUTSIDE_PROJECT`, `API_FILE_EXISTS`, `API_UPLOAD_TOO_LARGE`, `API_DOWNLOAD_TOO_LARGE`, `API_UNREACHABLE`,
 `API_REDIRECT_LOOP`, `API_REDIRECT_INSECURE`, `API_REDIRECTED` and `API_REDIRECT_OFF_HOST`, each with its own next
-step, all listed in [Errors](configuration.md#errors). A change refused because `readOnly` is set is `READ_ONLY`, and a
+step, all listed in [Errors](configuration.md#errors). A change refused because `access` is `"read-only"` is `READ_ONLY`, and a
 missing sign-in is `AUTH_REQUIRED`.
 
 OpenCode itself answers `rpc.invalid_input` for a body that is not the envelope above, `rpc.method_not_found` for a
@@ -185,7 +185,8 @@ These fields have the same names and meanings in every plugin of this family:
 | `unguardedAgents` | The agents without default rules, always present; `[]` when there are none. |
 | `nextStep` | The Next step row; `Nothing to do.` when nothing is needed. |
 
-GitHub's own fields sit beside them: `account`, `readOnly`, `toolsets`, `tools` (`visible`, `unknown`, `mode`),
+GitHub's own fields sit beside them: `account`, `access`, `deprecation` (while the old `readOnly` option is set),
+`toolsets`, `tools` (`visible`, `unknown`, `mode`),
 `permissionsBlock` (the rules to copy, while agents are listed), `unmatchedRules` (`github_api` rule resources with an
 upper-case owner or repo name, which never match), `shadowedSkills` (`{ id, path }` for each of the plugin's skills
 that a same-id skill at another path replaces), `hostWarning` (outside the range, with

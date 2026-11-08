@@ -23,7 +23,7 @@ const row = (label: string, value: string) => `${label.padEnd(28)} ${value}`
 const needsAuth: Status = {
   version: "0.0.2",
   state: "sign_in_required",
-  readOnly: true,
+  access: "read-only",
   toolsets: ["context", "repos", "issues", "pull_requests"],
   tools: { visible: 26, unknown: [], mode: "ask" },
   unguardedAgents: [],
@@ -106,7 +106,7 @@ describe("GitHub TUI status view", () => {
     expect(frame).not.toContain("Loading")
     expect(frame).toContain(row("Connection", "sign-in required"))
     expect(frame).toContain(row("Account", "none"))
-    expect(frame).toContain(row("Access", "read-only"))
+    expect(frame).toContain(row("Access", "reads run without asking; every change and every new tool is denied"))
     expect(frame).toContain(row("Toolsets", "context, repos, issues, pull_requests"))
     expect(frame).toContain(row("Host", "github.com"))
     expect(frame).toContain(row("Tools", "26 available"))
@@ -148,7 +148,7 @@ describe("GitHub TUI status view", () => {
     const frame = await answer(view, {
       status: {
         ...connected,
-        readOnly: false,
+        access: "all",
         tools: { visible: 27, unknown: ["github_new_a", "github_new_b"], mode: "ask" },
         unguardedAgents: ["reviewer"],
         permissionsBlock: [
@@ -159,7 +159,7 @@ describe("GitHub TUI status view", () => {
         hostWarning: "OpenCode 2.3.0 is outside the tested range.",
       } satisfies Status,
     })
-    expect(frame).toContain(row("Access", "reads and writes (writes ask first)"))
+    expect(frame).toContain(row("Access", "every tool runs without asking, reads and new tools included"))
     expect(frame).toContain(row("Tools", "27 available, 2 unknown (they ask first): github_new_a, github_new_b"))
     expect(frame).toContain(row("Agents without default rules", "reviewer"))
     expect(frame).not.toContain("rules below")
