@@ -113,7 +113,10 @@ export async function startHost(input: HostInput = {}) {
       router.target = undefined
       router.retired.add(fake.origin)
       await fake.close()
-      const blocked = router.blocked.slice(blockedBefore)
+      // OpenCode probes a remote server's OAuth metadata (`/.well-known/…`) when it registers or re-registers it. That
+      // probe is the host's own, carries no input and is blocked like everything else; it can also land as the host
+      // closes, which used to fail a test at random. Any other request off the machine is the failure.
+      const blocked = router.blocked.slice(blockedBefore).filter((url) => !/\/\.well-known\//.test(url))
       if (blocked.length > 0) throw new Error(`the host tried to leave the machine: ${[...new Set(blocked)].join(", ")}`)
     },
   }
