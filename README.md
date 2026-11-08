@@ -66,7 +66,7 @@ or remove the account in `/connect` → **GitHub**.
 ## Use
 
 Ask your agent about GitHub, for example "summarise the open pull requests in owner/repo" or "why did CI fail on
-pull request 42?". Agents use GitHub's own tools, read-only by default, from these toolsets: repositories and code,
+pull request 42?". Agents use GitHub's own tools, reads and writes alike, from these toolsets: repositories and code,
 issues, pull requests, labels, Actions runs and job logs, Git trees, discussions, code scanning, secret scanning,
 Dependabot and code quality alerts, security advisories, users and organisations. Examples: `github_issue_read`,
 `github_pull_request_read`, `github_get_file_contents`, `github_search_code` and `github_get_job_logs`. In Code Mode
