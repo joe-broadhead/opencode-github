@@ -2,48 +2,121 @@
 // Messages never carry upstream content, credentials or tokens. Each message starts with
 // its code, because OpenCode shows only the message when a plugin fails to load.
 
-type ErrorCode =
-  | "OPTIONS_INVALID"
-  | "HOST_UNTESTED"
-  | "STATUS_UNAVAILABLE"
-  | "SKILLS_INVALID"
-  | "SIGN_IN_EXPIRED"
-  | "SIGN_IN_CANCELLED"
-  | "SIGN_IN_CODE_UNKNOWN"
-  | "SIGN_IN_FAILED"
-  | "SIGN_IN_UNREACHABLE"
-  | "SIGN_IN_UNEXPECTED_RESPONSE"
-  | "DEVICE_FLOW_DISABLED"
-  | "CLIENT_ID_UNKNOWN"
-  | "DEVICE_GRANT_REJECTED"
-  | "TOKEN_FORMAT"
-  | "TOKEN_REJECTED"
-  | "TOKEN_FORBIDDEN"
-  | "TOKEN_CHECK_TIMEOUT"
-  | "TOKEN_CHECK_UNREACHABLE"
-  | "TOKEN_CHECK_FAILED"
-  | "READ_ONLY"
-  | "AUTH_REQUIRED"
+/**
+ * Every code this plugin's own code raises. The README's Troubleshooting table and the Errors table in
+ * docs/configuration.md name each one, and a test fails when they differ either way.
+ */
+export type PluginCode =
+  | "API_DOWNLOAD_TOO_LARGE"
+  | "API_FILE_EXISTS"
+  | "API_FILE_OUTSIDE_PROJECT"
+  | "API_GRAPHQL_PATH"
   | "API_INPUT_INVALID"
   | "API_PATH_INVALID"
-  | "API_GRAPHQL_PATH"
-  | "API_FILE_OUTSIDE_PROJECT"
-  | "API_FILE_EXISTS"
-  | "API_UPLOAD_TOO_LARGE"
-  | "API_DOWNLOAD_TOO_LARGE"
-  | "API_UNREACHABLE"
-  | "API_REDIRECT_LOOP"
   | "API_REDIRECT_INSECURE"
+  | "API_REDIRECT_LOOP"
   | "API_REDIRECT_OFF_HOST"
   | "API_REDIRECTED"
+  | "API_UNREACHABLE"
+  | "API_UPLOAD_TOO_LARGE"
+  | "AUTH_REQUIRED"
+  | "CLIENT_ID_UNKNOWN"
+  | "DEVICE_FLOW_DISABLED"
+  | "DEVICE_GRANT_REJECTED"
+  | "HOST_UNTESTED"
+  | "OPTIONS_INVALID"
+  | "READ_ONLY"
+  | "SIGN_IN_CANCELLED"
+  | "SIGN_IN_CODE_UNKNOWN"
+  | "SIGN_IN_EXPIRED"
+  | "SIGN_IN_FAILED"
+  | "SIGN_IN_UNEXPECTED_RESPONSE"
+  | "SIGN_IN_UNREACHABLE"
+  | "SKILLS_INVALID"
+  | "STATUS_UNAVAILABLE"
+  | "TOKEN_CHECK_FAILED"
+  | "TOKEN_CHECK_TIMEOUT"
+  | "TOKEN_CHECK_UNREACHABLE"
+  | "TOKEN_FORBIDDEN"
+  | "TOKEN_FORMAT"
+  | "TOKEN_REJECTED"
+
+export const PLUGIN_CODES: readonly PluginCode[] = [
+  "API_DOWNLOAD_TOO_LARGE",
+  "API_FILE_EXISTS",
+  "API_FILE_OUTSIDE_PROJECT",
+  "API_GRAPHQL_PATH",
+  "API_INPUT_INVALID",
+  "API_PATH_INVALID",
+  "API_REDIRECT_INSECURE",
+  "API_REDIRECT_LOOP",
+  "API_REDIRECT_OFF_HOST",
+  "API_REDIRECTED",
+  "API_UNREACHABLE",
+  "API_UPLOAD_TOO_LARGE",
+  "AUTH_REQUIRED",
+  "CLIENT_ID_UNKNOWN",
+  "DEVICE_FLOW_DISABLED",
+  "DEVICE_GRANT_REJECTED",
+  "HOST_UNTESTED",
+  "OPTIONS_INVALID",
+  "READ_ONLY",
+  "SIGN_IN_CANCELLED",
+  "SIGN_IN_CODE_UNKNOWN",
+  "SIGN_IN_EXPIRED",
+  "SIGN_IN_FAILED",
+  "SIGN_IN_UNEXPECTED_RESPONSE",
+  "SIGN_IN_UNREACHABLE",
+  "SKILLS_INVALID",
+  "STATUS_UNAVAILABLE",
+  "TOKEN_CHECK_FAILED",
+  "TOKEN_CHECK_TIMEOUT",
+  "TOKEN_CHECK_UNREACHABLE",
+  "TOKEN_FORBIDDEN",
+  "TOKEN_FORMAT",
+  "TOKEN_REJECTED",
+]
+
+/**
+ * The codes the tools RPC shares with every plugin of this family, listed in docs/scripting.md beside this plugin's
+ * own. They come from the shared tools RPC module and from OpenCode, not from this plugin's code.
+ */
+export type RpcCode =
+  | "AUTH_REQUIRED"
+  | "CANCELLED"
+  | "CONNECTING"
+  | "CONNECTION_FAILED"
+  | "DISABLED"
+  | "NOT_REGISTERED"
+  | "PERMISSION_DENIED"
+  | "SERVER_CONFLICT"
+  | "SESSION_AGENT_REQUIRED"
+  | "SESSION_UNKNOWN"
+  | "TOOL_UNAVAILABLE"
+  | "UPSTREAM_ERROR"
+
+export const RPC_CODES: readonly RpcCode[] = [
+  "AUTH_REQUIRED",
+  "CANCELLED",
+  "CONNECTING",
+  "CONNECTION_FAILED",
+  "DISABLED",
+  "NOT_REGISTERED",
+  "PERMISSION_DENIED",
+  "SERVER_CONFLICT",
+  "SESSION_AGENT_REQUIRED",
+  "SESSION_UNKNOWN",
+  "TOOL_UNAVAILABLE",
+  "UPSTREAM_ERROR",
+]
 
 export class GitHubPluginError extends Error {
-  readonly code: ErrorCode
+  readonly code: PluginCode
   /** What happened, without the code or the next step. */
   readonly detail: string
   readonly nextStep: string
 
-  constructor(code: ErrorCode, message: string, nextStep: string) {
+  constructor(code: PluginCode, message: string, nextStep: string) {
     super(`${code}: ${message} Next step: ${nextStep}`)
     this.name = "GitHubPluginError"
     this.code = code

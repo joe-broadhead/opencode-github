@@ -254,7 +254,39 @@ Error codes:
 | --- | --- |
 | `HOST_UNTESTED` | OpenCode is outside the supported range `>=2.2.3 <2.3.0`, so the plugin does not load: there is no `/github-status`, `/github` dialog or status RPC. Update OpenCode or the plugin, or set the option `allowUntestedHost: true` to load it anyway, with a warning in the status. |
 | `OPTIONS_INVALID` | An option is unknown or has a wrong value; the message names it. Fix that option for the plugin in `opencode.json`. |
-| `SIGN_IN_…`, `TOKEN_…`, `DEVICE_…`, `CLIENT_ID_UNKNOWN` | Sign-in failed. The message ends with the next step; [the error codes](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/configuration.md#errors) list them all. |
+| `SKILLS_INVALID` | A skill file the plugin ships is missing or malformed. Reinstall the plugin. |
+| `STATUS_UNAVAILABLE` | OpenCode did not report the `github` server's state. Try again in a few seconds; if it persists, restart OpenCode. |
+| `SIGN_IN_EXPIRED` | The device code expired before it was entered. Start the sign-in again. |
+| `SIGN_IN_CANCELLED` | The sign-in was cancelled on GitHub. Start the sign-in again. |
+| `SIGN_IN_CODE_UNKNOWN` | GitHub did not recognise the device code. Start the sign-in again. |
+| `SIGN_IN_FAILED` | GitHub ended the device sign-in with another error, named in the message. Start the sign-in again. |
+| `SIGN_IN_UNREACHABLE` | github.com could not be reached. Check your network, then start the sign-in again. |
+| `SIGN_IN_UNEXPECTED_RESPONSE` | GitHub answered the device sign-in with something unexpected. Start the sign-in again. |
+| `DEVICE_FLOW_DISABLED` | The OAuth App has Device Flow turned off. Enable it in the app's settings, or use a fine-grained personal access token. |
+| `CLIENT_ID_UNKNOWN` | GitHub does not know the `clientId`. Check the plugin option `clientId`, or use a fine-grained personal access token. |
+| `DEVICE_GRANT_REJECTED` | GitHub rejected the device sign-in request. Update the plugin, or use a fine-grained personal access token. |
+| `TOKEN_FORMAT` | The pasted text is not a GitHub personal access token. Paste one that starts with `github_pat_` or `ghp_`. |
+| `TOKEN_REJECTED` | GitHub rejected the token: invalid, expired or revoked. Create a new token and try again. |
+| `TOKEN_FORBIDDEN` | GitHub refused the token (HTTP 403). Check that it is allowed for your account or organization, then try again. |
+| `TOKEN_CHECK_TIMEOUT` | GitHub did not answer the token check within 10 seconds. Try again. |
+| `TOKEN_CHECK_UNREACHABLE` | api.github.com could not be reached. Check your network, then try again. |
+| `TOKEN_CHECK_FAILED` | GitHub could not check the token, or returned no account name. Try again later. |
+| `READ_ONLY` | A `github_api` call would change GitHub while `readOnly` is set. Tell the user that this needs the plugin option `readOnly: false`; each change then asks first. |
+| `AUTH_REQUIRED` | There is no GitHub sign-in to use. Run /connect and choose GitHub (GitHub Enterprise with `host`). |
+| `API_INPUT_INVALID` | The `github_api` input does not fit, for example `download` with a method other than GET. Fix the input and call it again. |
+| `API_PATH_INVALID` | The path is not a relative API path, has a `.` or `..` segment (also percent-encoded), or percent-encodes a character it can hold as itself. Pass a path such as `/repos/OWNER/REPO/pulls`. |
+| `API_GRAPHQL_PATH` | `/graphql` was called through method and path. Pass `{ graphql: { query, variables } }` instead. |
+| `API_FILE_OUTSIDE_PROJECT` | A download or upload file is outside the project. Use a path inside the project folder. |
+| `API_FILE_EXISTS` | The download file already exists. Choose another path, or pass `download.overwrite: true`. |
+| `API_UPLOAD_TOO_LARGE` | The upload file is over 100 MiB. Upload files up to 104857600 bytes. |
+| `API_DOWNLOAD_TOO_LARGE` | The download is over 2 GiB; the partial file is removed. Narrow the request, or download it outside OpenCode. |
+| `API_UNREACHABLE` | The API host could not be reached. Check your network, then try again. |
+| `API_REDIRECT_LOOP` | GitHub redirected more than 5 times. Try again later. |
+| `API_REDIRECT_INSECURE` | GitHub redirected to a non-HTTPS address. Try again later. |
+| `API_REDIRECT_OFF_HOST` | GitHub redirected a read outside its API. For job logs, call `get_job_logs` with `return_content: true`; for other files, pass `download: { path }`. |
+| `API_REDIRECTED` | GitHub redirected a change, which is never followed. The message names the new path: call `github_api` again with that path, so the change is checked for it. |
+
+Each row's own next step is in the message, and [the error codes](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/configuration.md#errors) give the same set with when each one happens.
 
 A script's errors from the tools RPC have their own codes, listed in
 [Scripting](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/scripting.md#errors).
