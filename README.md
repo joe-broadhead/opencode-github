@@ -319,6 +319,11 @@ Options go in the plugin's entry in `opencode.json`:
 The options are `toolsets`, `access`, `lockdown`, `unknownTools`, `clientId`, `scopes`, `allowUntestedHost` and
 `host`. `readOnly` is deprecated: it maps onto `access`.
 
+**`unknownTools`** decides only whether GitHub tools the plugin does not know are listed. `"ask"` (the default) keeps
+them, and they follow the `github_*` rule and `access` like every other tool: they run at the default, ask at
+`"ask-changes"` and are denied at `"read-only"`. The value's name is older than the all-allow default and does not
+make a tool ask; to make one ask or stop, use `access` or a rule. `"hide"` removes them from the agents' tool list.
+
 **GitHub Enterprise Server.** Set `host` to the server's host name, such as `"host": "github.example.com"`. GitHub's
 hosted MCP server does not support GitHub Enterprise Server, so the plugin then registers no MCP tools and
 `github_api` is the tool. Sign in with `/connect` → **GitHub Enterprise**; device sign-in there needs `clientId` from an

@@ -28,6 +28,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - One typed code table, `PLUGIN_CODES` and `RPC_CODES` in `src/errors.ts`, with a test that fails when a code in `src`
   is in neither, and when the README's Troubleshooting table, the configuration guide's Errors table or the scripting
   doc's refusal table drifts from it in either direction.
+- `unknownTools` decides only whether GitHub lists a tool the plugin does not know: `"ask"` (the default) keeps it, and the generated `github_*` rule and `access` decide it, so it runs at the default, asks at `"ask-changes"` and is denied at `"read-only"`; `"hide"` removes it. The value's name is older than the all-allow default and does not make a tool ask.
 - The README's Troubleshooting table lists every error code with its next step. The docs' tested-release sentences are
   checked against `TESTED_HOSTS`: 2.2.3, 2.2.4, 2.2.5 and 2.2.6. The README prints the default block in full.
 - The CI has an `actionlint` job, and `npm run check` runs `actionlint` and the icon check.

@@ -604,10 +604,14 @@ permission rules.
 
 GitHub adds, renames and removes tools over time. A GitHub tool that is not in the plugin's catalog is "unknown":
 
-- With `"ask"` (the default), it stays visible, and the default block's `github_*` rule decides it: it runs like every other tool at the default `access`, asks at `"ask-changes"` and is denied at `"read-only"`. Known tools keep working.
+- With `"ask"` (the default), it stays visible, and the default block's `github_*` rule decides it: it runs like every
+  other tool at the default `access`, asks at `"ask-changes"` and is denied at `"read-only"`. Known tools keep working.
+  The value's name is older than the all-allow default: it does not make an unknown tool ask, and it cannot. To make
+  one ask or stop, set `access`, or add a rule for it.
 - With `"hide"`, the plugin removes it from the agents' tools.
 
-The status names the unknown tools GitHub currently offers. Both modes apply only to the plugin's own `github`
+The status names the unknown tools GitHub currently offers, and says which of the above applies (`allowed by
+github_*`, `they ask first`, `they are denied` or `hidden`). Both modes apply only to the plugin's own `github`
 server.
 
 ## Fine-grained token permissions
