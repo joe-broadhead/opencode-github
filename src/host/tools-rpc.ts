@@ -45,8 +45,8 @@ const OFF_BY_DEFAULT = Object.entries(KNOWN_TOOLS)
 export const PLUGIN_ID = "github.platform"
 
 /**
- * Every known GitHub tool, by its upstream name and with its class: the 62 catalogued reads (without the hidden
- * ui_get) as `read`, and the catalogued writes as `write`. The class is what `describe` reports and what an approval
+ * Every known GitHub tool, by its upstream name and with its class: the 61 catalogued reads (without the hidden
+ * ui_get) as `read`, and the 37 catalogued writes as `write`. The class is what `describe` reports and what an approval
  * shows; the rules, not the class, decide whether a call runs. A toolset that is off leaves its methods unavailable,
  * and a tool GitHub adds later is not a method. The plugin's own `api` is a `kind: "plugin"` method, built in setup.
  */

@@ -8,7 +8,7 @@ docs: `README.md`, `docs/configuration.md`; contributor docs: `docs/architecture
 
 - Use only public APIs of `@opencode/plugin` 2.2.3. The supported host range is exactly `>=2.2.3 <2.3.0`, in both
   `package.json` `opencode.host` and `HOST_RANGE` in `src/host-version.ts`. Never write it as `^2.2.3`.
-- Test against stock OpenCode 2.2.3, 2.2.4 and 2.2.5 only. `TESTED_HOSTS` in `src/host-version.ts` is the one list:
+- Test against stock OpenCode 2.2.3, 2.2.4, 2.2.5 and 2.2.6. `TESTED_HOSTS` in `src/host-version.ts` is the one list:
   the status's `host.tested`, the host, pack and stock tests and CI all take it from there.
 - Keep plugin ids `github.platform` (server and status RPC), `github.platform.tools` (tools RPC) and
   `github.platform.tui` (TUI), and the server name `github`.
@@ -48,12 +48,13 @@ When you add a rule here, add it to the scan and its self-test too.
   directly after each agent's base `* * allow` rule. No permission hook decides them. User rules and saved approvals
   keep winning, and a stricter agent is never weakened.
 - **Tools RPC.** `github.platform.tools` (`src/host/tools-rpc.ts`) lets scripts call, with no model, `describe`, one
-  method per known read (`allReadTools()`, through OpenCode's own executors from `ctx.tool.list()`, never an MCP client
-  of the plugin's), and `api` (`src/api/script.ts`): `github_api`'s own spec, refusing writes, GraphQL that is not one
-  query, `download` and `upload` with `SCRIPT_READ_ONLY` before any request. Writes, `ui_get` and unknown tools are
-  never methods. `describe` gives a read GitHub does not list a `detail` naming its toolset and the `toolsets` option
-  (`unavailableDetail` in `src/tools.ts`). A script runs as a session and its agent; its one permission hook only turns
-  its own script calls' asks into denies. `src/host/tools-rpc.ts` is a copy of a module shared by several plugins: change only its block
+  method per known tool (`allReadTools()` and `allWriteTools()`, each with its class, through OpenCode's own executors
+  from `ctx.tool.list()`, never an MCP client of the plugin's), and `api` (`src/api/script.ts`): `github_api`'s own
+  spec, which asserts `github_api` on the exact resource for a change, a `download` and an `upload`, and refuses every
+  change with `READ_ONLY` while `readOnly` is set. `ui_get` and unknown tools are never methods. `describe` gives a
+  tool GitHub does not list a `detail` naming its toolset and the `toolsets` option (`unavailableDetail` in
+  `src/tools.ts`). A script runs as a session and its agent; its one permission hook only turns its own script calls'
+  asks into denies. `src/host/tools-rpc.ts` is a copy of a module shared by several plugins: change only its block
   between the `PLUGIN-SPECIFIC` markers here, and the rest in the shared copy first.
 - Agents defined only in the user's config get no rules. Status names them and gives the fix: the block **first** in
   **that agent's own** `permissions` list, followed by the user's top-level rules for `github_` tools. Never recommend the

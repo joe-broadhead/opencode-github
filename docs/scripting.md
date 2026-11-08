@@ -16,8 +16,8 @@ never sees the GitHub token for these calls. The hidden `ui_get` and any tool Gi
 
 A method runs only while GitHub's server lists its tool. A toolset that is off in the plugin's `toolsets` option leaves
 its methods unavailable: `describe` shows them with `available: false`, `reason: "TOOL_UNAVAILABLE"` and a `detail`
-that names the method's toolset and what to add to `toolsets`, and a call fails with that code. By default that is the tools of `copilot_spaces`, `gists`, `github_support_docs_search`,
-`governance`, `notifications`, `projects` and `stargazers`; the [toolsets table](configuration.md#toolsets) names each
+that names the method's toolset and what to add to `toolsets`, and a call fails with that code. By default that is the tools of `copilot`, `copilot_issue_intents`, `copilot_spaces`, `gists`,
+`github_support_docs_search`, `governance`, `notifications`, `projects` and `stargazers`; the [toolsets table](configuration.md#toolsets) names each
 method's toolset. Add it to `toolsets` and run `opencode reload`. With the
 [`host`](configuration.md#host-github-enterprise-server) option (GitHub Enterprise Server) there is no MCP server, so
 only `api` runs.
