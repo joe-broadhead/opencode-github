@@ -65,10 +65,11 @@ for (const version of STOCK_VERSIONS)
       await fake?.close()
     })
 
-    test("describes the known reads and api; the listed reads are available with their live schemas", async () => {
+    test("describes the known reads, api and events_list; the listed reads are available with their live schemas", async () => {
       const { value } = await script(host, "describe", {})
       expect(value.id).toBe(TOOLS_RPC_ID)
-      expect(value.methods.map((method: { name: string }) => method.name)).toEqual([...KNOWN_READS, SCRIPT_API_METHOD])
+      expect(value.methods.map((method: { name: string }) => method.name)).toEqual([...KNOWN_READS, SCRIPT_API_METHOD, "events_list"])
+      expect(value.methods.at(-1)).toMatchObject({ kind: "plugin", action: "github_events_list", available: true })
       const byName = new Map(value.methods.map((method: { name: string }) => [method.name, method]))
       for (const name of READS) expect(byName.get(name)).toMatchObject({ kind: "mcp", tool: `github_${name}`, action: `github_${name}`, available: true, input: FAKE_INPUT })
       // QA LIVE-9: describe says why: the toolset, and whether the toolsets option turns it on (issues is on by default).
