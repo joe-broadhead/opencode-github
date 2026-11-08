@@ -20,8 +20,13 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 const SOURCES = walk("src")
-/** Every SCREAMING_SNAKE code literal in src, wherever it is raised or described. */
-const raised = new Set(SOURCES.flatMap((file) => [...read(file).matchAll(/"([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*)"/g)].map((match) => match[1]!)))
+/** Every SCREAMING_SNAKE code literal in src, wherever it is raised or described, or one that starts a message as `CODE: what happened`. */
+const raised = new Set(
+  SOURCES.flatMap((file) => [
+    ...[...read(file).matchAll(/"([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*)"/g)].map((match) => match[1]!),
+    ...[...read(file).matchAll(/["'`]([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+): /g)].map((match) => match[1]!),
+  ]),
+)
 /** The code literals outside the table's own file: a code in the table that nothing raises is dead. */
 const raising = SOURCES.filter((file) => file !== "src/errors.ts")
   .map(read)

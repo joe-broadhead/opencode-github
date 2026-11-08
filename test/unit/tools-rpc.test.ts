@@ -17,7 +17,6 @@ import {
   upstreamText,
   type MethodSpec,
   type PluginMethod,
-  type ShapeCall,
   type ToolCall,
   type ToolsRpcOptions,
   // The module's own types stay internal, since no plugin imports them; the typecheck checks it.
@@ -690,9 +689,8 @@ describe("GitHub's block", () => {
     expect(METHODS.map((method) => method.name)).toContain("issue_write")
     expect(METHODS.map((method) => method.name)).not.toContain("ui_get")
     // The shapers are the identity: GitHub has no execute.before or execute.after hook.
-    const call: ShapeCall = { sessionID: "s", agent: "a", action: "x" }
-    expect(shapeInput("get_me", { a: 1 }, call)).toEqual({ a: 1 })
-    expect(shapeResult("get_me", { text: "t" }, call)).toEqual({ text: "t" })
+    expect(shapeInput("get_me", { a: 1 }, { sessionID: "s", agent: "a", action: "x" })).toEqual({ a: 1 })
+    expect(shapeResult("get_me", { text: "t" }, { sessionID: "s", agent: "a", action: "x" })).toEqual({ text: "t" })
   })
 })
 
