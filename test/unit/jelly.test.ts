@@ -21,7 +21,7 @@ describe("the jelly declaration", () => {
     expect(declarationProblems(ROOT, { effectOf: effectFromRules(defaultRules()) })).toEqual([])
   })
 
-  it("declares every known tool but the hidden ones, and github_api, marking the reads read-only", () => {
+  it("declares every known tool but the hidden ones, github_api and events_list, marking the reads read-only", () => {
     const hidden = new Set<string>(HIDDEN)
     const known = new Map<string, boolean>()
     for (const toolset of Object.values(KNOWN_TOOLS)) {
@@ -29,6 +29,7 @@ describe("the jelly declaration", () => {
       for (const name of toolset.read) if (!hidden.has(name)) known.set(`${TOOL_PREFIX}${name}`, true)
     }
     known.set(`${TOOL_PREFIX}${API_TOOL_NAME}`, false)
+    known.set(`${TOOL_PREFIX}events_list`, true)
     const declared = new Map(jelly.tools.map((tool) => [tool.permission, tool.readOnly]))
     expect([...declared.keys()].sort()).toEqual([...known.keys()].sort())
     for (const [permission, readOnly] of known) expect(declared.get(permission), permission).toBe(readOnly)

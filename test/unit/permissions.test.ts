@@ -15,11 +15,11 @@ function evaluate(rules: readonly Rule[], action: string): Rule["effect"] {
 }
 
 describe("defaultRules", () => {
-  it("asks for every GitHub tool, then allows the known reads", () => {
+  it("asks for every GitHub tool, then allows the known reads and the plugin's own events_list", () => {
     const rules = defaultRules()
     expect(rules[0]).toEqual({ action: "github_*", resource: "*", effect: "ask" })
-    expect(rules.slice(1)).toEqual(allReadTools().map((name) => ({ action: `github_${name}`, resource: "*", effect: "allow" })))
-    expect(rules).toHaveLength(allReadTools().length + 1)
+    expect(rules.slice(1)).toEqual([...allReadTools(), "events_list"].map((name) => ({ action: `github_${name}`, resource: "*", effect: "allow" })))
+    expect(rules).toHaveLength(allReadTools().length + 2)
   })
 
   it("lets reads run, and makes writes and unknown tools ask", () => {

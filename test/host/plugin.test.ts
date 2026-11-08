@@ -330,7 +330,7 @@ describe("device sign-in with a configured client ID, and hidden unknown tools",
 
   test("unknownTools: hide removes GitHub tools the catalog does not know", async () => {
     await until("the unknown tool is listed", async () => (await status(host)).tools.unknown.length === 1)
-    expect(await toolIDs(host)).toEqual(["github_api", "github_get_me", "github_issue_read"])
+    expect(await toolIDs(host)).toEqual(["github_api", "github_events_list", "github_get_me", "github_issue_read"])
     expect(await status(host)).toMatchObject({ tools: { visible: 2, unknown: ["github_brand_new_tool"], mode: "hide" } })
   })
 })
@@ -398,6 +398,16 @@ describe(`GitHub Enterprise Server on OpenCode ${SDK_VERSION}`, () => {
     expect(await attempt(host, await session(host), "build", "github_api", "reject", { method: "GET", path: "/repos/octo/hello" })).toEqual({ asked: undefined, ok: true })
     expect(host.fake.requests.slice(before).map((request) => `${request.method} ${request.path} ${request.authorized}`)).toEqual(["GET /repos/octo/hello true"])
     expect(mcpRequests(host)).toEqual([])
+  })
+
+  test("a script's events_list names the owner with GET /user, and reads GitHub only with GETs", async () => {
+    const sessionID = await session(host)
+    const before = host.fake.requests.length
+    const empty = await script(host, "events_list", { sessionID, input: { since: "2999-01-01" } })
+    expect(empty.value).toMatchObject({ source: "github", account: "default", owner: { id: expect.stringMatching(/^github:/) }, events: [], more: false, trust: "untrusted" })
+    // The fake GitHub has no search, so the first search fails, as EVENTS_READ_FAILED.
+    expect(await script(host, "events_list", { sessionID, input: { since: "2026-10-01" } })).toMatchObject({ type: "failed", code: "EVENTS_READ_FAILED" })
+    expect(host.fake.requests.slice(before).every((request) => request.method === "GET")).toBe(true)
   })
 
   test("a script reads through api with the GitHub Enterprise sign-in; GitHub's MCP methods are not registered", async () => {

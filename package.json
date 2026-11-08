@@ -662,6 +662,12 @@
         "readOnly": false
       },
       {
+        "name": "github.events_list",
+        "permission": "github_events_list",
+        "effect": "allow",
+        "readOnly": true
+      },
+      {
         "name": "github.api",
         "permission": "github_api",
         "effect": "ask",
