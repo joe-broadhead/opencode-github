@@ -77,10 +77,11 @@ branch protection, rulesets, Actions variables, downloading artifacts and logs t
 GitHub's REST or GraphQL API with your GitHub sign-in, for example
 `{ "method": "GET", "path": "/repos/OWNER/REPO/branches/main/protection" }` or
 `{ "graphql": { "query": "query { viewer { login } }" } }`. GET, HEAD, `POST /markdown` and a single GraphQL query
-read; every other call changes GitHub, asks first, and is refused while the plugin is read-only. Requests go only to
+read; every other call changes GitHub, and follows the `access` value: at the default it runs,
+`"ask-changes"` asks for it, and `"read-only"` refuses it. Requests go only to
 GitHub's API. A change never follows a redirect, a read follows one only within the API, and only a download follows
 one to GitHub's file storage, without your token. `download: { path }` saves a response to a file in the
-project, and `upload: { path, contentType }` sends a project file as a release asset; both ask first.
+project, and `upload: { path, contentType }` sends a project file as a release asset; both are changes.
 
 Three skills come with it:
 

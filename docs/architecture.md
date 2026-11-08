@@ -196,4 +196,4 @@ stock test (`test/stock`, stock `opencode serve` 2.2.3, 2.2.4, 2.2.5 and 2.2.6) 
 
 GitHub changes its tools over time. `npm run drift` (`scripts/drift.mjs`) is a maintainer check that lists the live
 tools of each catalogued toolset and warns about new tools, missing tools and read or write mismatches. It changes
-nothing at runtime: unknown tools ask by default, whatever it reports.
+nothing at runtime: an unknown tool is decided by the default block's `github_*` rule, whatever the report says.

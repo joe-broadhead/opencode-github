@@ -33,7 +33,7 @@ OPTIONS_INVALID: Invalid plugin option "toolset": this option does not exist. Ne
 | `access` | `"all"` | What the generated default rules allow: `"all"` (every tool runs), `"ask-changes"` (reads run, every change asks) or `"read-only"` (reads run, every change is denied, and GitHub's `X-MCP-Readonly` header turns its own write tools off). See [Permissions](#permissions). |
 | `readOnly` | none | Deprecated: `true` means `access: "read-only"` and `false` means `access: "all"`, with a note in status. An explicit `access` wins. |
 | `lockdown` | `false` | With `true`, sends GitHub's `X-MCP-Lockdown: true` header. See [`lockdown`](#lockdown). |
-| `unknownTools` | `"ask"` | `"ask"` keeps GitHub tools the plugin does not know visible, and they ask first. `"hide"` removes them. See [`unknownTools`](#unknowntools). |
+| `unknownTools` | `"ask"` | `"ask"` keeps GitHub tools the plugin does not know visible, so the default block's `github_*` rule decides them (allowed at the default `access`). `"hide"` removes them. See [`unknownTools`](#unknowntools). |
 | `clientId` | none (token sign-in only) | A GitHub OAuth App for device sign-in; with it `/connect` also offers **Sign in with GitHub**. Letters, digits, `.`, `_` and `-`, up to 100 characters. See [`clientId` and `scopes`](#clientid-and-scopes). |
 | `scopes` | `["repo", "read:org"]` | Scopes that device sign-in asks for, each once. Tokens are not affected. |
 | `allowUntestedHost` | `false` | Load on an OpenCode release outside the supported range `>=2.2.3 <2.3.0`, with a warning in the status. See [`allowUntestedHost`](#allowuntestedhost). |
@@ -546,9 +546,11 @@ its toolset is on; the call still runs.
 **Reads and writes.** GET and HEAD read, and so do `POST /markdown` and `POST /markdown/raw`, which only render
 Markdown; every other POST writes. A GraphQL document reads only when it holds exactly one operation and that
 operation is a query; the plugin scans the document itself, skipping strings and comments. Everything else is a
-write: it asks first, as `github_api` on `METHOD /path` (`POST /graphql` for GraphQL), and with `access: "read-only"` it
-is refused with `READ_ONLY`. A script's change resolves that same resource, so a rule for another method does not
-cover it. In that path, the names GitHub reads without regard to case are in lower case (see Rules). Saving a download asks as `download <file>`, also while read-only. Reads never ask.
+write: it is asserted as `github_api` on `METHOD /path` (`POST /graphql` for GraphQL), so the default `access: "all"`
+runs it, `"ask-changes"` asks for it, and `"read-only"` refuses it with `READ_ONLY`. A script's change resolves that
+same resource, so a rule for another method does not
+cover it. In that path, the names GitHub reads without regard to case are in lower case (see Rules). A download is
+asserted the same way, as `download <file>`, and is refused while read-only. Reads never ask.
 
 **Hosts and the token.** Requests go only to `https://api.github.com`, and uploads to `https://uploads.github.com`; with
 [`host`](#host-github-enterprise-server), to the server's own API. The plugin handles redirects itself:
