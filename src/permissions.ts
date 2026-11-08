@@ -1,9 +1,10 @@
 // Default permission rules for GitHub's tools, inserted into each agent right after its
 // base `* * allow` rule. OpenCode applies the last matching rule, so the agent's own
 // stricter rules (Plan, Explore), the user's `permissions` rules and saved "Always allow"
-// approvals all still win. Writes and unknown tools ask; known reads run without a prompt.
+// approvals all still win. Writes and unknown tools ask; known reads, and the plugin's own events_list, which Memory's
+// collector runs unattended, run without a prompt.
 import type { Plugin } from "@opencode/plugin"
-import { TOOL_PREFIX, allReadTools } from "./tools.js"
+import { EVENTS_TOOL_NAME, TOOL_PREFIX, allReadTools } from "./tools.js"
 
 export type Rule = { readonly action: string; readonly resource: string; readonly effect: "allow" | "ask" | "deny" }
 
@@ -11,6 +12,7 @@ export function defaultRules(): Rule[] {
   return [
     { action: `${TOOL_PREFIX}*`, resource: "*", effect: "ask" },
     ...allReadTools().map((name): Rule => ({ action: `${TOOL_PREFIX}${name}`, resource: "*", effect: "allow" })),
+    { action: `${TOOL_PREFIX}${EVENTS_TOOL_NAME}`, resource: "*", effect: "allow" },
   ]
 }
 

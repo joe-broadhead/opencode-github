@@ -10,6 +10,7 @@ an OpenCode client.
 | --- | --- | --- |
 | One per known read of GitHub's MCP server, named as the tool: `get_me`, `issue_read`, `pull_request_read`, `get_file_contents`, `search_code`, `list_dependabot_alerts` and the others in the [toolsets table](configuration.md#toolsets) | `github_<method>`, for example `github_issue_read` | allow |
 | `api` | `github_api`, for reads only: REST `GET` or `HEAD`, or one GraphQL query | runs: reads assert nothing |
+| `events_list` | `github_events_list`, the plugin's own read: what the signed-in user was involved in since a cursor, as Memory's events ([Events list](#events-list)) | allow |
 | `describe` | none: lists the methods, their permission actions, whether each can run now (`available`, and when not, the code in `reason` and for `TOOL_UNAVAILABLE` a `detail`), and each one's input as JSON Schema | |
 
 Each MCP method runs GitHub's own tool with the same input, through OpenCode's own connection and sign-in. The plugin
@@ -109,6 +110,13 @@ Anything else is refused with `SCRIPT_READ_ONLY` before any request: every other
 the model may call as a read), a GraphQL document that is not one query, `download` (a file write) and `upload`. This
 holds with `readOnly: false` and with an allow rule for `github_api`, because a script cannot answer the prompt a
 change asks for. Make changes from an OpenCode session.
+
+## Events list
+
+`events_list` runs the plugin's own `github_events_list`, Memory's source of GitHub events
+([configuration](configuration.md#events-list)). It asserts `github_events_list`, then makes only GET requests, as
+the `api` method does, plus `get_me` where GitHub's MCP server is there. Its errors are the `EVENTS_` codes in the
+configuration guide's Errors table.
 
 ## Errors
 
