@@ -69,7 +69,7 @@ export const NEXT_STEPS: NextSteps = {
   CANCELLED: "Call the method again if you still need the result.",
 }
 
-/** The plugin's own errors, thrown by the api method (github_api's spec), as a code, what happened and the next step. */
+/** The plugin's own errors, thrown by the api and events_list methods' specs, as a code, what happened and the next step. */
 export function pluginError(error: unknown): Failure | undefined {
   return error instanceof GitHubPluginError ? { code: error.code, what: error.detail, next: error.nextStep } : undefined
 }

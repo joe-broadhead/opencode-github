@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `github_events_list`, and the tools RPC method `events_list`: what the signed-in user was involved in since a cursor, as Memory's normalised events, oldest first, with `html_url` links: each change to an issue or pull request they are involved in (`/search/issues`, `involves:`), each commit they authored (`/search/commits`), and other notifications where the sign-in may read them. It makes only GET requests through `github_api`'s spec, names the owner with `get_me` (or `GET /user`), never asks, and is allowed by default, so Memory's collector can run it unattended. An event is listed once it is 5 minutes old.
+- `src/host/events-list.ts`, the shared `events_list` source contract, carried unchanged; `scripts/check-copies.mjs` pins it like the other shared copies.
+- The errors `EVENTS_INVALID_INPUT`, `EVENTS_CURSOR_INVALID`, `EVENTS_OWNER_UNKNOWN` and `EVENTS_READ_FAILED`.
+
 ## [0.0.8] - 2026-11-06
 
 ### Added

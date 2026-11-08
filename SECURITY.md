@@ -94,6 +94,11 @@ The tools RPC (`github.platform.tools`, see [docs/scripting.md](docs/scripting.m
   methods, even with an allow rule. `api` refuses every call that could change GitHub, every GraphQL document that is
   not one query, `download` and `upload` with `SCRIPT_READ_ONLY` before any request, whatever `readOnly` and the rules
   say.
+- `events_list` (`github_events_list`) asserts `github_events_list`, then makes only GET requests through `api`'s
+  own handling, plus `get_me`: it returns the titles, bodies (cut to 4,096 characters), commit messages, logins and
+  links of what the signed-in user was involved in, with that login as the owner. Memory's collector calls it to copy
+  these events to your private memory space, after you turn GitHub on as a source; the plugin itself sends them
+  nowhere and stores nothing.
 - MCP calls go through OpenCode's own connection and sign-in, and `api` uses the same sign-in, hosts and redirect
   handling as `github_api`. No token is returned.
 - GitHub's MCP error text reaches the script only as the first line, at most 300 characters, with tokens and URL query

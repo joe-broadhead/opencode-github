@@ -118,6 +118,10 @@ export const TOOL_PREFIX = `${SERVER_NAME}_`
 /** The plugin's own github_api tool, which shares the prefix and the Code Mode namespace. */
 export const API_TOOL_NAME = "api"
 const API_TOOL = `${TOOL_PREFIX}${API_TOOL_NAME}`
+/** The plugin's own github_events_list, Memory's source of GitHub events: a read, in the same namespace. */
+export const EVENTS_TOOL_NAME = "events_list"
+/** The plugin's own tools: never GitHub's server tools, so the filter neither counts nor hides them. */
+const OWN_TOOLS = new Set([API_TOOL, `${TOOL_PREFIX}${EVENTS_TOOL_NAME}`])
 /**
  * The core reads whose signatures Code Mode's github catalog shows, so the model reaches for them before github_api
  * (it shows only pinned signatures; the rest need a search). All are in toolsets that are on by default.
@@ -224,5 +228,5 @@ export async function registerToolFilter(
 
 function isServerTool(tool: { readonly id: string; readonly options?: { readonly namespace?: string } }): boolean {
   // The host gives each MCP tool its server name as the Code Mode namespace.
-  return tool.id.startsWith(TOOL_PREFIX) && tool.id !== API_TOOL && tool.options?.namespace === SERVER_NAME
+  return tool.id.startsWith(TOOL_PREFIX) && !OWN_TOOLS.has(tool.id) && tool.options?.namespace === SERVER_NAME
 }

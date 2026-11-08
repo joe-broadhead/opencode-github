@@ -37,6 +37,10 @@ type ErrorCode =
   | "API_REDIRECT_OFF_HOST"
   | "API_REDIRECTED"
   | "SCRIPT_READ_ONLY"
+  | "EVENTS_INVALID_INPUT"
+  | "EVENTS_CURSOR_INVALID"
+  | "EVENTS_OWNER_UNKNOWN"
+  | "EVENTS_READ_FAILED"
 
 export class GitHubPluginError extends Error {
   readonly code: ErrorCode

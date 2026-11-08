@@ -269,6 +269,47 @@ A deny on `{ "action": "github_api", "resource": "*" }` as the last matching rul
 Scripts can call `github_api` for reads through the tools RPC's `api` method, never for writes, downloads or uploads;
 see [Scripting](scripting.md#api).
 
+## Events list
+
+`github_events_list` (`tools.github.events_list` in Code Mode, and the tools RPC method `events_list`) is GitHub's side
+of Memory's sources funnel: the shared `events_list` contract, `src/host/events-list.ts`, which every source plugin
+carries unchanged. It lists what the signed-in user was involved in since a cursor, as normalised events, oldest first.
+It only reads, never asks and calls no model, so Memory's collector can run it unattended.
+
+```
+events_list({ since?, cursor?, limit?, account?, source? })
+  → { source: "github", account: "default", owner: { id, label }, events, cursor, more, trust: "untrusted" }
+```
+
+| Input | Meaning |
+| --- | --- |
+| `since` | Where to start without a cursor: an ISO date (a UTC day) or date-time with `Z` or an offset. Default: 24 hours ago. |
+| `cursor` | The previous result's cursor. It wins over `since`. |
+| `limit` | Most events, 1 to 500; 100 by default. A result also stops before 900,000 bytes of JSON. |
+| `account` | `default`, GitHub's one account. |
+| `source` | `github`, the one source. |
+
+It asserts `github_events_list`, then makes only GET requests, through `github_api`'s own spec with the plugin's
+sign-in (a GET asserts nothing, as for `github_api`):
+
+- the owner: GitHub's `get_me` through OpenCode's executor, or `GET /user` where GitHub's MCP server is not there
+  (`host`, or another server named `github`); `github:` and the login. The cursor holds a digest of it, so after a
+  sign-in to another account an old cursor is refused;
+- **issues and pull requests** the user is involved in: `/search/issues` with `involves:<login> updated:>=<time>`,
+  sorted by update, oldest first. One event each time one changes: kind `issue` or `pr`, the title, the body cut to
+  4,096 characters, the author and assignees as `github:` actors, the state and labels, and its `html_url`;
+- **commits** the user authored: `/search/commits` with `author:<login> committer-date:>=<time>`, sorted by committer
+  date. Kind `commit`, the message, and its `html_url`;
+- **notifications**, where the sign-in may read them: `/notifications` with `participating` and `since`. A 401, 403
+  or 404 leaves them out, as for a fine-grained token, which cannot read notifications. Those about an issue or a pull
+  request are left out too, because the first stream lists them. Kind `event`, the subject's title and type, and the
+  repository's link.
+
+The cursor holds a position in each stream. The result merges them by time, and lists only what no stream can still put
+before it. An event is listed once it is 5 minutes old, because GitHub's search lags a little behind a change. GitHub's
+search returns at most 1,000 results for one query; the cursor moves past what was listed, so the next call's query
+starts later.
+
 ## Repository scope
 
 The plugin has no repository allowlist. MCP permissions cannot name a repository, so scope comes from the
@@ -412,6 +453,10 @@ passed through unchanged.
 | `API_REDIRECT_INSECURE` | GitHub redirected to a non-HTTPS address. | Try again later. |
 | `API_REDIRECTED` | GitHub redirected a change, which is never followed. The message names the new path. | Call github_api again with path <the new path>, so the change is checked for that path. |
 | `API_REDIRECT_OFF_HOST` | GitHub redirected a read outside its API. | For job logs, call get_job_logs with return_content: true; for other files, pass download: { path }, which follows GitHub's storage redirects without the token. A script gets the get_job_logs method instead, and with `host` the step names only download. |
+| `EVENTS_INVALID_INPUT` | The `events_list` input breaks the shared contract, or names another account or source. | Pass only since, cursor, limit (1 to 500), account and source, as the tool's schema describes. |
+| `EVENTS_CURSOR_INVALID` | The cursor was not issued by GitHub's `events_list` for this account and its signed-in user. | Pass a cursor from a previous result of the same account, or start again with since. |
+| `EVENTS_OWNER_UNKNOWN` | GitHub's `get_me` (or `GET /user`) did not name the signed-in user. | Run /github-status, and sign in again if it shows a problem. |
+| `EVENTS_READ_FAILED` | A search or notifications read for `events_list` failed, or its answer was too large to read whole. | Call events_list again with the same cursor; if it keeps failing, run /github-status. |
 | `SCRIPT_READ_ONLY` | A script's `api` call could change GitHub, or would download or upload a file. | Call api with GET, HEAD or a single GraphQL query; make changes from an OpenCode session, where they ask first. |
 
 A script's calls through the tools RPC, `github.platform.tools`, have more codes for sessions, permissions and the

@@ -1,6 +1,6 @@
 // The server part: registers GitHub's MCP server, sign-in on its integration, default
-// permission rules, the tool catalog filter, the github_api tool, status, the tools RPC for
-// scripts and skills. With the host option (GitHub Enterprise Server) there is no MCP server:
+// permission rules, the tool catalog filter, the github_api and events_list tools, status, the
+// tools RPC for scripts and skills. With the host option (GitHub Enterprise Server) there is no MCP server:
 // the sign-in moves to the plugin's own integration and github_api is the tool. Everything goes
 // through public OpenCode plugin APIs; nothing is stored.
 import { Plugin } from "@opencode/plugin"
@@ -16,6 +16,7 @@ import { registerPermissionDefaults } from "./permissions.js"
 import { SERVER_NAME } from "./rpc.js"
 import { registerSignInStatus } from "./sign-in-status.js"
 import { SKILL_IDS, registerSkills, skillPath } from "./skills.js"
+import { eventsMethod, registerEventsTool } from "./source-events.js"
 import { type StatusDeps, registerStatus } from "./status.js"
 import { registerToolFilter, unavailableDetail } from "./tools.js"
 
@@ -71,6 +72,9 @@ export default Plugin.define({
           integrationID: source.integrationID,
         }),
       )
+      // events_list, Memory's source of GitHub events: GETs through github_api's spec, and get_me where the server is ours.
+      const events = { ctx, api: apiTool, managed: () => managed() }
+      keep(await registerEventsTool(ctx, events))
       keep(
         await registerStatus(ctx, {
           options,
@@ -88,7 +92,7 @@ export default Plugin.define({
           managed: () => managed(),
           unavailableDetail: (method, code) => (code === "TOOL_UNAVAILABLE" ? unavailableDetail(method, options.toolsets) : undefined),
         },
-        owned: [scriptApi(apiTool, api)],
+        owned: [scriptApi(apiTool, api), eventsMethod(events)],
       })
       keep({ dispose: stopTools })
       keep(await registerSkills(ctx))
