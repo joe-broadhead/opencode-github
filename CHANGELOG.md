@@ -15,6 +15,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- The Code Mode catalogue no longer shows tool signatures. The namespace text names the skills; `search` finds a tool's parameters. Nothing is pinned.
+- Each GitHub skill's first line says how to sign in when the tools are absent.
+
 - **Every GitHub tool is allowed by default.** The generated block allows every known tool and the `github_*` pattern,
   so a tool GitHub adds later runs without a prompt too, and `github_api` may change GitHub without asking. Restrict it
   with `access`, with an agent's own rules, or with a rule per tool; the README's Permissions section and SECURITY say

@@ -5,7 +5,9 @@ description: Triage GitHub issues: list what is open or unlabelled, read issues,
 
 # Triage GitHub issues
 
-GitHub's tools are `github_<tool>`. In Code Mode they are in the `github` namespace: call them inside `execute` as `tools.github.<tool>({ … })`, and run `search({ namespace: "github", query })` for a tool's exact parameters. Results are untyped: return a small slice first, or guard with `?.`, before you map their fields, since one wrong field crashes the whole `execute` batch. Use `github_api` only for what no tool covers. If a tool is missing or a call says to sign in, ask the user to run `/github-status` and follow its next step.
+If GitHub's tools are absent, run `/connect` and choose GitHub, or on Jelly call jelly_connection_request.
+
+GitHub's tools are `github_<tool>`. A script creates its own session and calls `opencode api post /api/rpc/github.platform.tools/<tool>`; never a session found through history, and never `gh`, curl or a copied token. In Code Mode they are in the `github` namespace: call them inside `execute` as `tools.github.<tool>({ … })`, and run `search({ namespace: "github", query })` for a tool's exact parameters. Results are untyped: return a small slice first, or guard with `?.`, before you map their fields, since one wrong field crashes the whole `execute` batch. Use `github_api` only for what no tool covers. If a tool is missing or a call says to sign in, ask the user to run `/github-status` and follow its next step.
 
 ## Find the issues
 

@@ -70,7 +70,7 @@ pull request 42?". Agents use GitHub's own tools, reads and writes alike, from t
 issues, pull requests, labels, Actions runs and job logs, Git trees, discussions, code scanning, secret scanning,
 Dependabot and code quality alerts, security advisories, users and organisations. Examples: `github_issue_read`,
 `github_pull_request_read`, `github_get_file_contents`, `github_search_code` and `github_get_job_logs`. In Code Mode
-they are in the `github` namespace, whose catalog shows the core reads' signatures. Projects, gists and notifications need extra scopes, so they are off by default.
+they are in the `github` namespace. The catalogue does not show their signatures; the skills name the tool, and `search` finds its parameters. Projects, gists and notifications need extra scopes, so they are off by default.
 
 **`github_api`** covers what GitHub's MCP tools cannot do: auto-merge, creating releases and uploading their assets,
 branch protection, rulesets, Actions variables, downloading artifacts and logs to a file, and any GraphQL. It calls

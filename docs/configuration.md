@@ -89,9 +89,8 @@ behind a feature flag the plugin does not turn on, so they do not appear today. 
 `github_support_docs_search`, exist only on GitHub's hosted server, as does `check_dependency_vulnerabilities`, which
 looks up a list of packages in the GitHub Advisory Database.
 
-GitHub's tools are available to agents through Code Mode, in the `github` namespace. Its catalog shows the signatures
-of the core reads, `get_file_contents`, `search_code`, `list_commits`, `get_commit`, `list_issues`, `search_issues`, `list_label`, `issue_read`, `list_pull_requests`, `pull_request_read` and `get_job_logs`, and of `github_api`; the model finds the others with Code Mode's `search`.
-None of them is a direct tool.
+GitHub's tools are available to agents through Code Mode, in the `github` namespace. None are pinned: the skills name
+the tool to call, and Code Mode's `search` finds its parameters. None of them is a direct tool.
 
 ## Permissions
 

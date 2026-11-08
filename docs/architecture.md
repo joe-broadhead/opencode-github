@@ -71,9 +71,9 @@ the status it set back from `integration.get`, which projects it as `connections
 `KNOWN_TOOLS` in `src/tools.ts` lists the known tools of each toolset, marked read or write, from
 github-mcp-server v2.1.0 and each tool's `readOnlyHint`; tools that only GitHub's hosted server has are classified by
 what they do. `ctx.tool.transform` records the `github` server's tools that are not in the catalog, removes them when
-`unknownTools` is `"hide"`, and pins the core reads (`PINNED`): `get_file_contents`, `search_code`, `list_commits`, `get_commit`, `list_issues`, `search_issues`, `list_label`, `issue_read`, `list_pull_requests`, `pull_request_read` and `get_job_logs`. In Code Mode,
-`pinned` only puts a tool's signature in the `github` catalog's shown listings; it never makes a direct tool. Without
-the pins the catalog showed only `github_api`'s signature, and agents used it where a GitHub tool does the job.
+`unknownTools` is `"hide"`. Nothing is pinned: a shown signature is sent on every turn, and GitHub's are large. The
+skills name the tool to call, and `search` finds its parameters. `pinned` would only put a signature in the catalog's
+shown listings; it never makes a direct tool.
 
 There are no wrapper tools. GitHub's own tools already have maintained schemas and descriptions, and they cover the
 workflows. A wrapper would add a second schema to keep in step with GitHub and would hide new upstream tools.
@@ -88,8 +88,8 @@ from `src/sign-in.ts`. The status reads the sign-in from that integration and na
 ## `github_api`
 
 `registerApiTool` (`src/api/tool.ts`) adds `github_api` (namespace `github`, name `api`, permission action
-`github_api`, pinned in Code Mode). It also describes the `github` namespace: the core reads are shown and `search`
-finds the rest, the three skills, whether the plugin is read-only now, and the tools RPC for scripts.
+`github_api`, not pinned). It also describes the `github` namespace: the skills, `search` for parameters, whether
+changes run now, and where scripts are documented.
 `src/api/classify.ts` decides read or write: REST by method, GraphQL by scanning
 the document's operations with a small tokenizer that skips strings, block strings and comments. Reads run; writes
 call `ctx.permission.assert` with `METHOD /path` as the resource and save pattern, and are refused while read-only.

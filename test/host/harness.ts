@@ -37,7 +37,7 @@ export type Client = Omit<OpenCodeClient, "plugin"> & {
   readonly close: () => Promise<void>
 }
 
-const router = routeFetch()
+export const router = routeFetch()
 
 /** Removes the temp root and restores fetch; call once after every host in the file has closed. */
 export function cleanup() {

@@ -118,23 +118,8 @@ export const TOOL_PREFIX = `${SERVER_NAME}_`
 /** The plugin's own github_api tool, which shares the prefix and the Code Mode namespace. */
 export const API_TOOL_NAME = "api"
 const API_TOOL = `${TOOL_PREFIX}${API_TOOL_NAME}`
-/**
- * The core reads whose signatures Code Mode's github catalog shows, so the model reaches for them before github_api
- * (it shows only pinned signatures; the rest need a search). All are in toolsets that are on by default.
- */
-export const PINNED = [
-  "get_file_contents",
-  "search_code",
-  "list_commits",
-  "get_commit",
-  "list_issues",
-  "search_issues",
-  "list_label",
-  "issue_read",
-  "list_pull_requests",
-  "pull_request_read",
-  "get_job_logs",
-] as const
+/** Nothing is pinned. A shown signature is sent on every turn; the skills name the tool, and search finds its parameters. */
+export const PINNED = [] as const
 
 const reads = new Set<string>(Object.values(KNOWN_TOOLS).flatMap((toolset) => toolset.read))
 const writes = new Set<string>(Object.values(KNOWN_TOOLS).flatMap((toolset) => toolset.write))
