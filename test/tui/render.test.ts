@@ -160,7 +160,7 @@ describe("GitHub TUI status view", () => {
       } satisfies Status,
     })
     expect(frame).toContain(row("Access", "every tool runs without asking, reads and new tools included"))
-    expect(frame).toContain(row("Tools", "27 available, 2 unknown (they ask first): github_new_a, github_new_b"))
+    expect(frame).toContain(row("Tools", "27 available, 2 unknown (allowed by the github_* rule): github_new_a, github_new_b"))
     expect(frame).toContain(row("Agents without default rules", "reviewer"))
     expect(frame).not.toContain("rules below")
     expect(frame).toContain('{"action":"github_*","resource":"*","effect":"ask"},')

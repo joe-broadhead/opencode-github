@@ -114,7 +114,8 @@ describe("formatStatus", () => {
     // QA INSTALL-4: a release in the range that is not tested says so, with the range.
     expect(formatStatus(status({ host: { version: "2.2.99", range, tested: false } }))).toContain("OpenCode: 2.2.99 (untested; supported range >=2.2.3 <2.3.0)")
     expect(formatStatus(status({ host: { version: "2.2.5", range, tested: true } }))).toContain("OpenCode: 2.2.5 (tested)")
-    expect(formatStatus(status({ tools: { visible: 3, unknown: ["github_a"], mode: "ask" } }))).toContain("(they ask first): github_a")
+    expect(formatStatus(status({ access: "all", tools: { visible: 3, unknown: ["github_a"], mode: "ask" } }))).toContain("(allowed by the github_* rule): github_a")
+    expect(formatStatus(status({ access: "ask-changes", tools: { visible: 3, unknown: ["github_a"], mode: "ask" } }))).toContain("(they ask first): github_a")
   })
 
   // TRIAGE decision 1: the agents row lists names only, followed by the rules block; the fix is the next step.

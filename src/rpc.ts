@@ -33,7 +33,7 @@ export type Status = {
   /** Present when the deprecated `readOnly` option set the access: what to write instead. */
   readonly deprecation?: string
   readonly toolsets: readonly string[]
-  /** The github server's tools that agents can use, the ones this plugin does not know yet, and whether those ask first or are hidden. */
+  /** The github server's tools that agents can use, the ones this plugin does not know yet, and whether those are hidden. */
   readonly tools: { readonly visible: number; readonly unknown: readonly string[]; readonly mode: (typeof UNKNOWN_TOOL_MODES)[number] }
   /** Agents whose own rules let GitHub tools run without asking, because they lack the default rules (defined only in the user's config). */
   readonly unguardedAgents: readonly string[]
@@ -163,12 +163,13 @@ export function formatRules(rules: readonly Rule[]): string {
 }
 
 /** The tools line; on GitHub Enterprise Server there are no MCP tools, only github_api. */
-export function describeTools(status: Pick<Status, "tools" | "enterprise">): string {
+export function describeTools(status: Pick<Status, "tools" | "enterprise" | "access">): string {
   if (status.enterprise) return "github_api only. GitHub's hosted MCP tools do not support GitHub Enterprise Server; run github-mcp-server yourself for them."
   const tools = status.tools
   const visible = `${tools.visible} available`
   if (tools.unknown.length === 0) return visible
-  const handling = tools.mode === "hide" ? "hidden" : "they ask first"
+  const handling =
+    tools.mode === "hide" ? "hidden" : status.access === "all" ? "allowed by the github_* rule" : status.access === "ask-changes" ? "they ask first" : "they are denied"
   return `${visible}, ${tools.unknown.length} unknown (${handling}): ${tools.unknown.join(", ")}`
 }
 
