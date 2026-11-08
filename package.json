@@ -23,11 +23,16 @@
     },
     "./tui": {
       "default": "./dist/tui.js"
-    }
+    },
+    "./icon.svg": "./assets/icon.svg",
+    "./icon-128.png": "./assets/icon-128.png",
+    "./icon-256.png": "./assets/icon-256.png"
   },
   "files": [
     "dist",
     "assets/icon.svg",
+    "assets/icon-128.png",
+    "assets/icon-256.png",
     "skills",
     "README.md",
     "LICENSE",
@@ -41,9 +46,11 @@
     "test:tui": "npm run build && bun test test/tui",
     "test:host": "npm run build && node scripts/host-tests.mjs",
     "test:stock": "npm run build && bun test test/stock",
+    "icons": "node scripts/check-icons.mjs",
+    "actionlint": "node scripts/actionlint.mjs",
     "lint": "node scripts/check-forbidden.mjs --self-test && node scripts/check-forbidden.mjs && node scripts/check-copies.mjs",
     "test:pack": "npm run build && node scripts/pack-smoke.mjs",
-    "check": "npm run typecheck && npm test && npm run build && npm run lint && npm run test:pack && npm run test:tui && npm run test:host && npm run test:stock",
+    "check": "npm run typecheck && npm test && npm run build && npm run lint && npm run icons && npm run actionlint && npm run test:pack && npm run test:tui && npm run test:host && npm run test:stock",
     "e2e": "npm run build && bun scripts/e2e-live.mjs",
     "drift": "node scripts/drift.mjs",
     "release:check": "node scripts/release-check.mjs"
@@ -66,7 +73,35 @@
     "zod": "4.6.7"
   },
   "opencode": {
-    "host": ">=2.2.3 <2.3.0"
+    "host": ">=2.2.3 <2.3.0",
+    "icons": [
+      {
+        "src": "assets/icon.svg",
+        "mimeType": "image/svg+xml",
+        "sizes": [
+          "any"
+        ]
+      },
+      {
+        "src": "assets/icon-128.png",
+        "mimeType": "image/png",
+        "sizes": [
+          "128x128"
+        ]
+      },
+      {
+        "src": "assets/icon-256.png",
+        "mimeType": "image/png",
+        "sizes": [
+          "256x256"
+        ]
+      }
+    ],
+    "vendor": {
+      "id": "github",
+      "name": "GitHub",
+      "domain": "github.com"
+    }
   },
   "jelly": {
     "title": "GitHub",
