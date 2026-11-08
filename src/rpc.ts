@@ -169,7 +169,7 @@ export function describeTools(status: Pick<Status, "tools" | "enterprise" | "acc
   const visible = `${tools.visible} available`
   if (tools.unknown.length === 0) return visible
   const handling =
-    tools.mode === "hide" ? "hidden" : status.access === "all" ? "allowed by the github_* rule" : status.access === "ask-changes" ? "they ask first" : "they are denied"
+    tools.mode === "hide" ? "hidden" : status.access === "all" ? "allowed by github_*" : status.access === "ask-changes" ? "they ask first" : "they are denied"
   return `${visible}, ${tools.unknown.length} unknown (${handling}): ${tools.unknown.join(", ")}`
 }
 
