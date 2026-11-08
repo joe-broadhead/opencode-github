@@ -1,4 +1,4 @@
-// Builds dist/ as exactly two self-contained files, so an in-place plugin update can never mix
+// Builds dist/ as exactly two self-contained, minified files, so an in-place plugin update can never mix
 // a new entry with a stale sibling module that the host still holds:
 // - dist/index.js: the server part (src/index.ts);
 // - dist/tui.js: the TUI part (src/tui/index.tsx). Babel compiles its JSX with OpenTUI's Solid
@@ -46,6 +46,7 @@ async function bundle(entry, outfile, plugins = []) {
     outfile: join(dist, outfile),
     bundle: true,
     splitting: false,
+    minify: true,
     format: "esm",
     platform: "node",
     target: "es2022",
