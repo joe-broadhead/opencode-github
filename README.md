@@ -92,9 +92,10 @@ Three skills come with it:
 Each skill reports findings and changes nothing on GitHub unless you ask.
 
 **Scripts.** A script or a cron job can call GitHub's tools and `github_api` with no model, through `opencode api`.
-It runs as a session and its agent, and every call needs a rule that resolves to `allow`: the 61 known reads run on
-the default rules, while a write, a download or an upload needs a prior explicit `allow` in the session's or the
-agent's rules. An `ask` is refused, and a saved "Always allow" is not enough.
+It runs as a session and its agent, and every call resolves the rule for its action, the agent's and then the
+session's: only an `allow` runs, an `ask` is refused, and a saved "Always allow" is not enough. A non-GET/HEAD `api`
+call resolves the same write permission the direct path asserts — action `github_api`, resource `METHOD /path` — from a
+prior explicit `allow` only, and an allow scoped to GETs cannot POST.
 
 ```sh
 opencode api post /api/rpc/github.platform.tools/pull_request_read -H "x-opencode-directory:$PWD" \
