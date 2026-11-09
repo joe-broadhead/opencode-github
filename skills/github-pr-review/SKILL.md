@@ -3,9 +3,9 @@ name: github-pr-review
 description: Review or summarise a GitHub pull request from its description, changed files, diff, earlier reviews and CI checks, and find out why CI failed, now or on an earlier run, without changing anything unless asked. Use when the user asks to review, summarise or check a GitHub pull request (a URL, OWNER/REPO#123 or a number), or why its CI or a check failed.
 ---
 
-# Review a GitHub pull request
+If GitHub's tools are absent, run `/connect` and choose GitHub (GitHub Enterprise for a configured Enterprise Server), or on Jelly call jelly_connection_request.
 
-If GitHub's tools are absent, run `/connect` and choose GitHub, or on Jelly call jelly_connection_request.
+# Review a GitHub pull request
 
 GitHub's tools are `github_<tool>`. A script creates its own session and calls `opencode api post /api/rpc/github.platform.tools/<tool>`; never a session found through history, and never `gh`, curl or a copied token. In Code Mode they are in the `github` namespace: call them inside `execute` as `tools.github.<tool>({ … })`, and run `search({ namespace: "github", query })` for a tool's exact parameters. Results are untyped: return a small slice first, or guard with `?.`, before you map their fields, since one wrong field crashes the whole `execute` batch. Use `github_api` only for what no tool covers. If a tool is missing or a call says to sign in, ask the user to run `/github-status` and follow its next step.
 

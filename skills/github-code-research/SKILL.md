@@ -3,9 +3,9 @@ name: github-code-research
 description: Research code in a GitHub repository: find where something is defined, read files at a branch, tag or commit, compare versions, and follow the commit history to explain when and why code changed, citing permalinks. Use when the user asks how code in a GitHub repository works, where something is defined, what changed between versions or tags, or when and why it changed; not for files in the local checkout.
 ---
 
-# Research code on GitHub
+If GitHub's tools are absent, run `/connect` and choose GitHub (GitHub Enterprise for a configured Enterprise Server), or on Jelly call jelly_connection_request.
 
-If GitHub's tools are absent, run `/connect` and choose GitHub, or on Jelly call jelly_connection_request.
+# Research code on GitHub
 
 GitHub's tools are `github_<tool>`. In Code Mode they are in the `github` namespace: call them inside `execute` as `tools.github.<tool>({ … })`, and run `search({ namespace: "github", query })` for a tool's exact parameters. Results are untyped: return a small slice first, or guard with `?.`, before you map their fields, since one wrong field crashes the whole `execute` batch. Use `github_api` only for what no tool covers. If a tool is missing or a call says to sign in, ask the user to run `/github-status` and follow its next step. For files in the local checkout, use your local tools instead.
 

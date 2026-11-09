@@ -84,7 +84,7 @@ describe("registerSkills", () => {
     for (const skill of added) {
       expect(skill.name).toBe(skill.id)
       expect(isAbsolute(skill.path) && existsSync(skill.path)).toBe(true)
-      expect(skill.content.startsWith("# ")).toBe(true)
+      expect(skill.content).toMatch(/^If GitHub's tools are absent, run `\/connect` and choose GitHub \(GitHub Enterprise for a configured Enterprise Server\), or on Jelly call jelly_connection_request\.\n\n# /)
       expect(skill.description).toBe(parseSkill(skill.id, read(skill.id)).description)
     }
   })
