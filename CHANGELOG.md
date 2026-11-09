@@ -15,7 +15,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
-- The Code Mode catalogue no longer shows tool signatures. The namespace text names the skills; `search` finds a tool's parameters. Nothing is pinned.
+- The Code Mode catalogue no longer pins tool signatures. The namespace text names the skills; `search` finds a tool's parameters. The host can still show unpinned tools.
 - Each GitHub skill's first line says how to sign in when the tools are absent.
 
 - **Every GitHub tool is allowed by default.** The generated block allows every known tool and the `github_*` pattern,
