@@ -4,7 +4,7 @@
 // is a query. Anything else, including a document this scanner cannot follow, writes, so
 // it asks first.
 
-export type Kind = "read" | "write"
+type Kind = "read" | "write"
 
 /** POST endpoints that change nothing: GitHub renders the Markdown it is sent. Exact paths only. */
 const POST_READS: readonly string[] = ["/markdown", "/markdown/raw"]
@@ -15,7 +15,7 @@ export function restKind(method: string, path: string): Kind {
   return method === "POST" && POST_READS.includes(path) ? "read" : "write"
 }
 
-export type GraphqlOperation = { readonly type: "query" | "mutation" | "subscription"; readonly fields: readonly string[] }
+type GraphqlOperation = { readonly type: "query" | "mutation" | "subscription"; readonly fields: readonly string[] }
 
 /**
  * The operations of an executable GraphQL document, with the root field names of each, or

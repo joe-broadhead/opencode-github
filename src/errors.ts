@@ -6,7 +6,7 @@
  * Every code this plugin's own code raises. The README's Troubleshooting table and the Errors table in
  * docs/configuration.md name each one, and a test fails when they differ either way.
  */
-export type PluginCode =
+type PluginCode =
   | "API_DOWNLOAD_TOO_LARGE"
   | "API_FILE_EXISTS"
   | "API_FILE_OUTSIDE_PROJECT"
@@ -83,7 +83,7 @@ export const PLUGIN_CODES: readonly PluginCode[] = [
  * The codes the tools RPC shares with every plugin of this family, listed in docs/scripting.md beside this plugin's
  * own. They come from the shared tools RPC module and from OpenCode, not from this plugin's code.
  */
-export type RpcCode =
+type RpcCode =
   | "AUTH_REQUIRED"
   | "CANCELLED"
   | "CONNECTING"

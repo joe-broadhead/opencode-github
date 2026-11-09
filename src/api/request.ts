@@ -30,7 +30,7 @@ const DEFAULT_MAX_ITEMS = 1000
 const REDIRECTS = new Set([301, 302, 303, 307, 308])
 const TRUST = { githubContent: "untrusted" } as const
 
-export type CallDeps = {
+type CallDeps = {
   readonly token: string
   readonly endpoints: Endpoints
   /** The name /connect shows for the sign-in. */
@@ -56,7 +56,7 @@ type Follow = "never" | "api" | "storage"
  * A REST call's target: the URL, and the `METHOD /path` that permissions see. `path` is exactly the path sent; the
  * resource has its case-insensitive name segments in lower case (permissionPath).
  */
-export type RestTarget = { readonly url: URL; readonly resource: string; readonly path: string }
+type RestTarget = { readonly url: URL; readonly resource: string; readonly path: string }
 
 /** Characters a path segment holds as themselves (RFC 3986 pchar); percent-encoding one only hides it. */
 const PLAIN = /^[A-Za-z0-9\-._~!$&'()*+,;=:@]$/

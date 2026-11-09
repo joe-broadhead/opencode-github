@@ -136,7 +136,7 @@ export function isStatus(value: unknown): value is Status {
 }
 
 /** The connection label for each state, shared by every plugin's status. */
-export const STATE_LABELS: Record<Status["state"], string> = {
+const STATE_LABELS: Record<Status["state"], string> = {
   connected: "connected",
   sign_in_required: "sign-in required",
   connecting: "connecting",
@@ -153,7 +153,7 @@ export const AGENT_STEP =
   "Put the default rules shown by /github-status first in each listed agent's own permissions, in opencode.json or the agent's Markdown file, followed by your top-level rules for GitHub tools."
 
 /** The value of a row that has nothing to show. */
-export const NONE = "none"
+const NONE = "none"
 
 export type StatusRow = { readonly label: string; readonly value: string }
 
@@ -173,7 +173,7 @@ export function describeTools(status: Pick<Status, "tools" | "enterprise" | "acc
   return `${visible}, ${tools.unknown.length} unknown (${handling}): ${tools.unknown.join(", ")}`
 }
 
-export function describeHost(status: Pick<Status, "host" | "hostWarning">): string {
+function describeHost(status: Pick<Status, "host" | "hostWarning">): string {
   const { host } = status
   if (host.tested) return `${host.version} (tested)`
   if (status.hostWarning) return `${host.version} (untested: ${status.hostWarning})`
@@ -206,7 +206,7 @@ export function statusRows(status: Status): StatusRow[] {
 }
 
 /** The title line of /github-status and the dialog. */
-export const STATUS_TITLE = "GitHub status"
+const STATUS_TITLE = "GitHub status"
 
 export function formatStatus(status: Status): string {
   const lines: string[] = [STATUS_TITLE]

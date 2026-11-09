@@ -1,7 +1,7 @@
 // One status, computed fresh on every call (no locks, caches or caps), behind the
 // /github-status command and the RPC method the TUI view uses.
 import type { Plugin } from "@opencode/plugin"
-import type { Access, Options } from "./config.js"
+import type { Options } from "./config.js"
 import { GitHubPluginError } from "./errors.js"
 import { HOST_RANGE, TESTED_HOSTS, isTestedHost } from "./host-version.js"
 import { lowerResource, neverMatches } from "./api/names.js"
