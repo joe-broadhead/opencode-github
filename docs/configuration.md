@@ -481,7 +481,9 @@ GitHub's tools, such as one that ends with `{ "action": "*", "resource": "*", "e
 not listed.
 
 To fix an agent, put the default block **first** in **that agent's own** `permissions` list, followed by your
-top-level rules for `github_` tools, so they keep winning:
+top-level rules for `github_` tools, so they keep winning. The block `/github-status` prints for your `access` value
+is the list of rules that goes first; the example below shows its pattern rule only, and the rule that follows it is
+your own:
 
 ```json
 {
@@ -492,7 +494,6 @@ top-level rules for `github_` tools, so they keep winning:
       "mode": "subagent",
       "permissions": [
         { "action": "github_*", "resource": "*", "effect": "allow" },
-        …the rest of the block from /github-status…
         { "action": "github_merge_pull_request", "resource": "*", "effect": "deny" }
       ]
     }

@@ -452,6 +452,15 @@ still stores its token.
 3. Data folders: none. The plugin stores nothing of its own.
 4. Remove the default rules you copied into agents' own `permissions`.
 
+## Known limits
+
+- **GitHub decides its tools.** The plugin's tool table follows GitHub's hosted server at this release. A tool GitHub adds later runs under `access`, is listed as unknown in `/github-status`, and is not a script method until the plugin classifies it. `npm run drift` compares the table with the server.
+- **The token limits what is possible.** The scopes you granted decide what the account's token can do. The default `repo` scope reaches every repository the account can write.
+- **Toolsets are a selection.** The default `toolsets` turn on 15 of the 24 toolsets, which show 69 tools. Nine toolsets are off by default, such as `copilot` and `gists`, and GitHub's two issue artifact tools need a feature flag the plugin does not turn on. See the [toolsets table](docs/configuration.md#toolsets).
+- **An allow on `github_api` covers writes.** An allow for `github_api` authorises every `api` call, reads included, and also its writes, downloads and uploads. Grant it only to a session that may change GitHub, or set `access` to `"read-only"` for a read-only script.
+- **Tested on OpenCode 2.2.3, 2.2.4, 2.2.5 and 2.2.6 only.** Other releases in `>=2.2.3 <2.3.0` run untested.
+- **GitHub's rate limits and error text are GitHub's.** Errors from OpenCode and GitHub pass through unchanged.
+
 ## Links
 
 - [Configuration](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/configuration.md): options,
