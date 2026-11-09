@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { defaultRules } from "../../src/permissions.js"
+import { loadOptions } from "../../src/config.js"
 import { ENTERPRISE_INTEGRATION_ID, ENTERPRISE_NAME } from "../../src/enterprise.js"
 import { SERVER_NAME } from "../../src/rpc.js"
 import { API_TOOL_NAME, HIDDEN, KNOWN_TOOLS, TOOL_PREFIX } from "../../src/tools.js"
@@ -41,10 +42,17 @@ describe("the jelly declaration", () => {
     ])
   })
 
-  it("declares no RPC methods, views or contributions", () => {
+  it("declares flat settings the plugin reads, and no RPC methods, views or other contributions", () => {
     expect(jelly.rpc).toEqual([])
     expect(jelly.views).toEqual([])
-    expect(jelly.contributes).toEqual({ homeFeeds: [], homeWidgets: [], workKinds: [], settings: [] })
+    expect(jelly.contributes.homeFeeds).toEqual([])
+    expect(jelly.contributes.homeWidgets).toEqual([])
+    expect(jelly.contributes.workKinds).toEqual([])
+    expect(jelly.contributes.settings.map((setting) => {
+      const entry = setting as { key: string; type: string }
+      return { key: entry.key, type: entry.type }
+    })).toEqual([{ key: "access", type: "string" }, { key: "unknownTools", type: "string" }, { key: "lockdown", type: "boolean" }])
+    expect(loadOptions({ access: "read-only", unknownTools: "hide", lockdown: true })).toMatchObject({ access: "read-only", unknownTools: "hide", lockdown: true })
   })
 })
 
