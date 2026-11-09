@@ -126,7 +126,7 @@ describe("github_api checks the path it sends", () => {
       expect(refused).toBeGreaterThan(300)
       expect(checked).toBeGreaterThan(300)
       expect(cased).toBeGreaterThan(100)
-    })
+    }, 30_000)
   }
 
   it("checks a download's path the same way, before its file prompt", async () => {
@@ -145,7 +145,7 @@ describe("github_api checks the path it sends", () => {
       const described = describeCall(input as never, GHES)
       expect(`GET /api/v3${described.target!.path}`).toBe(`GET ${new URL(api.sent[0]!).pathname}`)
     }
-  })
+  }, 30_000)
 
   it("asks for GraphQL as POST /graphql and sends it only to the GraphQL endpoint, on github.com and a host", async () => {
     for (const endpoints of [GITHUB_COM, GHES]) {

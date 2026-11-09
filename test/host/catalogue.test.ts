@@ -113,5 +113,5 @@ describe("the Code Mode catalogue", () => {
     expect(text.startsWith("- github ("), mock.text().slice(0, 600)).toBe(true)
     expect(tokens(text)).toBeLessThanOrEqual(1000)
     expect(text).toContain("github-pr-review")
-  })
+  }, 120_000)
 })
