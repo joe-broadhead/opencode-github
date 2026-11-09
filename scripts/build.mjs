@@ -1,8 +1,9 @@
-// Builds dist/ as exactly two self-contained, minified files, so an in-place plugin update can never mix
+// Builds dist/ as exactly two self-contained files, so an in-place plugin update can never mix
 // a new entry with a stale sibling module that the host still holds:
-// - dist/index.js: the server part (src/index.ts);
+// - dist/index.js: the server part (src/index.ts), minified;
 // - dist/tui.js: the TUI part (src/tui/index.tsx). Babel compiles its JSX with OpenTUI's Solid
-//   preset as esbuild loads it, so no .tsx ships or runs from node_modules.
+//   preset as esbuild loads it, so no .tsx ships or runs from node_modules. It is not minified:
+//   OpenCode cannot load the minified form of its host imports from a local-path install.
 // esbuild bundles each entry alone (no splitting, no chunks): shared code such as the RPC
 // contract, which is plain JSON Schema, is inlined into both; zod, which only the server
 // part's option and github_api schemas use, goes into dist/index.js alone. What the host
@@ -26,6 +27,8 @@ const allowed = (path) =>
 // The plugin's version, for src/version.ts; no source file repeats it.
 const VERSION = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version
 const presets = [["babel-preset-solid", { moduleName: "@opentui/solid", generate: "universal" }], "@babel/preset-typescript"]
+// A minified bundle writes its imports without spaces (`from"x"`, `import{a}`). The TUI part must keep them plain.
+const MINIFIED_IMPORT = /\bfrom"|\bimport[{*]/
 
 /** Compiles .tsx with Babel's Solid preset as esbuild loads it; esbuild handles plain .ts itself. */
 const solid = {
@@ -39,14 +42,14 @@ const solid = {
   },
 }
 
-async function bundle(entry, outfile, plugins = []) {
+async function bundle(entry, outfile, plugins = [], minify = true) {
   const result = await build({
     absWorkingDir: root,
     entryPoints: [join(root, entry)],
     outfile: join(dist, outfile),
     bundle: true,
     splitting: false,
-    minify: true,
+    minify,
     format: "esm",
     platform: "node",
     target: "es2022",
@@ -86,7 +89,8 @@ function checkNotice(metafiles) {
 try {
   rmSync(dist, { recursive: true, force: true })
   const server = await bundle("src/index.ts", "index.js")
-  const tui = await bundle("src/tui/index.tsx", "tui.js", [solid])
+  const tui = await bundle("src/tui/index.tsx", "tui.js", [solid], false)
+  if (MINIFIED_IMPORT.test(readFileSync(join(dist, "tui.js"), "utf8"))) throw new Error("dist/tui.js is minified. OpenCode cannot load its host imports from a local-path install, so bundle the TUI part with minify false.")
   checkNotice([server, tui])
   const files = readdirSync(dist, { recursive: true }).map(String).sort()
   if (files.join(",") !== "index.js,tui.js") throw new Error(`dist/ must hold exactly index.js and tui.js, found: ${files.join(", ")}`)
