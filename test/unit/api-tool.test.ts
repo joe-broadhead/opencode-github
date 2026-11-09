@@ -105,7 +105,7 @@ describe("github_api", () => {
     expect(hosted).toContain('search({ namespace: "github", query })')
     for (const skill of ["github-pr-review", "github-issue-triage", "github-code-research"]) expect(hosted).toContain(skill)
     expect(hosted).toContain('Read-only now: GitHub lists no write tools and api refuses changes; a change needs the user to set access: "ask-changes" or access: "all".')
-    expect(namespaceDescription({ enterprise: false, access: "ask-changes" })).toContain("Reads run without asking; every change asks the user first.")
+    expect(namespaceDescription({ enterprise: false, access: "ask-changes" })).toContain("At `access` `ask-changes`, reads run without asking and every change asks first.")
     expect(namespaceDescription({ enterprise: true, access: "read-only" })).toMatch(/^GitHub Enterprise Server through api, .*hosted MCP tools do not serve it\. /)
     for (const enterprise of [false, true]) {
       const text = namespaceDescription({ enterprise, access: "read-only" })

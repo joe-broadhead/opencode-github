@@ -42,8 +42,13 @@ describe("the model-facing text at access all", () => {
   })
 
   it("says what a change does under each access value, in the namespace the model reads", () => {
-    expect(namespaceDescription({ enterprise: false, access: "all" })).toContain("and so does every change")
-    expect(namespaceDescription({ enterprise: false, access: "ask-changes" })).toContain("every change asks the user first")
+    expect(namespaceDescription({ enterprise: false, access: "all" })).toContain("At the default `access` `all`, every tool runs without asking, changes included.")
+    expect(namespaceDescription({ enterprise: false, access: "ask-changes" })).toContain("At `access` `ask-changes`, reads run without asking and every change asks first.")
     expect(namespaceDescription({ enterprise: false, access: "read-only" })).toContain('access: "all"')
+  })
+
+  it("never says a change asks at the default, the one value the namespace states as a fact", () => {
+    const text = namespaceDescription({ enterprise: false, access: "all" })
+    expect(text).not.toMatch(/asks first|asks the user|every change asks/)
   })
 })
