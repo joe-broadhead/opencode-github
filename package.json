@@ -737,18 +737,21 @@
           "key": "access",
           "label": "Access",
           "type": "string",
+          "default": "all",
           "description": "all, ask-changes or read-only. Generates default rules for agents with a base allow; read-only also disables GitHub's write tools."
         },
         {
           "key": "unknownTools",
           "label": "Unknown tools",
           "type": "string",
+          "default": "ask",
           "description": "ask keeps unknown GitHub tools visible under the access rules; hide removes them."
         },
         {
           "key": "lockdown",
           "label": "Lockdown",
           "type": "boolean",
+          "default": false,
           "description": "Send GitHub's X-MCP-Lockdown header to restrict untrusted content."
         }
       ]

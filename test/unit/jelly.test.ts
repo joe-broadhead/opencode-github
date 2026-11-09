@@ -52,6 +52,11 @@ describe("the jelly declaration", () => {
       const entry = setting as { key: string; type: string }
       return { key: entry.key, type: entry.type }
     })).toEqual([{ key: "access", type: "string" }, { key: "unknownTools", type: "string" }, { key: "lockdown", type: "boolean" }])
+    const defaults = loadOptions({})
+    for (const setting of jelly.contributes.settings) {
+      const entry = setting as { key: "access" | "unknownTools" | "lockdown"; default: unknown }
+      expect(entry.default).toBe(defaults[entry.key])
+    }
     expect(loadOptions({ access: "read-only", unknownTools: "hide", lockdown: true })).toMatchObject({ access: "read-only", unknownTools: "hide", lockdown: true })
   })
 })
