@@ -90,6 +90,10 @@ When you add a rule here, add it to the scan and its self-test too.
   in some contexts only makes GitHub reject the whole file and run nothing.
 - Releases publish from CI on a `v<version>` tag (see CONTRIBUTING). The release workflow refuses a private package or
   a tag that differs from the version.
+- No personal email in anything we publish. Every commit, tag and package is authored and committed as
+  `joe-broadhead <91376460+joe-broadhead@users.noreply.github.com>`. Before committing or tagging, check that
+  `git config user.email` is that address: a fresh clone inherits the machine's global identity, which is not that
+  address. Never commit, tag or publish with a work or personal address, or with a local hostname.
 
 ## Hygiene
 
