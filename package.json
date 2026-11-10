@@ -1,6 +1,6 @@
 {
   "name": "@joe-broadhead/opencode-github",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "Unofficial OpenCode plugin for GitHub",
   "keywords": [
     "opencode",
@@ -695,6 +695,12 @@
         "permission": "github_update_pull_request_branch",
         "effect": "allow",
         "readOnly": false
+      },
+      {
+        "name": "github.events_list",
+        "permission": "github_events_list",
+        "effect": "allow",
+        "readOnly": true
       },
       {
         "name": "github.api",

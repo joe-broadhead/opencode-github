@@ -16,17 +16,18 @@ function evaluate(rules: readonly Rule[], action: string): Rule["effect"] {
 
 describe("defaultRules", () => {
   // R18: every tool a plugin registers is allowed, and so is the pattern, so a tool GitHub adds later runs at once.
-  it("allows every GitHub tool by default, reads and writes and a tool GitHub adds later alike", () => {
+  it("allows every GitHub tool by default, reads, writes, the plugin's events_list and a tool GitHub adds later alike", () => {
     const rules = defaultRules()
     expect(rules[0]).toEqual({ action: "github_*", resource: "*", effect: "allow" })
     expect(rules.slice(1)).toEqual([
       ...allReadTools().map((name) => ({ action: `github_${name}`, resource: "*", effect: "allow" })),
+      { action: "github_events_list", resource: "*", effect: "allow" },
       ...allWriteTools().map((name) => ({ action: `github_${name}`, resource: "*", effect: "allow" })),
     ])
-    expect(rules).toHaveLength(allReadTools().length + allWriteTools().length + 1)
+    expect(rules).toHaveLength(allReadTools().length + allWriteTools().length + 2)
     expect(rules.filter((rule) => rule.effect !== "allow")).toEqual([])
     const evaluated = [BASE, ...rules]
-    for (const action of ["github_get_me", "github_create_pull_request", "github_brand_new_tool", "bash"]) expect(evaluate(evaluated, action)).toBe("allow")
+    for (const action of ["github_get_me", "github_create_pull_request", "github_events_list", "github_brand_new_tool", "bash"]) expect(evaluate(evaluated, action)).toBe("allow")
   })
 
   it("ask-changes allows reads and asks for everything else, new tools included", () => {

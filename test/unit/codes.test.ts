@@ -43,7 +43,7 @@ function tableCodes(markdown: string): string[] {
 }
 
 const TROUBLESHOOTING = /## Troubleshooting([\s\S]*?)## Uninstall/.exec(read("README.md"))?.[1] ?? ""
-const CONFIGURATION_ERRORS = /## Errors([\s\S]*?)A script/.exec(read("docs/configuration.md"))?.[1] ?? ""
+const CONFIGURATION_ERRORS = /## Errors([\s\S]*?)A script's calls through the tools RPC/.exec(read("docs/configuration.md"))?.[1] ?? ""
 const SCRIPTING = read("docs/scripting.md")
 
 describe("codes", () => {

@@ -34,7 +34,11 @@ When you add a rule here, add it to the scan and its self-test too.
 
 ## Design
 
-- GitHub's own MCP tools are the tool surface. The plugin adds one tool, `github_api` (`src/api/`), for what they
+- GitHub's own MCP tools are the tool surface. The plugin adds `github_events_list` (`src/source-events.ts`), Memory's
+  source of GitHub events over the shared `events_list` contract (`src/host/events-list.ts`, carried unchanged and
+  pinned by `scripts/check-copies.mjs`: change it in every source plugin at once); it makes only GETs through
+  `github_api`'s spec, and its tests run the contract's conformance check on a synthetic GitHub. The plugin adds one
+  more tool, `github_api` (`src/api/`), for what they
   cannot do. It classifies each call itself (GET and HEAD, `POST /markdown` and `/markdown/raw`, or one GraphQL query,
   read; everything else writes), asserts `github_api` on `METHOD /path` for writes, with exactly the path it sends
   (dot segments and needless percent-encoding are refused) and the names GitHub reads without regard to case in lower

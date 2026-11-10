@@ -4,7 +4,7 @@
 // still win. Every tool is allowed by default; the `access` option generates the block.
 import type { Plugin } from "@opencode/plugin"
 import type { Access } from "./config.js"
-import { TOOL_PREFIX, allReadTools, allWriteTools } from "./tools.js"
+import { EVENTS_TOOL_NAME, TOOL_PREFIX, allReadTools, allWriteTools } from "./tools.js"
 
 export type Rule = { readonly action: string; readonly resource: string; readonly effect: "allow" | "ask" | "deny" }
 
@@ -13,12 +13,17 @@ const rule = (tool: string, effect: Rule["effect"]): Rule => ({ action: `${TOOL_
 /**
  * Broad first, narrow last, because the last matching rule wins. At `access: "all"` every tool the plugin registers
  * is allowed, and so is one GitHub adds later through the `github_*` pattern; `ask-changes` asks for anything that is
- * not a read, and `read-only` denies it. The reads are always allowed, which is why the first rule alone decides an
- * unknown tool.
+ * not a read, and `read-only` denies it. The reads are always allowed, and so is the plugin's own `events_list`, which
+ * Memory's collector runs unattended; that is why the first rule alone decides an unknown tool.
  */
 export function defaultRules(access: Access = "all"): Rule[] {
   const other: Rule["effect"] = access === "all" ? "allow" : access === "ask-changes" ? "ask" : "deny"
-  return [rule("*", other), ...allReadTools().map((name) => rule(name, "allow")), ...allWriteTools().map((name) => rule(name, other))]
+  return [
+    rule("*", other),
+    ...allReadTools().map((name) => rule(name, "allow")),
+    rule(EVENTS_TOOL_NAME, "allow"),
+    ...allWriteTools().map((name) => rule(name, other)),
+  ]
 }
 
 const isBaseAllow = (rule: Rule) => rule.action === "*" && rule.resource === "*" && rule.effect === "allow"

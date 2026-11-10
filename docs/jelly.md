@@ -13,7 +13,7 @@ declaration, because that schema accepts no unknown keys.
 
 ## Tools and permissions
 
-99 tools are declared (61 read-only). Jelly's agents have no base "allow everything" rule, so the
+100 tools are declared (62 read-only). Jelly's agents have no base "allow everything" rule, so the
 plugin's own default rules, which it puts after that rule, never reach them. Jelly writes each
 declared `ask` or `deny` as that tool's default instead (the person's own choice replaces it), and
 denies a read-only helper every tool not marked `readOnly`. Every tool is declared `allow`, so a
@@ -22,7 +22,8 @@ the plugin's `access` option, to restrict one.
 
 - Ask: none. Every tool is allowed by default, in Jelly as in OpenCode.
 - Off: none.
-- Everything else runs. A `deny` or `ask` rule of your own replaces it, per tool.
+- Everything else runs, as the plugin's own rules let it. That includes `github_events_list`, the plugin's own read
+  for Memory's collector, which runs it unattended, so it never asks. A `deny` or `ask` rule of your own replaces it, per tool.
 
 A function that changes GitHub still needs a token that may: GitHub itself refuses a write the
 token cannot make, and `github_api` asserts `github_api` on the call's own `METHOD /path` before
@@ -70,4 +71,4 @@ Jelly folds the declared sign-ins into this plugin's one card, which shows each 
 Jelly's curated catalogue pins an exact version. Each release is published under a new version, so a review in
 Jelly can tell the two apart.
 
-The declaration test runs the shared kit, `test/support/jelly-kit.ts`, which checks the declaration and this page against Jelly's plugin authors' standard. `scripts/check-copies.mjs` holds the kit, and the shared part of the tools RPC (`src/host/tools-rpc.ts`), equal to the copy every plugin carries.
+The declaration test runs the shared kit, `test/support/jelly-kit.ts`, which checks the declaration and this page against Jelly's plugin authors' standard. `scripts/check-copies.mjs` holds the kit, the shared part of the tools RPC (`src/host/tools-rpc.ts`) and the events_list source contract (`src/host/events-list.ts`) equal to the copies every plugin carries.

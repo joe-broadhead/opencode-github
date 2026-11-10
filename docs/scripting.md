@@ -13,6 +13,7 @@ opencode api post /api/rpc/github.platform.tools/<method> -H "x-opencode-directo
 | --- | --- | --- |
 | One per known tool of GitHub's MCP server, named as the tool: `get_me`, `issue_read`, `pull_request_read`, `get_file_contents`, `search_code`, `issue_write`, `merge_pull_request` and the others in the [toolsets table](configuration.md#toolsets) | `read` or `write` | `github_<method>`, for example `github_issue_read` |
 | `api` | `write` | `github_api`: REST or GraphQL, with the whole input |
+| `events_list` | `read` | `github_events_list`, the plugin's own read: what the signed-in user was involved in since a cursor, as Memory's events ([Events list](#events-list)) |
 | `describe` | none | none: lists every method with its class, its permission action, whether it can run now (`available`, and when not, the code in `reason` and for `TOOL_UNAVAILABLE` a `detail`), and each one's input as JSON Schema; given a session, it also gives each method's resolved `permission` |
 
 Each MCP method runs GitHub's own tool with the same input, through OpenCode's own connection and sign-in. The plugin
@@ -139,6 +140,13 @@ change, a `download` (a file write inside the project) and an `upload` each need
 session's rules. **An allow scoped to GETs cannot POST:** a rule whose resource is `GET …` does not match
 `POST /repos/…`, so the change is refused and nothing is sent. An allow on resource `*` covers every method and path.
 `access: "read-only"` still refuses every change, whoever calls it.
+
+## Events list
+
+`events_list` runs the plugin's own `github_events_list`, Memory's source of GitHub events
+([configuration](configuration.md#events-list)). It asserts `github_events_list`, then makes only GET requests, as
+the `api` method does, plus `get_me` where GitHub's MCP server is there. Its errors are the `EVENTS_` codes in the
+configuration guide's Errors table.
 
 ## Errors
 
