@@ -119,7 +119,14 @@ GITHUB_DRIFT_TOKEN=<token> npm run drift
 
 It compares GitHub's live tools, toolset by toolset, with `KNOWN_TOOLS` in `src/tools.ts`, and warns about new tools,
 catalogued tools that are missing, and tools whose read or write classification differs. It changes nothing; at
-runtime, unknown tools ask by default whatever it reports.
+runtime, an unknown tool follows `access`: it runs at the default `"all"`, asks at `"ask-changes"` and is denied at
+`"read-only"`.
+
+The signed-in catalogue and the `jelly` declaration list different counts on purpose. The catalogue lists the tools of
+the toolsets the `toolsets` option turns on: 69 with the defaults, which are the 72 names of the default toolsets, less
+the hidden `ui_get` and the two `issue_artifact_*` tools behind a feature flag the plugin does not turn on. The
+declaration lists every known tool: the 98 GitHub tools, `github_api` and `github_events_list`, so a toolset a user
+turns on needs no change to the declaration.
 
 - Exit codes: `0` the comparison ran, with or without warnings; `2` no token, or GitHub could not be reached or
   refused the token.

@@ -17,6 +17,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - The Code Mode catalogue no longer pins tool signatures. The namespace text names the skills; `search` finds a tool's parameters. The host can still show unpinned tools.
 - The Code Mode namespace says what `access` decides, in one clause for each value: `all` runs every tool without asking, `ask-changes` asks before a change, and `read-only` denies one.
+- `github_events_list` runs without a prompt at every `access` value, because it is a read and Memory's collector runs it unattended. Restrict it with a rule per tool, as any tool.
+- The `jelly` declaration's settings carry their defaults (`access`, `unknownTools` and `lockdown`), which Jelly displays.
 - Each GitHub skill's first line says how to sign in when the tools are absent.
 
 - **Every GitHub tool is allowed by default.** The generated block allows every known tool and the `github_*` pattern,
