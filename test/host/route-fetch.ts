@@ -16,6 +16,8 @@ const ROUTED = [
 export interface FetchRouter {
   /** The fake's origin while a host runs; undefined blocks GitHub too. */
   target: string | undefined
+  /** A loopback origin the host may reach besides the fake, such as a mock model; undefined by default. */
+  loopback: string | undefined
   /** Origins of fakes that have closed. */
   readonly retired: Set<string>
   /** The origin and path of every blocked request. */
@@ -29,6 +31,7 @@ export function routeFetch(): FetchRouter {
   const original = globalThis.fetch
   const router: FetchRouter = {
     target: undefined,
+    loopback: undefined,
     retired: new Set(),
     blocked: [],
     stale: [],
@@ -43,6 +46,7 @@ export function routeFetch(): FetchRouter {
     let destination: string | undefined
     if (target && ROUTED.some((matches) => url.protocol === "https:" && matches(url))) destination = `${target}${url.pathname}${url.search}`
     else if (target && url.origin === target) destination = url.href
+    else if (router.loopback !== undefined && url.origin === router.loopback) destination = url.href
     if (!destination) {
       ;(router.retired.has(url.origin) ? router.stale : router.blocked).push(`${url.origin}${url.pathname}`)
       throw new Error(`EXTERNAL_FETCH_BLOCKED: the host test does not allow requests to ${url.origin}`)
