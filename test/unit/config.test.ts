@@ -83,7 +83,7 @@ describe("loadOptions", () => {
     const error = failure(raw)
     expect(error.code).toBe("OPTIONS_INVALID")
     expect(error.message).toContain(message)
-    expect(error.nextStep).toBe("Fix the options for @joe-broadhead/opencode-github in opencode.json.")
+    expect(error.nextStep).toBe("Fix the options for github:joe-broadhead/opencode-github#v0.0.0 in opencode.json.")
     expect(error.message.endsWith(`Next step: ${error.nextStep}`)).toBe(true)
   })
 

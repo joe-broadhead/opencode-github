@@ -142,7 +142,7 @@ export function loadOptions(raw: unknown): Options {
     throw new GitHubPluginError(
       "OPTIONS_INVALID",
       path ? `Invalid plugin option "${path}": ${message}.` : `Invalid plugin options: ${message}.`,
-      "Fix the options for @joe-broadhead/opencode-github in opencode.json.",
+      "Fix the options for github:joe-broadhead/opencode-github#v0.0.0 in opencode.json.",
     )
   }
   const { readOnly, ...rest } = result.data

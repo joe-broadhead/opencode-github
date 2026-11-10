@@ -41,6 +41,7 @@ All notable changes to this project are documented here. The format follows [Kee
   checked against `TESTED_HOSTS`: 2.2.3, 2.2.4, 2.2.5 and 2.2.6. The README prints the default block in full.
 - The CI has an `actionlint` job, and `npm run check` runs `actionlint` and the icon check.
 - The tools RPC is v2: every known tool is a method with its class (`read` for the 61 catalogued reads, `write` for the 37 catalogued writes and for `api`), and a call runs only with a prior explicit `allow` in the agent's or the session's rules. An `ask` is refused before the tool runs, so no prompt waits, and a saved "Always allow" does not authorize an ad-hoc script. `api` now takes `github_api`'s whole input: a write, a download and an upload run under an allow and assert `github_api` themselves, and `readOnly: true` still refuses every change; `SCRIPT_READ_ONLY` is gone. `ui_get` and unknown tools are still not methods.
+- The `OPTIONS_INVALID` next step names the Git spec, `github:joe-broadhead/opencode-github#v0.0.0`, not the npm name.
 
 ### Fixed
 

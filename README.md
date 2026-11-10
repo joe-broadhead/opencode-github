@@ -22,7 +22,15 @@ opencode plugin add github:joe-broadhead/opencode-github#v0.0.0
 Run `opencode reload`, or restart OpenCode. Then run `/github-status`: it shows `Connection: sign-in required` until
 you sign in, and `opencode mcp list` shows `github  needs authentication`.
 
-The install takes the GitHub release tag. Its commit carries the built `dist/`, so the install runs no build. To update, remove the spec you installed with `opencode plugin remove`, add the new tag's spec with `opencode plugin add`, then run `opencode reload`.
+Each release has its own tag, and a Git install does not update by itself. To move to a newer release, remove the old entry with `opencode plugin remove github:joe-broadhead/opencode-github#v0.0.0`, then add the new tag with `opencode plugin add github:joe-broadhead/opencode-github#v<version>`.
+
+Or add the plugin to `opencode.json` instead, with the same spec:
+
+```json
+{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.0" }] }
+```
+
+The install takes the GitHub release tag. Its commit carries the built `dist/`, so the install runs no build.
 
 ## Sign in
 
@@ -128,7 +136,7 @@ asks first. Restrict it in any of these three ways:
    | `"read-only"` | the read tools | nothing: every write is **denied**, and GitHub's own server lists no write tools |
 
    ```json
-   { "plugins": [{ "package": "@joe-broadhead/opencode-github", "options": { "access": "read-only" } }] }
+   { "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.0", "options": { "access": "read-only" } }] }
    ```
 
    `readOnly: true` and `false` still work: they mean `"read-only"` and `"all"`, and `/github-status` says they are
@@ -314,7 +322,7 @@ Options go in the plugin's entry in `opencode.json`:
 
 ```json
 {
-  "plugins": [{ "package": "@joe-broadhead/opencode-github", "options": { "toolsets": ["context", "repos", "issues"] } }]
+  "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.0", "options": { "toolsets": ["context", "repos", "issues"] } }]
 }
 ```
 
@@ -344,7 +352,7 @@ overrides user and project config, so members only sign in:
 {
   "plugins": [
     {
-      "package": "@joe-broadhead/opencode-github",
+      "package": "github:joe-broadhead/opencode-github#v0.0.0",
       "options": {
         "clientId": "<your organisation's OAuth App client ID>",
         "scopes": ["repo", "read:org"],
@@ -466,6 +474,7 @@ still stores its token.
 - **An allow on `github_api` covers writes.** An allow for `github_api` authorises every `api` call, reads included, and also its writes, downloads and uploads. Grant it only to a session that may change GitHub, or set `access` to `"read-only"` for a read-only script.
 - **Tested on OpenCode 2.2.3, 2.2.4, 2.2.5 and 2.2.6 only.** Other releases in `>=2.2.3 <2.3.0` run untested.
 - **GitHub's rate limits and error text are GitHub's.** Errors from OpenCode and GitHub pass through unchanged.
+- Updates are not automatic for a Git install, and `opencode plugin update` and `opencode plugin check` do not work on one: to move to a newer release, remove the old entry and add the new tag.
 
 ## Links
 
