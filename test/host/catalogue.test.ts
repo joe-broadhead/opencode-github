@@ -68,6 +68,8 @@ describe("the Code Mode catalogue", () => {
    * received. Signed in, GitHub's MCP server is the fake, so the section lists the tools that sign-in reaches.
    */
   async function renderGithub(signedIn: boolean): Promise<{ text: string; prompt: string }> {
+    // Another file's cleanup may have restored the native fetch in this process, so route again before any request.
+    router.install()
     const mock = startMock()
     const fake = signedIn ? startFakeGitHub() : undefined
     const mockOrigin = new URL(mock.baseURL).origin

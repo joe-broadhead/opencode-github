@@ -24,6 +24,8 @@ export interface FetchRouter {
   readonly blocked: string[]
   /** Blocked requests to a closed fake: retries a closed host had already scheduled. */
   readonly stale: string[]
+  /** Puts the routing back after restore(). Another file's cleanup restores the native fetch for the whole process. */
+  install(): void
   restore(): void
 }
 
@@ -35,6 +37,9 @@ export function routeFetch(): FetchRouter {
     retired: new Set(),
     blocked: [],
     stale: [],
+    install: () => {
+      globalThis.fetch = installed
+    },
     restore: () => {
       globalThis.fetch = original
     },
@@ -54,6 +59,7 @@ export function routeFetch(): FetchRouter {
     // No second hop: a redirect would leave the routed origin.
     return original(new Request(destination, request), { redirect: "error" })
   }
-  globalThis.fetch = Object.assign(routed, { preconnect: () => undefined }) as typeof fetch
+  const installed = Object.assign(routed, { preconnect: () => undefined }) as typeof fetch
+  globalThis.fetch = installed
   return router
 }
