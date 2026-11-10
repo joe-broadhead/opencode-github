@@ -4,8 +4,8 @@
 // TESTED_HOSTS (the plugin active, its skills read from the installed package), checks that dist/ holds
 // exactly the two self-contained entries, and finally imports the server entry with @opencode/plugin installed beside it in
 // place of the host. Run it through `npm run test:pack`, which builds first.
-// `--tarball <file>` checks that tarball instead of packing; the release workflow uses it on the
-// tarball it publishes.
+// PACK_TARBALL, when set, names the tarball to check instead of packing this checkout; the release workflow sets it to
+// the tarball it publishes (scripts/release-pack.mjs). See scripts/pack-source.mjs.
 //
 // The stock binaries come from OPENCODE_BIN_2_2_3 to OPENCODE_BIN_2_2_6. When one is
 // unset, @opencode/cli and its platform package are installed into the temp folder with scripts disabled,
@@ -13,10 +13,11 @@
 // proxy that refuses every outbound request.
 import { execFileSync, spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { createServer } from "node:net"
-import { basename, dirname, join, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
+import { packSource } from "./pack-source.mjs"
 import { loadSource } from "./source.mjs"
 
 const root = fileURLToPath(new URL("../", import.meta.url))
@@ -274,26 +275,12 @@ async function loadInStock(version, binary, work, installed) {
 const sameRule = (a, b) => a?.action === b.action && a?.resource === b.resource && a?.effect === b.effect
 const isBaseAllow = (rule) => sameRule(rule, { action: "*", resource: "*", effect: "allow" })
 
-/** The --tarball file, described like an `npm pack --json` entry, or undefined without the flag. */
-function tarballArgument() {
-  const index = process.argv.indexOf("--tarball")
-  if (index === -1) return undefined
-  const file = process.argv[index + 1]
-  if (!file) throw new Error("--tarball needs a file")
-  const path = resolve(file)
-  const files = run("tar", ["-tzf", path], root)
-    .split("\n")
-    .filter((line) => line && !line.endsWith("/"))
-    .map((line) => ({ path: line.replace(/^package\//, "") }))
-  return { path, filename: basename(path), files, size: statSync(path).size, unpackedSize: undefined }
-}
-
 async function main() {
   const work = scratchDir("github-pack-smoke-")
   try {
     const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
     const problems = checkManifest(manifest)
-    const pack = tarballArgument() ?? JSON.parse(run("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", work], root))[0]
+    const pack = packSource({ env: process.env, root, scratch: work, run })
     problems.push(...checkPack(pack))
     if (problems.length > 0) throw new Error(problems.join("\n"))
 
