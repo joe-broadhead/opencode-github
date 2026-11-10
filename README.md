@@ -16,17 +16,13 @@ Unofficial; not affiliated with GitHub. GitHub is a trademark of GitHub, Inc.
 ## Install
 
 ```sh
-opencode plugin add @joe-broadhead/opencode-github
+opencode plugin add github:joe-broadhead/opencode-github#v0.0.0
 ```
 
 Run `opencode reload`, or restart OpenCode. Then run `/github-status`: it shows `Connection: sign-in required` until
 you sign in, and `opencode mcp list` shows `github  needs authentication`.
 
-### Update
-
-Update with `opencode plugin update @joe-broadhead/opencode-github`, then run `opencode reload`. Your options and
-rules stay as they are. An entry pinned to a version (`@joe-broadhead/opencode-github@<version>`) does not update: remove
-the `@<version>` from its `plugins` entry first.
+The install takes the GitHub release tag. Its commit carries the built `dist/`, so the install runs no build. To update, remove the spec you installed with `opencode plugin remove`, add the new tag's spec with `opencode plugin add`, then run `opencode reload`.
 
 ## Sign in
 
@@ -458,7 +454,7 @@ still stores its token.
    account, which works only in an interactive terminal. Then, on GitHub, delete the token under **Settings →
    Developer settings → Personal access tokens**, or, after a device sign-in, revoke the OAuth App under **Settings →
    Applications → Authorized OAuth Apps**.
-2. Run `opencode plugin remove @joe-broadhead/opencode-github`, then `opencode reload`.
+2. Run `opencode plugin remove github:joe-broadhead/opencode-github#v0.0.0` (the spec you installed), then `opencode reload`.
 3. Data folders: none. The plugin stores nothing of its own.
 4. Remove the default rules you copied into agents' own `permissions`.
 
