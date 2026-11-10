@@ -20,6 +20,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - `github_events_list` runs without a prompt at every `access` value, because it is a read and Memory's collector runs it unattended. Restrict it with a rule per tool, as any tool.
 - The `jelly` declaration's settings carry their defaults (`access`, `unknownTools` and `lockdown`), which Jelly displays.
 - Each GitHub skill's first line says how to sign in when the tools are absent.
+- `docs/scripting.md` says a script's session needs the project as its `location`; without one, each call fails `Agent not found`.
 
 - **Every GitHub tool is allowed by default.** The generated block allows every known tool and the `github_*` pattern,
   so a tool GitHub adds later runs without a prompt too, and `github_api` may change GitHub without asking. Restrict it

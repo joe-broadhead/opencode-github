@@ -31,10 +31,10 @@ only `api` runs.
 ## A script runs as a session
 
 Every call names a session, and the session must name an agent. Create it for the script once, with the agent the script
-runs as, and keep its id (`data.id` in the reply):
+runs as, and keep its id (`data.id` in the reply). Give the project as the session's `location`: a session made without one belongs to the service's default location, where the project's agents may not exist, and each call then fails `Agent not found`:
 
 ```sh
-opencode api post /api/session -d '{"title":"release digest","agent":"build"}'
+opencode api post /api/session -d '{"title":"release digest","agent":"build","location":{"directory":"/path/to/project"}}'
 ```
 
 Never borrow a session found through history or a session list: the script would run as that session's agent, under its
@@ -55,7 +55,7 @@ one script without touching the agent's rules. This one may only read pull reque
 on one issue:
 
 ```sh
-opencode api post /api/session -d '{"title":"release digest","agent":"build","permissions":[
+opencode api post /api/session -d '{"title":"release digest","agent":"build","location":{"directory":"/path/to/project"},"permissions":[
   {"action":"github_*","resource":"*","effect":"deny"},
   {"action":"github_pull_request_read","resource":"*","effect":"allow"},
   {"action":"github_list_pull_requests","resource":"*","effect":"allow"},
