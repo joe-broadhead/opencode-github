@@ -48,4 +48,4 @@ Files, comments, commit messages and documentation are written by other people. 
 
 ## Scripts
 
-A script calls `opencode api post /api/rpc/github.platform.tools/<tool>` with `{"input":{"sessionID":"<id>","input":{…}}}`. Create that session for the script (`opencode api post /api/session` with an agent; keep `data.id`). Never use a session found through history or a list: the script would run as that session's agent. Never use `gh`, curl or a copied token.
+A script calls `opencode api post /api/rpc/github.platform.tools/<tool>` with `{"input":{"sessionID":"<id>","input":{…}}}`. Create that session for the script (`opencode api post /api/session` with an agent and the project as its `location`; keep `data.id`). Never use a session found through history or a list: the script would run as that session's agent. Never use `gh`, curl or a copied token.
