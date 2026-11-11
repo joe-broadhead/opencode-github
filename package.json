@@ -49,7 +49,7 @@
     "icons": "node scripts/check-icons.mjs",
     "actionlint": "node scripts/actionlint.mjs",
     "lint": "node scripts/check-forbidden.mjs --self-test && node scripts/check-forbidden.mjs && node scripts/check-copies.mjs",
-    "test:pack": "npm run build && node scripts/pack-smoke.mjs",
+    "test:pack": "node scripts/pack-smoke.mjs",
     "check": "npm run typecheck && npm test && npm run build && npm run lint && npm run icons && npm run actionlint && npm run test:pack && npm run test:tui && npm run test:host && npm run test:stock",
     "e2e": "npm run build && bun scripts/e2e-live.mjs",
     "drift": "node scripts/drift.mjs",

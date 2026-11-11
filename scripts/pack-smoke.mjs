@@ -3,7 +3,8 @@
 // packages OpenCode supplies itself. Then it loads the installed plugin in each stock OpenCode release of
 // TESTED_HOSTS (the plugin active, its skills read from the installed package), checks that dist/ holds
 // exactly the two self-contained entries, and finally imports the server entry with @opencode/plugin installed beside it in
-// place of the host. Run it through `npm run test:pack`, which builds first.
+// place of the host. Run it through `npm run test:pack` after `npm run build` (`npm run check` does both, in that order).
+// test:pack does not build: the release commit drops the build script, and its pack stage tests the committed dist/.
 // PACK_TARBALL, when set, names the tarball to check instead of packing this checkout; the release workflow sets it to
 // the tarball it publishes (scripts/release-pack.mjs). See scripts/pack-source.mjs.
 //
