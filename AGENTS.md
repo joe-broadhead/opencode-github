@@ -92,10 +92,17 @@ When you add a rule here, add it to the scan and its self-test too.
   files, `opencode.vendor` declares GitHub as the vendor, and the three `exports` and three `files` entries ship them.
 - **The workflows are linted** by `actionlint` (`scripts/actionlint.mjs`, and a CI job), because a `${{ }}` that exists
   in some contexts only makes GitHub reject the whole file and run nothing.
-- Releases publish from CI on a `v<version>` tag (see CONTRIBUTING). The release workflow refuses a private package or
-  a tag that differs from the version.
-- No personal email in anything we publish. Every commit, tag and package is authored and committed as
-  `joe-broadhead <91376460+joe-broadhead@users.noreply.github.com>`. Before committing or tagging, check that
+- Releases come only from `.github/workflows/release.yml` ("Releasing" in [CONTRIBUTING.md](CONTRIBUTING.md)). A
+  release-prep PR sets `version` in `package.json` and the install specs and runs `node scripts/changelog.mjs release`;
+  once it is on `master` and CI passed, start the release with
+  `gh workflow run release.yml --ref master -f sha=<its full sha>`. The workflow builds `dist/`, makes the release
+  commit on a temporary `release/v<version>` branch, checks and stages everything, and waits for the owner to approve
+  the `release` environment; only then does it create the tag `v<version>` and the GitHub Release. Never push a tag or a
+  `release/*` branch, and never commit, tag or publish a release by hand. Agents never approve a release, never call the
+  deployment-approval API, and never bypass a ruleset or the environment.
+- No personal email in anything we publish. Every commit is authored and committed as
+  `joe-broadhead <91376460+joe-broadhead@users.noreply.github.com>`, except the release commit and tag, which the
+  release workflow makes as `github-actions[bot]`. Before committing or tagging, check that
   `git config user.email` is that address: a fresh clone inherits the machine's global identity, which is not that
   address. Never commit, tag or publish with a work or personal address, or with a local hostname.
 
