@@ -43,6 +43,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "node scripts/build.mjs",
     "test": "vitest run",
+    "test:kit": "node --test scripts/release-kit.test.mjs",
     "test:tui": "npm run build && bun test test/tui",
     "test:host": "npm run build && node scripts/host-tests.mjs",
     "test:stock": "npm run build && bun test test/stock",
@@ -50,7 +51,7 @@
     "actionlint": "node scripts/actionlint.mjs",
     "lint": "node scripts/check-forbidden.mjs --self-test && node scripts/check-forbidden.mjs && node scripts/check-copies.mjs",
     "test:pack": "node scripts/pack-smoke.mjs",
-    "check": "npm run typecheck && npm test && npm run build && npm run lint && npm run icons && npm run actionlint && npm run test:pack && npm run test:tui && npm run test:host && npm run test:stock",
+    "check": "npm run typecheck && npm test && npm run test:kit && npm run build && npm run lint && npm run icons && npm run actionlint && npm run test:pack && npm run test:tui && npm run test:host && npm run test:stock",
     "e2e": "npm run build && bun scripts/e2e-live.mjs",
     "drift": "node scripts/drift.mjs",
     "release:check": "node scripts/release-check.mjs"
