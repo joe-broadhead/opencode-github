@@ -482,8 +482,10 @@ Ask before every GitHub MCP tool, reads included:
 { "permissions": [{ "action": "github_*", "resource": "*", "effect": "ask" }] }
 ```
 
-`github_api` reads (GET, HEAD, `POST /markdown` and one GraphQL query) never ask; to stop them, deny `github_api` on
-`*`, which removes the tool.
+`github_api` asserts every request on its own resource, reads included, and the block allows its reads (`GET *`,
+`HEAD *`, `POST /markdown`, `POST /markdown/raw` and `QUERY /graphql`) at every access value. To stop a read, deny it
+by resource, such as `{ "action": "github_api", "resource": "GET /notifications", "effect": "deny" }`; to stop them
+all, deny `github_api` on `*`, which removes the tool.
 
 Keep one agent away from GitHub: add `{ "action": "github_*", "resource": "*", "effect": "deny" }` at the end of that
 agent's own `permissions` list.
@@ -565,22 +567,27 @@ its toolset is on; the call still runs.
 **Reads and writes.** GET and HEAD read, and so do `POST /markdown` and `POST /markdown/raw`, which only render
 Markdown; every other POST writes. A GraphQL document reads only when it holds exactly one operation and that
 operation is a query; the plugin scans the document itself, skipping strings and comments. Everything else is a
-write: it is asserted as `github_api` on `METHOD /path` (`POST /graphql` for GraphQL), so the default `access: "all"`
-runs it, `"ask-changes"` asks for it, and `"read-only"` refuses it with `READ_ONLY`. A script's change resolves that
-same resource, so a rule for another method does not
-cover it. In that path, the names GitHub reads without regard to case are in lower case (see Rules). A download is
-asserted the same way, as `download <file>`, and is refused while read-only. Reads never ask.
+write.
+
+**Every request asserts first.** Each request `github_api` sends, a read or a write, is asserted as `github_api` on its
+own `METHOD /path` before it is sent, as the calling session; a single GraphQL query is `QUERY /graphql`, and any other
+GraphQL document `POST /graphql`. The block allows the reads at every access value, so they run without a prompt; a
+write follows `access`: `"all"` runs it, `"ask-changes"` asks for it, and `"read-only"` refuses it with `READ_ONLY`.
+A rule of your own decides either: a deny for one read path refuses that read, with nothing sent. A script's request
+resolves that same resource, so a rule for another method does not cover it. In that path, the names GitHub reads
+without regard to case are in lower case (see Rules). A download is asserted the same way, as `download <file>`, and
+is refused while read-only.
 
 **Hosts and the token.** Requests go only to `https://api.github.com`, and uploads to `https://uploads.github.com`; with
 [`host`](#host-github-enterprise-server), to the server's own API. The plugin handles redirects itself:
 
 - A change (any method but GET and HEAD, GraphQL and uploads included) never follows one. It fails with
   `API_REDIRECTED`, which names the new path, so you can call again with that path and have it checked there.
-- A GET or HEAD follows a redirect within the API base, such as a renamed repository's, without asking, as reads
-  never ask. A read redirected outside the API fails with `API_REDIRECT_OFF_HOST`.
+- A GET or HEAD follows a redirect within the API base, such as a renamed repository's, after asserting the new path
+  as its own request. A read redirected outside the API fails with `API_REDIRECT_OFF_HOST`.
 - A download follows a redirect within the API too, and one to the storage that serves logs, artifacts and release
   assets, without the `Authorization` header. For job logs, GitHub's `get_job_logs` tool returns the text.
-- Pagination follows a `Link` only under the API base path.
+- Pagination follows a `Link` only under the API base path, and asserts a page at another path before it is sent.
 
 The token never appears in output, errors or logs. A 401 marks the account in `/connect` as needing a new sign-in.
 
@@ -627,7 +634,8 @@ events_list({ since?, cursor?, limit?, account?, source? })
 | `source` | `github`, the one source. |
 
 It asserts `github_events_list`, then makes only GET requests, through `github_api`'s own spec with the plugin's
-sign-in (a GET asserts nothing, as for `github_api`):
+sign-in. Each GET asserts `github_api` on its own `GET /path` first, unattended: it runs only under an allow rule, which
+the block has, and a rule that asks or denies it refuses it with `PERMISSION_DENIED` before the request is sent:
 
 - the owner: GitHub's `get_me` through OpenCode's executor, or `GET /user` where GitHub's MCP server is not there
   (`host`, or another server named `github`); `github:` and the login. The cursor holds a digest of it, so after a
@@ -817,7 +825,7 @@ passed through unchanged.
 | `TOKEN_CHECK_FAILED` | GitHub could not check the token, or returned no account name. | Try again later. |
 | `READ_ONLY` | A `github_api` call would change GitHub, and `access` is `"read-only"` (or the deprecated `readOnly: true`). | Tell the user that this needs the plugin option `access: "all"`, which they set in opencode.json; each change then runs without asking, unless they keep `ask-changes`. |
 | `AUTH_REQUIRED` | `github_api` has no GitHub sign-in to use. | Run /connect and choose GitHub (GitHub Enterprise with `host`). |
-| `PERMISSION_DENIED` | A rule asks or denies a call, and the caller is a script: an `ask` cannot be answered and a `deny` refuses. For `github_api` the rule must name the call's own `METHOD /path`. | Add or narrow the rule for the session or for its agent. |
+| `PERMISSION_DENIED` | A rule asks or denies a call, and the caller is a script or `events_list`: an `ask` cannot be answered and a `deny` refuses. For `github_api` the rule must name the request's own `METHOD /path`. | Add or narrow the rule for the session or for its agent. |
 | `API_INPUT_INVALID` | The `github_api` input does not fit, for example `download` with a method other than GET. | Fix the github_api input and call it again. |
 | `API_PATH_INVALID` | The path is not a relative API path, has a `.` or `..` segment (also percent-encoded), or percent-encodes a character it can hold as itself. | Pass a relative API path such as /repos/OWNER/REPO/pulls. |
 | `API_GRAPHQL_PATH` | `/graphql` was called through method and path. | Pass { graphql: { query, variables } } instead. |

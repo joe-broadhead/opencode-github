@@ -37,13 +37,14 @@ When you add a rule here, add it to the scan and its self-test too.
 - GitHub's own MCP tools are the tool surface. The plugin adds `github_events_list` (`src/source-events.ts`), Memory's
   source of GitHub events over the shared `events_list` contract (`src/host/events-list.ts`, carried unchanged and
   pinned by `scripts/check-copies.mjs`: change it in every source plugin at once); it makes only GETs through
-  `github_api`'s spec, and its tests run the contract's conformance check on a synthetic GitHub. The plugin adds one
+  `github_api`'s spec, as a script call, so each asserts `github_api` on its own `GET /path` first, and its tests run the contract's conformance check on a synthetic GitHub. The plugin adds one
   more tool, `github_api` (`src/api/`), for what they
   cannot do. It classifies each call itself (GET and HEAD, `POST /markdown` and `/markdown/raw`, or one GraphQL query,
-  read; everything else writes), asserts `github_api` on `METHOD /path` for writes, with exactly the path it sends
+  read; everything else writes), asserts `github_api` on `METHOD /path` for every request before it is sent, reads
+  included (`QUERY /graphql` for one GraphQL query; the default block allows the read resources), with exactly the path it sends
   (dot segments and needless percent-encoding are refused) and the names GitHub reads without regard to case in lower
   case (`src/api/names.ts`), never follows a redirect for a change, follows a read's redirect (and a `Link` page) only
-  within the API base, with no assert, as reads never ask, and leaves the API only for a download's storage redirect, refuses writes while read-only, sends requests only to the
+  within the API base, asserting the new path first, and leaves the API only for a download's storage redirect, refuses writes while read-only, sends requests only to the
   configured API and uploads bases, and never forwards the token across origins. It and GitHub's MCP tools share the
   Code Mode namespace `github`, which it describes. Status lives in `/github-status`,
   the `/github` dialog and the status RPC, which all render one status model (`src/rpc.ts`).

@@ -32,6 +32,14 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- **Every GitHub request asserts its permission first.** `github_api` asserted only changes and downloads, so its reads
+  (GET, HEAD, `POST /markdown`, a GraphQL query), the redirects and `Link` pages it followed, and `github_events_list`'s
+  searches, notifications and `GET /user` were sent without checking the calling session's rules: a session rule that
+  denied `github_api`, or one read path, did not stop them. Now each request asserts `github_api` on its own
+  `METHOD /path` (`QUERY /graphql` for a single GraphQL query) before any network I/O, a redirect or page at another
+  path included. The default block allows the read resources at every access value, so nothing new asks; a rule of
+  your own that asks for or denies a read now decides it. `events_list` runs its GETs as an unattended call, so an ask
+  or a deny refuses them with `PERMISSION_DENIED` and nothing is sent.
 - The host test of the Code Mode catalogue reads the request that carries the catalogue, not the session-title request
   OpenCode 2.2.4 can send after it.
 
