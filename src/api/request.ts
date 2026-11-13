@@ -531,7 +531,7 @@ function scopes(header: string | null): string[] {
 
 /**
  * The next page, as a REST target on the API base; a link off the API base, or one whose path the plugin would not send
- * as written, ends the pagination.
+ * as written, ends the pagination silently: the result's `pagination.more` is then false.
  */
 function nextLink(response: Response, endpoints: Endpoints): RestTarget | undefined {
   const link = response.headers.get("link")

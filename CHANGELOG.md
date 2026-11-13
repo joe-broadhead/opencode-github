@@ -19,6 +19,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- `github_api` reads in an agent without the base `* * allow` rule now ask. The plugin's block, which allows them, goes
+  only into agents with that rule; before this release such reads ran unchecked. In those agents a script's or
+  `events_list`'s reads are refused with `PERMISSION_DENIED` unless allowed. To allow them, add
+  `{ "action": "github_api", "resource": "GET *", "effect": "allow" }` to the agent's rules, and the same for `HEAD *`,
+  `POST /markdown`, `POST /markdown/raw` and `QUERY /graphql` as needed.
 - `github_api` words a GitHub App's 403 ("Resource not accessible by integration") by permission and installation: it
   names the permission from `X-Accepted-GitHub-Permissions` and the account from the path, and links the install page.
   A GitHub App's 404 also says the App may not be installed there. SAML single sign-on (`X-GitHub-SSO`, with its

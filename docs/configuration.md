@@ -443,7 +443,11 @@ read-only mode on, so its server lists no write tools:
   so. An explicit `access` wins over them.
 - The reads are allowed at every access value, whichever toolsets are on; a method a toolset turns off is unavailable
   rather than denied.
-- Agents without the base allow rule are unchanged. The block is added once, even after a reload.
+- Agents without the base allow rule are unchanged. The block is added once, even after a reload. Such an agent does
+  not get the `github_api` read allows either, so its `github_api` reads ask, and a script's or `events_list`'s reads
+  are refused with `PERMISSION_DENIED`, unless its own rules allow them: add
+  `{ "action": "github_api", "resource": "GET *", "effect": "allow" }`, and the same for `HEAD *`, `POST /markdown`,
+  `POST /markdown/raw` and `QUERY /graphql` as you need them.
 - OpenCode applies the last rule that matches. So the agent's own later rules still win (Plan keeps its rules, and
   Explore still denies GitHub tools), then your top-level `permissions` rules, then saved approvals.
 - MCP tool permissions use the tool name as the action and `*` as the resource, so rules cannot target a repository.
@@ -481,6 +485,10 @@ Ask before every GitHub MCP tool, reads included:
 ```json
 { "permissions": [{ "action": "github_*", "resource": "*", "effect": "ask" }] }
 ```
+
+Under this rule `github_events_list` asks, and once approved its inner reads fail with `PERMISSION_DENIED`, because
+they run unattended and cannot ask; add `{ "action": "github_api", "resource": "GET *", "effect": "allow" }` after it to
+avoid that (it also lets `github_api` GETs run without asking).
 
 `github_api` asserts every request on its own resource, reads included, and the block allows its reads (`GET *`,
 `HEAD *`, `POST /markdown`, `POST /markdown/raw` and `QUERY /graphql`) at every access value. To stop a read, deny it
