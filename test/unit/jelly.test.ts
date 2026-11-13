@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest"
 import { defaultRules } from "../../src/permissions.js"
 import { loadOptions } from "../../src/config.js"
 import { ENTERPRISE_INTEGRATION_ID, ENTERPRISE_NAME } from "../../src/enterprise.js"
-import { SERVER_NAME } from "../../src/rpc.js"
+import { ACCESS, SERVER_NAME } from "../../src/rpc.js"
 import { API_TOOL_NAME, HIDDEN, KNOWN_TOOLS, TOOL_PREFIX } from "../../src/tools.js"
 import { type Declaration, type DeclaredTool, declarationProblems, docProblems, effectFromRules, readPackage } from "../support/jelly-kit.js"
+import { ACCESS_CHOICES, type PluginSetting, settingChoices, settingsProblems, settingValueIssue } from "../support/jelly-settings.js"
 
 /**
  * The `jelly` section of package.json, which Jelly reads without loading the plugin. Jelly's agents have no base
@@ -15,7 +16,7 @@ import { type Declaration, type DeclaredTool, declarationProblems, docProblems, 
 
 const ROOT = new URL("../../", import.meta.url)
 const manifest = readPackage(ROOT)
-const jelly = manifest.jelly as Declaration & { rpc: unknown[]; views: unknown[]; contributes: Record<string, unknown[]>; tools: DeclaredTool[] }
+const jelly = manifest.jelly as Declaration & { rpc: unknown[]; views: unknown[]; contributes: Record<string, unknown[]> & { settings: PluginSetting[] }; tools: DeclaredTool[] }
 
 describe("the jelly declaration", () => {
   it("follows the plugin authors' standard, with the effects the plugin's own default rules give", () => {
@@ -59,6 +60,30 @@ describe("the jelly declaration", () => {
       expect(entry.default).toBe(defaults[entry.key])
     }
     expect(loadOptions({ access: "read-only", unknownTools: "hide", lockdown: true })).toMatchObject({ access: "read-only", unknownTools: "hide", lockdown: true })
+  })
+
+  it("the settings follow Jelly's rules for a declared setting", () => {
+    expect(settingsProblems(jelly.contributes.settings)).toEqual([])
+  })
+
+  it("access declares Jelly's own words for its three values, and unknownTools its two", () => {
+    const setting = (key: string) => jelly.contributes.settings.find((entry) => entry.key === key)!
+    expect(setting("access").choices).toEqual(ACCESS_CHOICES)
+    expect((settingChoices(setting("unknownTools")) ?? []).map((choice) => choice.value)).toEqual(["ask", "hide"])
+    expect(settingChoices(setting("lockdown"))).toBeUndefined()
+  })
+
+  it("the options parser takes every value of each declared closed set, and refuses a value outside it", () => {
+    const sets = jelly.contributes.settings.filter((entry) => settingChoices(entry) !== undefined)
+    expect(sets.map((entry) => entry.key)).toEqual(["access", "unknownTools"])
+    expect((settingChoices(sets[0]!) ?? []).map((choice) => choice.value)).toEqual([...ACCESS])
+    for (const entry of sets) {
+      const key = entry.key as "access" | "unknownTools"
+      for (const { value } of settingChoices(entry) ?? []) expect<string>(loadOptions({ [key]: value })[key]).toBe(value)
+      expect<string>(loadOptions({})[key]).toBe(entry.default as string)
+      expect(settingValueIssue(entry, "write")).not.toBeNull()
+      expect(() => loadOptions({ [key]: "write" })).toThrow(/OPTIONS_INVALID|Invalid plugin option/)
+    }
   })
 })
 
