@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { type Fetch, fetchLogin, pollAccessToken, requestDeviceCode } from "../../src/device-flow.js"
+import { type Fetch, REFRESH_TIMEOUT_MS, fetchInstallationCount, fetchLogin, pollAccessToken, refreshAccessToken, requestDeviceCode } from "../../src/device-flow.js"
 
 const TOKEN = "gho_" + "S".repeat(36)
 const DEVICE_CODE = "device-code-secret"
@@ -262,5 +262,71 @@ describe("fetchLogin", () => {
     const controller = new AbortController()
     controller.abort(new Error("stopped"))
     await expect(fetchLogin(TOKEN, { fetch: fakeFetch([json({ login: "octocat" })]).fetch, signal: controller.signal })).rejects.toThrow("stopped")
+  })
+})
+
+describe("refreshing a GitHub App's user token", () => {
+  const REFRESH = "ghr_" + "R".repeat(40)
+  const NEW_REFRESH = "ghr_" + "N".repeat(40)
+  const NEW_TOKEN = "ghu_" + "U".repeat(36)
+
+  it("exchanges the refresh token for a new pair, with no client secret", async () => {
+    const { fetch, calls } = fakeFetch([
+      json({ access_token: NEW_TOKEN, expires_in: 28800, refresh_token: NEW_REFRESH, refresh_token_expires_in: 15897600, scope: "", token_type: "bearer" }),
+    ])
+    await expect(refreshAccessToken({ clientId: "Iv23.client", refreshToken: REFRESH, service: "GitHub", fetch })).resolves.toEqual({
+      accessToken: NEW_TOKEN,
+      scope: "",
+      refreshToken: NEW_REFRESH,
+      expiresIn: 28800,
+      refreshTokenExpiresIn: 15897600,
+    })
+    expect(calls[0]?.url).toBe("https://github.com/login/oauth/access_token")
+    expect(Object.fromEntries(calls[0]!.form!)).toEqual({ client_id: "Iv23.client", grant_type: "refresh_token", refresh_token: REFRESH })
+    expect(new Headers(calls[0]?.init.headers).get("accept")).toBe("application/json")
+  })
+
+  it("asks for a new sign-in when GitHub refuses the refresh token, and never shows it", async () => {
+    const { fetch } = fakeFetch([json({ error: "bad_refresh_token", error_description: "The refresh token passed is incorrect or expired." })])
+    const message = await messageOf(refreshAccessToken({ clientId: "Iv23.client", refreshToken: REFRESH, service: "GitHub", fetch }))
+    expect(message).toBe("SIGN_IN_REJECTED: GitHub rejected the saved sign-in. Next step: Run /connect and choose GitHub to sign in again.")
+    expect(message).not.toContain(REFRESH)
+  })
+
+  it("gives up on a GitHub that does not answer within its own limit, well inside OpenCode's 30 seconds", async () => {
+    expect(REFRESH_TIMEOUT_MS).toBeLessThanOrEqual(10_000)
+    const hanging: Fetch = (_url, init) =>
+      new Promise((_resolve, reject) => init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true }))
+    const started = Date.now()
+    const message = await messageOf(refreshAccessToken({ clientId: "c", refreshToken: REFRESH, service: "GitHub", fetch: hanging, timeoutMs: 50 }))
+    expect(message).toMatch(/^REFRESH_UNREACHABLE: /)
+    expect(Date.now() - started).toBeLessThan(5_000)
+  })
+
+  it("asks to try again, not to sign in again, when GitHub cannot be reached or fails", async () => {
+    const unreachable = fakeFetch([new TypeError("fetch failed")])
+    expect(await messageOf(refreshAccessToken({ clientId: "c", refreshToken: REFRESH, service: "GitHub", fetch: unreachable.fetch }))).toMatch(/^REFRESH_UNREACHABLE: /)
+    const failing = fakeFetch([new Response("<html>", { status: 502 })])
+    expect(await messageOf(refreshAccessToken({ clientId: "c", refreshToken: REFRESH, service: "GitHub", fetch: failing.fetch }))).toMatch(/^REFRESH_FAILED: /)
+  })
+})
+
+describe("the device code request", () => {
+  it("sends the scopes, and no scope at all when the list is empty", async () => {
+    const answer = () => json({ device_code: "d", user_code: "ABCD-EFGH", verification_uri: "https://github.com/login/device" })
+    const { fetch, calls } = fakeFetch([answer(), answer()])
+    await requestDeviceCode({ clientId: "Ov23.client", scopes: ["repo", "read:org"], fetch })
+    await requestDeviceCode({ clientId: "Iv23.client", scopes: [], fetch })
+    expect(Object.fromEntries(calls[0]!.form!)).toEqual({ client_id: "Ov23.client", scope: "repo read:org" })
+    expect(Object.fromEntries(calls[1]!.form!)).toEqual({ client_id: "Iv23.client" })
+  })
+})
+
+describe("installation count", () => {
+  it("reads total_count, and is undefined when GitHub does not say", async () => {
+    const { fetch, calls } = fakeFetch([json({ total_count: 0, installations: [] }), json({ message: "Forbidden" }, 403)])
+    expect(await fetchInstallationCount("ghu_x", { fetch })).toBe(0)
+    expect(calls[0]?.url).toBe("https://api.github.com/user/installations?per_page=1")
+    expect(await fetchInstallationCount("ghu_x", { fetch })).toBeUndefined()
   })
 })

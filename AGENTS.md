@@ -71,8 +71,12 @@ When you add a rule here, add it to the scan and its self-test too.
 - With `host` (GitHub Enterprise Server) no MCP server is registered: sign-in lives on the plugin's own
   `github-enterprise` integration and `github_api` is the tool.
 - A server named `github` that the user configured is left alone: no headers, no sign-in methods, status `conflict`.
-- Sign-in methods attach to the `github` server's integration. No client secret, no refresh hook. No OAuth App client
-  ID ships: token sign-in always, device sign-in only when the user or an organisation sets `clientId`.
+- Sign-in methods attach to the `github` server's integration. No client secret. No OAuth App or GitHub App client ID
+  ships: token sign-in always, device sign-in only when the user or an organisation sets `clientId`, which may name an
+  OAuth App or a GitHub App. Only the device method registers `refresh`: it renews a GitHub App's expiring token with
+  its refresh token and returns every other credential unchanged, without a request (OpenCode calls it for
+  `expires: 0` too). Tell a GitHub App from an OAuth App by the token GitHub returns (`ghu_` or `gho_`, then an empty
+  `scope`), never by the client ID.
 - The plugin's own errors are `GitHubPluginError(code, message, nextStep)`. Errors from OpenCode and GitHub pass
   through unchanged. No error, log or output contains a token, a device code or raw upstream content.
 - `dist/` holds exactly two self-contained bundles, `index.js` and `tui.js` (esbuild, no splitting, no chunks, no

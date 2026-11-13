@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
-import { loadOptions } from "../../src/config.js"
+import { GITHUB_COM, loadOptions } from "../../src/config.js"
 import { type Rule, defaultRules, insertDefaults } from "../../src/permissions.js"
 import { STATES, formatStatus, isStatus } from "../../src/rpc.js"
 import { PLUGIN_VERSION } from "../../src/version.js"
@@ -17,7 +17,7 @@ const BASE: Rule = { action: "*", resource: "*", effect: "allow" }
 const OWN = "/pkg/skills/github-pr-review/SKILL.md"
 
 function fakeCtx(
-  input: { server?: ServerStatus; label?: string; agents?: Array<{ id: string; permissions: Rule[] }>; fail?: boolean; skills?: Array<{ id: string; path: string }> | "fail" } = {},
+  input: { server?: ServerStatus; label?: string; metadata?: Record<string, unknown>; agents?: Array<{ id: string; permissions: Rule[] }>; fail?: boolean; skills?: Array<{ id: string; path: string }> | "fail" } = {},
 ) {
   const calls = { list: 0, synthetic: [] as unknown[] }
   const registered: { commands: Array<Record<string, any>>; rpc?: { definition: any; handlers: any } } = { commands: [] }
@@ -46,6 +46,7 @@ function fakeCtx(
       connection: {
         active: async (integrationID: string) =>
           integrationID === ID && input.label ? { type: "credential" as const, id: "cred_1", label: input.label, method: "oauth" as const } : undefined,
+        resolve: async () => ({ type: "oauth" as const, methodID: "github-device", access: "x", refresh: "", expires: 0, ...(input.metadata ? { metadata: input.metadata } : {}) }),
       },
     },
     command: { transform: async (callback: (editor: any) => void) => (callback({ add: (command: any) => registered.commands.push(command) }), { dispose: async () => {} }) },
@@ -68,6 +69,7 @@ function fakeCtx(
 function deps(overrides: Partial<StatusDeps> = {}): StatusDeps {
   return {
     options: loadOptions({}),
+    endpoints: GITHUB_COM,
     conflict: () => false,
     integrationID: () => ID,
     tools: () => ({ visible: 26, unknown: [] }),
@@ -78,6 +80,28 @@ function deps(overrides: Partial<StatusDeps> = {}): StatusDeps {
 }
 
 describe("computeStatus", () => {
+  it("says while a GitHub App sign-in reaches no installation, with the install link, asking GitHub again each time", async () => {
+    let live = 0
+    const seen: string[] = []
+    const fetch = async (url: string) => (seen.push(url), Response.json({ total_count: live }))
+    const note = (installations: number, appSlug?: string) =>
+      computeStatus(
+        fakeCtx({ server: "connected", label: "octocat", metadata: { login: "octocat", githubApp: true, installations } }).ctx,
+        deps({ options: loadOptions(appSlug ? { appSlug } : {}), fetch }),
+      )
+    const none = await note(0, "jelly-dev")
+    expect(none.account).toBe("octocat")
+    expect(none.nextStep).toBe(
+      "The GitHub App is not installed on any account this sign-in reaches, so it sees no repositories. Install it at https://github.com/apps/jelly-dev/installations/new.",
+    )
+    expect((await note(0)).nextStep).toContain("Install the GitHub App on that account or organization.")
+    expect((await note(2, "jelly-dev")).nextStep).toBe("Nothing to do.")
+    expect(seen).toEqual(["https://api.github.com/user/installations?per_page=1", "https://api.github.com/user/installations?per_page=1"])
+    // Installed after sign-in: the sign-in still records none, and the status asks GitHub again.
+    live = 1
+    expect((await note(0, "jelly-dev")).nextStep).toBe("Nothing to do.")
+  })
+
   it.each([
     ["connected", { server: "connected", label: "octocat" }, {}, "Nothing to do."],
     ["sign_in_required", { server: "needs_auth" }, {}, "Run /connect and choose GitHub."],

@@ -25,7 +25,9 @@ interface Catalogue {
 }
 
 function startMock() {
-  let captured = ""
+  // Every chat request's system prompt. The host also asks the model for a session title, in its own request and in
+  // either order, so the catalogue is read from the request whose system prompt holds it, never the last one.
+  const prompts: string[] = []
   const chunk = (delta: Record<string, unknown>, finish: string | null = null) =>
     `data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", created: 0, model: "m1", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`
   const server = Bun.serve({
@@ -37,7 +39,7 @@ function startMock() {
       if (url.pathname.endsWith("/models")) return Response.json({ object: "list", data: [{ id: "m1", object: "model", owned_by: "mock" }] })
       if (!url.pathname.endsWith("/chat/completions")) return new Response("not found", { status: 404 })
       const body = await request.json() as { messages?: { role: string; content?: unknown }[] }
-      captured = (body.messages ?? []).filter(message => message.role === "system").map(message => typeof message.content === "string" ? message.content : "").join("\n\n")
+      prompts.push((body.messages ?? []).filter(message => message.role === "system").map(message => typeof message.content === "string" ? message.content : "").join("\n\n"))
       return new Response(new ReadableStream({
         start(controller) {
           const send = (line: string) => controller.enqueue(new TextEncoder().encode(line))
@@ -50,13 +52,21 @@ function startMock() {
       }), { headers: { "content-type": "text/event-stream" } })
     },
   })
-  return { baseURL: `http://127.0.0.1:${server.port}/v1`, stop: () => void server.stop(true), text: () => captured }
+  return {
+    baseURL: `http://127.0.0.1:${server.port}/v1`,
+    stop: () => void server.stop(true),
+    /** The system prompt that holds the Code Mode catalogue, or every prompt received when none does, for the failure message. */
+    text: () => prompts.find(prompt => prompt.includes(CATALOGUE)) ?? prompts.join("\n\n----\n\n"),
+  }
 }
+
+/** The Code Mode catalogue's line for GitHub, which only the main request's system prompt carries. */
+const CATALOGUE = "- github ("
 
 /** The github section of a system prompt: its header line and the indented lines under it. */
 function githubSection(prompt: string): string {
   const lines = prompt.split("\n")
-  const start = lines.findIndex(line => line.startsWith("- github ("))
+  const start = lines.findIndex(line => line.startsWith(CATALOGUE))
   const taken = start < 0 ? [] : [lines[start]!]
   for (let i = start + 1; i < lines.length && lines[i]!.startsWith("  "); i++) taken.push(lines[i]!)
   return taken.join("\n")
@@ -129,7 +139,7 @@ describe("the Code Mode catalogue", () => {
       const session = await host.session.create({ location, agent: "build" })
       await host.session.prompt({ sessionID: session.id, text: "Reply with ok." })
       const deadline = Date.now() + 30_000
-      while (!mock.text().includes("- github (") && Date.now() < deadline) await Bun.sleep(50)
+      while (!mock.text().includes(CATALOGUE) && Date.now() < deadline) await Bun.sleep(50)
       return { text: githubSection(mock.text()), prompt: mock.text() }
     } finally {
       router.target = undefined

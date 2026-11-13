@@ -102,10 +102,18 @@ const OptionsSchema = z.strictObject({
   readOnly: z.boolean().optional(),
   lockdown: z.boolean().default(false),
   unknownTools: z.enum(["ask", "hide"]).default("ask"),
-  /** An OAuth App for device sign-in, set by the user or an organisation; without it only token sign-in is offered. */
+  /**
+   * An OAuth App or a GitHub App for device sign-in, set by the user or an organisation; without it only token sign-in
+   * is offered.
+   */
   clientId: z
     .string()
-    .regex(/^[A-Za-z0-9._-]{1,100}$/, "use the OAuth App's client ID (letters, digits, '.', '_' or '-')")
+    .regex(/^[A-Za-z0-9._-]{1,100}$/, "use the app's client ID (letters, digits, '.', '_' or '-')")
+    .optional(),
+  /** The GitHub App's URL name (github.com/apps/<appSlug>), for the link that installs it. */
+  appSlug: z
+    .string()
+    .regex(/^[a-z0-9]([a-z0-9-]{0,98}[a-z0-9])?$/, "use the GitHub App's URL name, as in github.com/apps/<name>")
     .optional(),
   scopes: z
     .array(z.string().regex(/^[a-z][a-z0-9_:.-]{0,63}$/, "use a GitHub OAuth scope name such as repo or read:org"))

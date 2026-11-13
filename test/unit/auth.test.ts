@@ -245,11 +245,11 @@ describe("integration discovery", () => {
     await auth.dispose()
   })
 
-  it("registers no refresh hook and labels accounts with the GitHub login", async () => {
+  it("registers a refresh hook only on device sign-in and labels accounts with the GitHub login", async () => {
     const { host, auth } = await signedOutHost()
     for (const id of [DEVICE_METHOD_ID, TOKEN_METHOD_ID]) {
       const method = host.implementation(id)
-      expect("refresh" in method).toBe(false)
+      expect("refresh" in method).toBe(id === DEVICE_METHOD_ID)
       const credential: Credential = { type: "oauth", methodID: id as Credential["methodID"], access: "x", refresh: "", expires: 0 }
       expect(method.label?.({ ...credential, metadata: { login: "octocat" } })).toBe("octocat")
       expect(method.label?.(credential)).toBeUndefined()
@@ -520,6 +520,107 @@ describe("device sign-in", () => {
     )
     await method.authorize({})
     expect(await firstOutcome).toBe("rejected")
+    await auth.dispose()
+  })
+})
+
+describe("GitHub App device sign-in", () => {
+  const APP_TOKEN = "ghu_" + "A".repeat(36)
+  const REFRESH = "ghr_" + "R".repeat(40)
+  const NEW_TOKEN = "ghu_" + "B".repeat(36)
+  const NEW_REFRESH = "ghr_" + "S".repeat(40)
+  const OAUTH_URL = "https://github.com/login/oauth/access_token"
+  const INSTALLATIONS_URL = "https://api.github.com/user/installations?per_page=1"
+  // What OpenCode does before it uses a credential: renew it through the method's refresh when it expires within five minutes.
+  const resolve = async (host: ReturnType<typeof fakeHost>, credential: Credential) =>
+    credential.expires <= Date.now() + 5 * 60_000 ? await host.implementation(DEVICE_METHOD_ID).refresh!(credential) : credential
+
+  async function appSignIn(host: ReturnType<typeof fakeHost>, installations: number) {
+    const calls = stubFetch({
+      "https://github.com/login/device/code": () =>
+        json({ device_code: "device-code", user_code: "WDJB-MJHT", verification_uri: "https://github.com/login/device", expires_in: 900, interval: 5 }),
+      [OAUTH_URL]: [
+        () => json({ access_token: APP_TOKEN, expires_in: 1, refresh_token: REFRESH, refresh_token_expires_in: 15897600, scope: "", token_type: "bearer" }),
+        (init) => {
+          const form = Object.fromEntries(new URLSearchParams(String(init.body)))
+          return form.refresh_token === REFRESH
+            ? json({ access_token: NEW_TOKEN, expires_in: 28800, refresh_token: NEW_REFRESH, refresh_token_expires_in: 15897600, scope: "", token_type: "bearer" })
+            : json({ error: "bad_refresh_token" })
+        },
+        () => json({ error: "bad_refresh_token" }),
+      ],
+      "https://api.github.com/user": () => json({ login: "octocat" }),
+      [INSTALLATIONS_URL]: [() => json({ total_count: installations }), () => json({ total_count: 1 })],
+    })
+    const authorization = await host.implementation(DEVICE_METHOD_ID).authorize({})
+    if (authorization.mode !== "auto") throw new Error("expected auto mode")
+    await vi.advanceTimersByTimeAsync(5_000)
+    return { credential: await authorization.callback, calls }
+  }
+
+  it("renews an expiring token once with the refresh token, with no client secret, and keeps the new refresh token", async () => {
+    const { host, auth } = await signedOutHost()
+    const { credential, calls } = await appSignIn(host, 1)
+    const signedInAt = Date.now()
+    expect(credential).toMatchObject({ access: APP_TOKEN, refresh: REFRESH, expires: signedInAt + 1000, metadata: { login: "octocat", githubApp: true, installations: 1 } })
+    expect(host.implementation(DEVICE_METHOD_ID).label?.(credential)).toBe("octocat")
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    const renewed = await resolve(host, credential)
+    expect(renewed).toMatchObject({ methodID: DEVICE_METHOD_ID, access: NEW_TOKEN, refresh: NEW_REFRESH, expires: Date.now() + 28_800_000, metadata: { login: "octocat", githubApp: true } })
+    const refreshes = calls.filter((call) => call.url === OAUTH_URL).slice(1)
+    expect(refreshes).toHaveLength(1)
+    expect(Object.fromEntries(new URLSearchParams(String(refreshes[0]?.init.body)))).toEqual({ client_id: "Iv1.client", grant_type: "refresh_token", refresh_token: REFRESH })
+    // A fresh token is not renewed again.
+    expect(await resolve(host, renewed)).toBe(renewed)
+    expect(calls.filter((call) => call.url === OAUTH_URL)).toHaveLength(2)
+    await auth.dispose()
+  })
+
+  it("asks for a new sign-in when GitHub refuses the refresh token, or it is older than six months", async () => {
+    const { host, auth } = await signedOutHost()
+    const { credential } = await appSignIn(host, 1)
+    const stale = { ...credential, refresh: "ghr_" + "X".repeat(40) }
+    await expect(resolve(host, stale)).rejects.toThrow("SIGN_IN_REJECTED: GitHub rejected the saved sign-in. Next step: Run /connect and choose GitHub to sign in again.")
+    const old = { ...credential, metadata: { ...credential.metadata, refreshExpires: Date.now() - 1 } }
+    await expect(resolve(host, old)).rejects.toThrow(/^SIGN_IN_REJECTED: /)
+    await auth.dispose()
+  })
+
+  it("labels the account with the login alone, since OpenCode never updates a label, and records no installation", async () => {
+    const host = fakeHost()
+    host.registerServer()
+    const auth = await registerAuth(host.ctx, { ...INPUT, appSlug: "jelly-dev" })
+    await vi.advanceTimersByTimeAsync(0)
+    const { credential } = await appSignIn(host, 0)
+    expect(credential.metadata).toMatchObject({ installations: 0 })
+    expect(host.implementation(DEVICE_METHOD_ID).label?.(credential)).toBe("octocat")
+    await auth.dispose()
+  })
+
+  it("returns the rotated pair without waiting for an installation count that never answers", async () => {
+    const { host, auth } = await signedOutHost()
+    const { credential, calls } = await appSignIn(host, 0)
+    await vi.advanceTimersByTimeAsync(2_000)
+    // From now on the installation count would hang: the renewal must not touch it.
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      calls.push({ url, init })
+      if (url === OAUTH_URL) return json({ access_token: NEW_TOKEN, expires_in: 28800, refresh_token: NEW_REFRESH, scope: "", token_type: "bearer" })
+      return new Promise<Response>(() => undefined)
+    })
+    const renewed = await resolve(host, credential)
+    expect(renewed).toMatchObject({ access: NEW_TOKEN, refresh: NEW_REFRESH, metadata: { installations: 0 } })
+    expect(calls.map((call) => call.url).filter((url) => url === INSTALLATIONS_URL)).toHaveLength(1)
+    await auth.dispose()
+  })
+
+  it("returns an OAuth App's credential unchanged, with no request, though OpenCode treats expires 0 as expiring", async () => {
+    const { host, auth } = await signedOutHost()
+    const calls = stubFetch({})
+    const classic: Credential = { type: "oauth", methodID: DEVICE_METHOD_ID as Credential["methodID"], access: DEVICE_TOKEN, refresh: "", expires: 0, metadata: { tokenType: "Bearer", scope: "repo,read:org", login: "octocat" } }
+    expect(await resolve(host, classic)).toBe(classic)
+    expect(calls).toHaveLength(0)
+    expect(host.implementation(TOKEN_METHOD_ID).refresh).toBeUndefined()
     await auth.dispose()
   })
 })

@@ -6,6 +6,7 @@ import * as z from "zod"
 import { ApiInput, ApiOutput } from "../../src/api/contract.js"
 import { API_ACTION, type ApiDeps, apiDescription, namespaceDescription, parseInput, registerApiTool } from "../../src/api/tool.js"
 import { DEFAULT_TOOLSETS, GITHUB_COM, type Toolset } from "../../src/config.js"
+import { signInAgain } from "../../src/device-flow.js"
 
 type Ctx = Parameters<typeof registerApiTool>[0]
 const ID = "mcp_0123456789abcdef"
@@ -18,7 +19,7 @@ beforeEach(() => {
 })
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
-function setUp(input: { readOnly?: boolean; enterprise?: boolean; toolsets?: readonly Toolset[]; signedIn?: boolean; decline?: boolean | ((resource: string) => boolean); status?: number; answers?: Record<string, () => Response> } = {}) {
+function setUp(input: { readOnly?: boolean; enterprise?: boolean; toolsets?: readonly Toolset[]; signedIn?: boolean; decline?: boolean | ((resource: string) => boolean); status?: number; answers?: Record<string, () => Response>; resolve?: () => Promise<unknown> } = {}) {
   const asserts: Array<Record<string, unknown>> = []
   const statuses: unknown[] = []
   const requests: Array<{ url: string; method: string }> = []
@@ -45,7 +46,7 @@ function setUp(input: { readOnly?: boolean; enterprise?: boolean; toolsets?: rea
       connection: {
         active: async () =>
           input.signedIn === false ? undefined : { type: "credential", id: "cred_1", label: "octocat", method: "oauth" },
-        resolve: async () => ({ type: "oauth", methodID: "github-token", access: TOKEN, refresh: "", expires: 0 }),
+        resolve: input.resolve ?? (async () => ({ type: "oauth", methodID: "github-token", access: TOKEN, refresh: "", expires: 0 })),
         status: async (value: { status: unknown }) => {
           statuses.push(value.status)
           reported = value.status
@@ -333,6 +334,20 @@ describe("github_api", () => {
     await api.run({ method: "GET", path: "/user" })
     await api.run({ method: "GET", path: "/user" })
     expect(api.statuses).toEqual([{ status: "needs_auth", message: "GitHub rejected the saved sign-in. Sign in again." }, undefined])
+  })
+
+  it("asks for a new sign-in when OpenCode's renewal of a GitHub App token fails with a refused refresh token", async () => {
+    // OpenCode may wrap the refresh hook's error; the plugin's own error is found in the cause chain.
+    const refused = new Error("refresh failed", { cause: signInAgain("GitHub") })
+    const api = setUp({ resolve: async () => Promise.reject(refused) })
+    await expect(message(api.run({ method: "GET", path: "/user" }))).resolves.toBe(
+      "SIGN_IN_REJECTED: GitHub rejected the saved sign-in. Next step: Run /connect and choose GitHub to sign in again.",
+    )
+    expect(api.statuses).toEqual([{ status: "needs_auth", message: "GitHub rejected the saved sign-in. Sign in again." }])
+    expect(api.requests).toEqual([])
+    const other = setUp({ resolve: async () => Promise.reject(new Error("database is locked")) })
+    await expect(message(other.run({ method: "GET", path: "/user" }))).resolves.toMatch(/^SIGN_IN_UNAVAILABLE: OpenCode could not load the GitHub sign-in\./)
+    expect(other.statuses).toEqual([])
   })
 
   it("marks the account for sign-in on a 401, and never shows the token", async () => {

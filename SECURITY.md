@@ -19,8 +19,9 @@ The plugin's own code connects only to these GitHub endpoints:
 | Endpoint | Used for |
 | --- | --- |
 | `https://api.githubcopilot.com/mcp/` | GitHub's MCP server. OpenCode's MCP client makes these requests. |
-| `https://github.com/login/device/code` and `https://github.com/login/oauth/access_token` | Device sign-in, only when `clientId` is set. |
+| `https://github.com/login/device/code` and `https://github.com/login/oauth/access_token` | Device sign-in, only when `clientId` is set, and renewing a GitHub App's expiring token with its refresh token. |
 | `https://api.github.com/user` | Checking a credential and reading its GitHub login. |
+| `https://api.github.com/user/installations` | After a GitHub App device sign-in, and from `/github-status` while it had none: how many installations the token reaches. |
 | `https://<host>/login/…`, `https://<host>/api/v3`, `/api/graphql` and `/api/uploads` | Only with the `host` option: sign-in and `github_api` on your GitHub Enterprise Server, instead of the github.com endpoints. |
 | `https://api.github.com` and `https://uploads.github.com` | The `github_api` tool. It refuses any other host. A download follows GitHub's redirects to its file storage (logs, artifacts, release assets) without the token; other calls never leave the API. |
 
@@ -33,18 +34,21 @@ service.
   server as a Bearer token. The plugin keeps no copy and writes nothing to disk.
 - The plugin never logs a token, a device code or a raw GitHub response, and its error messages contain none of
   them. `github_api` sends the token only to GitHub's API and uploads hosts, never on a redirect to another host.
-- No client secret or OAuth App client ID ships. Device sign-in is offered only when `clientId` names an OAuth App,
-  and needs only its public client ID.
+- No client secret or app client ID ships. Device sign-in is offered only when `clientId` names an OAuth App or a
+  GitHub App, and needs only its public client ID. A GitHub App's refresh token is stored with the credential by
+  OpenCode, sent only to `login/oauth/access_token` to renew it, and replaced by the new one each time.
 - When you paste a token into `opencode auth login` on OpenCode 2.2.3, the terminal shows it as you type. Clear the
   screen afterwards if others can see it.
 - To revoke access, sign out in OpenCode (`opencode auth logout GitHub <login>`, with your GitHub login), then revoke
-  the app under **GitHub Settings → Applications → Authorized OAuth Apps**, or delete the token under **Developer
+  the app under **GitHub Settings → Applications → Authorized OAuth Apps** (or **Authorized GitHub Apps**), or delete the token under **Developer
   settings → Personal access tokens**.
 
 ### Scopes and least privilege
 
-- Device sign-in (with `clientId`) asks for `repo` and `read:org`. Classic OAuth scopes cannot be read-only: `repo` grants read and
+- Device sign-in with an OAuth App asks for `repo` and `read:org`. Classic OAuth scopes cannot be read-only: `repo` grants read and
   write access to every repository your account can reach.
+- Device sign-in with a GitHub App gets only the permissions the App has, only where it is installed, and only what
+  your account can reach too. Its token expires after 8 hours.
 - `access: "read-only"` limits which tools GitHub offers. It does not limit what the token can do.
 - A fine-grained personal access token is the least-privilege choice. It reaches only the repositories you select,
   with only the permissions you grant, and GitHub enforces both. Use read-only permissions unless you need writes.

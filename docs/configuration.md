@@ -34,8 +34,9 @@ OPTIONS_INVALID: Invalid plugin option "toolset": this option does not exist. Ne
 | `readOnly` | none | Deprecated: `true` means `access: "read-only"` and `false` means `access: "all"`, with a note in status. An explicit `access` wins. |
 | `lockdown` | `false` | With `true`, sends GitHub's `X-MCP-Lockdown: true` header. See [`lockdown`](#lockdown). |
 | `unknownTools` | `"ask"` | `"ask"` keeps GitHub tools the plugin does not know visible, so the default block's `github_*` rule decides them (allowed at the default `access`). `"hide"` removes them. See [`unknownTools`](#unknowntools). |
-| `clientId` | none (token sign-in only) | A GitHub OAuth App for device sign-in; with it `/connect` also offers **Sign in with GitHub**. Letters, digits, `.`, `_` and `-`, up to 100 characters. See [`clientId` and `scopes`](#clientid-and-scopes). |
-| `scopes` | `["repo", "read:org"]` | Scopes that device sign-in asks for, each once. Tokens are not affected. |
+| `clientId` | none (token sign-in only) | A GitHub OAuth App or GitHub App for device sign-in; with it `/connect` also offers **Sign in with GitHub**. Letters, digits, `.`, `_` and `-`, up to 100 characters. See [`clientId` and `scopes`](#clientid-and-scopes). |
+| `appSlug` | none | The GitHub App's URL name (`github.com/apps/<appSlug>`), for the link that installs it. Lower-case letters, digits and `-`. See [A GitHub App](#a-github-app). |
+| `scopes` | `["repo", "read:org"]` | Scopes that device sign-in with an OAuth App asks for, each once; `[]` sends none. A GitHub App ignores them. Tokens are not affected. |
 | `allowUntestedHost` | `false` | Load on an OpenCode release outside the supported range `>=2.2.3 <2.3.0`, with a warning in the status. See [`allowUntestedHost`](#allowuntestedhost). |
 | `host` | none (github.com) | A GitHub Enterprise Server host name, such as `github.example.com`. See [`host`](#host-github-enterprise-server). |
 
@@ -696,6 +697,36 @@ are requested at sign-in; they are not part of the app.
 An organisation can set `clientId` and `scopes` for everyone on a machine; see
 [Organisation rollout](../README.md#organisation-rollout).
 
+### A GitHub App
+
+`clientId` can name a GitHub App instead (its client ID, not its app ID). GitHub Apps use the same device flow, so
+the plugin cannot tell the two apart until GitHub returns the token: a GitHub App's user token starts with `ghu_` and
+comes with an empty `scope`, an OAuth App's starts with `gho_`. The device code request still carries `scopes`; a
+GitHub App ignores them (its only scope is `offline_access`), and `scopes: []` leaves the parameter out.
+
+Register it under **GitHub Settings → Developer settings → GitHub Apps → New GitHub App**, tick **Enable Device
+Flow**, give it read-only repository permissions for what the toolsets read, and keep **Expire user authorization
+tokens** on. Then:
+
+- **Renewal.** The user token expires after 8 hours. OpenCode asks the plugin to renew it shortly before; the plugin
+  sends the refresh token to `login/oauth/access_token` (no client secret: GitHub needs none for a token the device
+  flow made) and stores the new token and the new refresh token, which replaces the old one. When GitHub refuses the
+  refresh token (revoked, already used, or older than six months), the next call fails with `SIGN_IN_REJECTED` and
+  `/connect` asks for a new sign-in.
+- **Installations.** The token reaches only repositories where the App is installed. After sign-in the plugin asks
+  GitHub how many installations it reaches; with none, `/github-status`'s next step says so, with the install link
+  when `appSlug` is set, and asks GitHub again each time until the App is installed. The `/connect` label is the login
+  alone, because OpenCode sets it only at sign-in.
+- **Renewal limits.** The renewal is one request with its own 10-second limit, well inside the 30 seconds OpenCode
+  allows, so a slow GitHub fails it cleanly (`REFRESH_UNREACHABLE`; the next call tries again) instead of being cut off.
+- **Permissions.** A call the App has no permission for, or makes on an account it is not installed on, fails with
+  "Resource not accessible by integration". `github_api`'s next step names the permission GitHub asked for and the
+  account, and links the install page.
+
+```json
+{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.0", "options": { "clientId": "<the GitHub App's client ID>", "appSlug": "<its URL name>" } }] }
+```
+
 ## `host` (GitHub Enterprise Server)
 
 GitHub's hosted MCP server does not support GitHub Enterprise Server. With `host` set:
@@ -755,6 +786,10 @@ passed through unchanged.
 | `SIGN_IN_CODE_UNKNOWN` | GitHub did not recognise the device code. | Start the sign-in again. |
 | `SIGN_IN_FAILED` | GitHub ended the device sign-in with another error, named in the message. | Start the sign-in again. |
 | `SIGN_IN_UNREACHABLE` | github.com could not be reached. | Check your network, then start the sign-in again. |
+| `SIGN_IN_REJECTED` | GitHub refused to renew a GitHub App sign-in: its refresh token was revoked, already used, or is older than six months. | Run /connect and choose GitHub to sign in again. |
+| `SIGN_IN_UNAVAILABLE` | OpenCode could not load the saved sign-in for `github_api`. | Try again; if it keeps failing, run /connect and choose GitHub to sign in again. |
+| `REFRESH_UNREACHABLE` | github.com could not be reached to renew a GitHub App sign-in. | Check your network, then try again. |
+| `REFRESH_FAILED` | GitHub could not renew a GitHub App sign-in right now. | Try again later. |
 | `SIGN_IN_UNEXPECTED_RESPONSE` | GitHub answered the device sign-in with something unexpected. | Start the sign-in again. |
 | `DEVICE_FLOW_DISABLED` | The OAuth App has Device Flow turned off. | Enable Device Flow in the app settings, or use a fine-grained personal access token. |
 | `CLIENT_ID_UNKNOWN` | GitHub does not know the `clientId`. | Check the plugin option clientId, or use a fine-grained personal access token. |
