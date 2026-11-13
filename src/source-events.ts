@@ -1,6 +1,7 @@
 // events_list for GitHub: what the signed-in person did or was involved in since a cursor, as Memory's events
 // (src/host/events-list.ts), oldest first, for Memory's collector and other scripts. It only reads: GET requests
-// through github_api's own spec, with the plugin's sign-in, and GitHub's get_me through OpenCode's executor.
+// through github_api's own spec, with the plugin's sign-in, and GitHub's get_me through OpenCode's executor. Each GET
+// asserts `github_api` on its own `GET /path` as the caller, unattended: it runs only under a prior allow rule.
 //
 // Three streams, each with its own position in the one cursor:
 // - issues and pull requests the person is involved in (`involves:`), from /search/issues sorted by update, oldest
@@ -345,13 +346,17 @@ export const EVENTS_OUTPUT = {
 export interface EventsDeps {
   readonly ctx: { readonly tool: Pick<Plugin.Context["tool"], "list">; readonly permission: Pick<Plugin.Context["permission"], "assert"> }
   /** github_api's spec, as `registerApiTool` returns it. */
-  readonly api: { run(input: ApiInput, call: Call, caller?: { readonly script?: boolean }): Promise<ApiOutput> }
+  readonly api: { run(input: ApiInput, call: Call): Promise<ApiOutput> }
   /** Whether the github server is the plugin's, so its get_me is GitHub's. */
   readonly managed: () => boolean
   readonly now?: () => number
 }
 
-/** The tool's and the method's one run: asserts github_events_list for the caller, then lists, with GETs only. */
+/**
+ * The tool's and the method's one run: asserts github_events_list for the caller, then lists, with GETs only. Each GET
+ * runs as an unattended call of github_api's spec, so it resolves and asserts `github_api` on its own `GET /path`
+ * before it is sent: a rule that asks or denies refuses it, and nothing is sent.
+ */
 export async function runEvents(deps: EventsDeps, input: unknown, call: Call): Promise<EventsListResult> {
   await deps.ctx.permission.assert({
     sessionID: call.sessionID as never,
@@ -362,7 +367,7 @@ export async function runEvents(deps: EventsDeps, input: unknown, call: Call): P
     metadata: {},
     source: { type: "tool", messageID: call.messageID as never, id: call.id as never },
   })
-  const get: Get = (path, query) => deps.api.run({ method: "GET", path, query }, call, { script: true })
+  const get: Get = (path, query) => deps.api.run({ method: "GET", path, query }, { ...call, script: true })
   const me: Me = async () => {
     const tool = deps.managed() ? (await deps.ctx.tool.list()).find((entry) => entry.id === `${SERVER_NAME}_get_me`) : undefined
     if (tool) {
