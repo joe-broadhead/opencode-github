@@ -390,7 +390,12 @@ describe(`a revoked sign-in on OpenCode ${SDK_VERSION}`, () => {
 describe(`GitHub Enterprise Server on OpenCode ${SDK_VERSION}`, () => {
   let host: Host
   beforeAll(async () => {
-    host = await startHost({ options: { host: "ghe.example.com", access: "all" } })
+    // jelly is an agent as Jelly writes one: no base allow (everything else asks) and an allow per declared tool, here
+    // github_events_list alone. The plugin's block never reaches it, so its github_api reads ask.
+    host = await startHost({
+      options: { host: "ghe.example.com", access: "all" },
+      config: () => ({ agents: { jelly: { description: "Collects for Memory", mode: "subagent", permissions: [{ action: "*", resource: "*", effect: "ask" }, allow("github_events_list")] } } }),
+    })
   })
   afterAll(() => host?.close())
 
@@ -427,14 +432,35 @@ describe(`GitHub Enterprise Server on OpenCode ${SDK_VERSION}`, () => {
     expect(host.fake.requests.slice(before).every((request) => request.method === "GET")).toBe(true)
   })
 
-  // events_list asserts each inner read: a session deny on the search paths stops it before any search is sent.
-  test("events_list's inner reads assert github_api: a session deny on GET /search/* sends no search", async () => {
+  // events_list asserts each inner read as github_events_list: a session deny on the search paths stops it before any
+  // search is sent.
+  test("events_list's inner reads assert github_events_list: a session deny on GET /search/* sends no search", async () => {
     const before = host.fake.requests.length
-    const denied = await session(host, "build", [{ action: "github_api", resource: "GET /search/*", effect: "deny" }])
+    const denied = await session(host, "build", [{ action: "github_events_list", resource: "GET /search/*", effect: "deny" }])
     const listed = await attempt(host, denied, "build", "github_events_list", "reject", { since: "2026-11-01" })
     expect(listed).toMatchObject({ asked: undefined, ok: false })
-    expect(String((listed as { error?: string }).error)).toContain("GET /search/issues needs a prior allow rule for github_api, and a deny rule refuses it")
+    expect(String((listed as { error?: string }).error)).toContain("GET /search/issues needs a prior allow rule for github_events_list, and a deny rule refuses it")
     expect(host.fake.requests.slice(before).map((request) => `${request.method} ${request.path}`)).toEqual(["GET /user"])
+    expect(await host.client.permission.list({ sessionID: denied })).toEqual([])
+  })
+
+  // Memory's unattended collection in an agent without the base allow: Jelly's allow for github_events_list alone lets
+  // every inner read run, with no github_api rule; a deny on github_events_list stops it with nothing sent.
+  test("events_list runs in an agent with no base allow and only an allow for github_events_list", async () => {
+    const sessionID = await session(host, "jelly")
+    const before = host.fake.requests.length
+    // The agent really has no github_api allow: a script's own GET is refused, with nothing sent.
+    expect(await script(host, "api", { sessionID, input: { method: "GET", path: "/repos/octo/hello" } })).toMatchObject({ type: "failed", code: "PERMISSION_DENIED" })
+    expect(host.fake.requests.length).toBe(before)
+    const listed = await script(host, "events_list", { sessionID, input: { since: "2999-01-01" } })
+    expect(JSON.stringify(listed)).not.toContain("PERMISSION_DENIED")
+    expect(listed.value).toMatchObject({ source: "github", owner: { id: expect.stringMatching(/^github:/) }, events: [], more: false })
+    expect(host.fake.requests.slice(before).map((request) => `${request.method} ${request.path}`)).toEqual(["GET /user"])
+
+    const denied = await session(host, "jelly", [deny("github_events_list")])
+    const after = host.fake.requests.length
+    expect(await script(host, "events_list", { sessionID: denied, input: { since: "2999-01-01" } })).toMatchObject({ type: "failed", code: "PERMISSION_DENIED" })
+    expect(host.fake.requests.slice(after)).toEqual([])
     expect(await host.client.permission.list({ sessionID: denied })).toEqual([])
   })
 

@@ -186,7 +186,8 @@ A call is `{ sessionID, input }`. The shared module (`src/host/tools-rpc.ts`):
    `github_api`'s own `run` with the call's context. Every request — a read, a write, a `download`, an `upload`, a
    redirect within the API and a `Link` page at another path — resolves `github_api` on its own resource against the
    agent's and the session's rules, then asserts it with the script call's source, so it runs only under a prior
-   `allow`. `events_list` runs its GETs through the same spec as a script call.
+   `allow`. `events_list` runs its GETs through the same spec as a script call, under a scope (`ApiScope`) that
+   resolves and asserts `github_events_list` instead of `github_api` and refuses any resource but its four GETs.
 
 While a call runs, its id is live. A `permission.hook("evaluate")` turns an `ask` whose source id is live into a deny,
 so an inner action a method needs is named in the refusal and no prompt waits. It changes nothing else; the forbidden-API scan

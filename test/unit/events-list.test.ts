@@ -8,8 +8,8 @@ import { registerApiTool } from "../../src/api/tool.js"
 import { DEFAULT_TOOLSETS, GITHUB_COM } from "../../src/config.js"
 import { GitHubPluginError } from "../../src/errors.js"
 import { EVENT_LIMITS, PAGE, assertEventsListConformance, encodeCursor, resultProblems, type EventsListResult } from "../../src/host/events-list.js"
-import { type Rule, defaultRules } from "../../src/permissions.js"
-import { EVENTS_ACTION, EVENTS_INPUT, SETTLE_MS, SOURCE, commitItem, eventsMethod, issueItem, listEvents, loginOf, notificationItem, runEvents } from "../../src/source-events.js"
+import { type Rule, defaultRules, effectOf } from "../../src/permissions.js"
+import { EVENTS_ACTION, EVENTS_INPUT, EVENTS_READS, SETTLE_MS, SOURCE, commitItem, eventsMethod, issueItem, listEvents, loginOf, notificationItem, runEvents } from "../../src/source-events.js"
 
 const NOW = Date.parse("2026-11-08T12:00:00Z")
 const SINCE = "2026-10-01"
@@ -249,18 +249,35 @@ describe("the tool and the tools RPC method", () => {
   })
 })
 
-// Every inner read asserts github_api on its own GET /path through github_api's real spec, before any network I/O, so a
-// session rule that denies the action, or one of the paths, stops it with nothing sent.
+// Every inner read asserts github_events_list, the tool's own permission, on its own GET /path through github_api's
+// real spec, before any network I/O, so the grant for the tool covers exactly its reads. Jelly's agents have no base
+// `* * allow` rule, so the plugin's block (with the github_api read allows) never reaches them; Jelly writes an allow for
+// each declared read tool instead, github_events_list included, and that alone must let Memory's unattended collection
+// run. A rule that asks for or denies github_events_list, or one of its paths, stops it with nothing sent.
 describe("events_list's inner reads", () => {
   const call = { sessionID: "ses_1", agent: "build", messageID: "msg_1", id: "call_1" }
   const BASE: Rule[] = [{ action: "*", resource: "*", effect: "allow" }, ...defaultRules("all")]
+  /** What Jelly writes for this plugin: an allow per declared tool, with no base allow and no github_api rule. */
+  const JELLY: Rule[] = [
+    { action: "github_get_me", resource: "*", effect: "allow" },
+    { action: EVENTS_ACTION, resource: "*", effect: "allow" },
+  ]
+  const READS = ["/user", "/search/issues", "/search/commits", "/notifications"]
 
-  async function wired(session: readonly Rule[]) {
+  async function wired(session: readonly Rule[], agent: readonly Rule[] = BASE) {
     const fetched: string[] = []
     const asserted: string[] = []
+    // OpenCode's assert, as far as this needs it: the last matching rule of the agent's, then the session's, decides;
+    // an ask has nobody to answer it in an unattended call, so it refuses like a deny.
     const ctx = {
       tool: { transform: async () => ({ dispose: async () => {} }), list: async () => [] },
-      permission: { assert: async (request: { action: string; resources: string[] }) => void asserted.push(`${request.action} ${request.resources[0]}`) },
+      permission: {
+        assert: async (request: { action: string; resources: string[] }) => {
+          const effect = effectOf([...agent, ...session], request.action, request.resources[0])
+          if (effect !== "allow") throw new Error(`refused: ${request.action} ${request.resources[0]} (${effect})`)
+          asserted.push(`${request.action} ${request.resources[0]}`)
+        },
+      },
       integration: {
         get: async () => ({ data: { connections: [] } }),
         connection: {
@@ -270,7 +287,7 @@ describe("events_list's inner reads", () => {
         },
       },
       session: { get: async () => ({ permissions: session }) },
-      agent: { get: async () => ({ data: { permissions: BASE } }) },
+      agent: { get: async () => ({ data: { permissions: agent } }) },
     }
     const api = await registerApiTool(ctx as never, {
       access: "all",
@@ -288,21 +305,39 @@ describe("events_list's inner reads", () => {
       },
     })
     const deps = { ctx: { tool: ctx.tool, permission: ctx.permission }, api, managed: () => false, now: () => NOW }
-    return { run: () => runEvents(deps as never, { since: SINCE }, call), fetched, asserted }
+    return { run: () => runEvents(deps as never, { since: SINCE }, call), api, fetched, asserted }
   }
 
-  it("asserts github_events_list, then github_api on each GET /path before it is sent", async () => {
+  it("asserts github_events_list, then github_events_list on each GET /path before it is sent", async () => {
     const { run, fetched, asserted } = await wired([])
     expect((await run()).events).toEqual([])
-    expect(fetched).toEqual(["/user", "/search/issues", "/search/commits", "/notifications"])
-    expect(asserted).toEqual([`${EVENTS_ACTION} *`, "github_api GET /user", "github_api GET /search/issues", "github_api GET /search/commits", "github_api GET /notifications"])
+    expect(fetched).toEqual(READS)
+    expect(asserted).toEqual([`${EVENTS_ACTION} *`, ...READS.map((path) => `${EVENTS_ACTION} GET ${path}`)])
+    expect(EVENTS_READS).toEqual(READS.map((path) => `GET ${path}`))
   })
 
-  it("sends nothing when the session denies github_api", async () => {
-    const { run, fetched, asserted } = await wired([{ action: "github_api", resource: "*", effect: "deny" }])
-    await expect(run()).rejects.toThrow(/^PERMISSION_DENIED: GET \/user needs a prior allow rule for github_api, and a deny rule refuses it\./)
-    expect(fetched).toEqual([])
-    expect(asserted).toEqual([`${EVENTS_ACTION} *`])
+  it("runs end to end in an agent with no base allow and only Jelly's allow for github_events_list", async () => {
+    const { run, fetched, asserted } = await wired([], JELLY)
+    const result = await run().catch((error: unknown) => error)
+    expect(String((result as Error).message ?? "")).not.toContain("PERMISSION_DENIED")
+    expect(result).toMatchObject({ source: "github", owner: OWNER, events: [] })
+    expect(fetched).toEqual(READS)
+    expect(asserted.every((entry) => entry.startsWith(`${EVENTS_ACTION} `))).toBe(true)
+  })
+
+  it("is not decided by github_api rules: a session deny on github_api does not stop it", async () => {
+    const { run, fetched } = await wired([{ action: "github_api", resource: "*", effect: "deny" }], JELLY)
+    expect((await run()).owner).toEqual(OWNER)
+    expect(fetched).toEqual(READS)
+  })
+
+  it("stops with nothing sent when the session denies github_events_list", async () => {
+    for (const agent of [BASE, JELLY]) {
+      const { run, fetched, asserted } = await wired([{ action: EVENTS_ACTION, resource: "*", effect: "deny" }], agent)
+      await expect(run()).rejects.toThrow(`refused: ${EVENTS_ACTION} * (deny)`)
+      expect(fetched).toEqual([])
+      expect(asserted).toEqual([])
+    }
   })
 
   it.each([
@@ -310,9 +345,61 @@ describe("events_list's inner reads", () => {
     ["GET /notifications", ["/user", "/search/issues", "/search/commits"]],
   ])("refuses a read the session denies (%s) before its request, and an ask too, as nobody can answer it", async (resource, sent) => {
     for (const effect of ["deny", "ask"] as const) {
-      const { run, fetched } = await wired([{ action: "github_api", resource, effect }])
-      await expect(run()).rejects.toThrow(/^PERMISSION_DENIED: GET \/(search|notifications)/)
+      const { run, fetched } = await wired([{ action: EVENTS_ACTION, resource, effect }], JELLY)
+      await expect(run()).rejects.toThrow(new RegExp(`^PERMISSION_DENIED: GET /(search|notifications)\\S* needs a prior allow rule for ${EVENTS_ACTION}`))
       expect(fetched).toEqual(sent)
     }
+  })
+
+  it("reaches nothing but its documented GETs: another path or a change is refused before it is sent", async () => {
+    const { api, fetched, asserted } = await wired([], [{ action: EVENTS_ACTION, resource: "*", effect: "allow" }, { action: "github_api", resource: "*", effect: "allow" }])
+    const scope = { action: EVENTS_ACTION, resources: EVENTS_READS }
+    const script = { ...call, script: true }
+    for (const input of [
+      { method: "GET" as const, path: "/repos/octo/app" },
+      { method: "POST" as const, path: "/search/issues" },
+      { method: "DELETE" as const, path: "/notifications" },
+    ]) {
+      await expect(api.run(input, script, scope)).rejects.toThrow(/^PERMISSION_DENIED: github_events_list reads only GET \/user, /)
+    }
+    await expect(api.run({ graphql: { query: "query { viewer { login } }" } }, script, scope)).rejects.toThrow(/not QUERY \/graphql/)
+    expect(fetched).toEqual([])
+    expect(asserted).toEqual([])
+  })
+
+  it("refuses a redirect from a documented GET to another path, before following it", async () => {
+    const fetched: string[] = []
+    const redirecting = await registerApiTool(
+      {
+        tool: { transform: async () => ({ dispose: async () => {} }) },
+        permission: { assert: async () => {} },
+        integration: {
+          get: async () => ({ data: { connections: [] } }),
+          connection: {
+            active: async () => ({ type: "credential", id: "cred_1", label: LOGIN, method: "oauth" }),
+            resolve: async () => ({ type: "oauth", access: "gho_" + "t".repeat(36), refresh: "", expires: 0 }),
+            status: async () => {},
+          },
+        },
+        session: { get: async () => ({ permissions: [] }) },
+        agent: { get: async () => ({ data: { permissions: JELLY } }) },
+      } as never,
+      {
+        access: "all",
+        readOnly: false,
+        endpoints: GITHUB_COM,
+        service: "GitHub",
+        root: "/",
+        toolsets: DEFAULT_TOOLSETS,
+        integrationID: () => "mcp_1",
+        fetch: async (url) => {
+          fetched.push(new URL(url).pathname)
+          return new Response(null, { status: 307, headers: { location: "https://api.github.com/repos/octo/app" } })
+        },
+      },
+    )
+    const result = redirecting.run({ method: "GET", path: "/user" }, { ...call, script: true }, { action: EVENTS_ACTION, resources: EVENTS_READS })
+    await expect(result).rejects.toThrow(/reads only .*, not GET \/repos\/octo\/app/)
+    expect(fetched).toEqual(["/user"])
   })
 })

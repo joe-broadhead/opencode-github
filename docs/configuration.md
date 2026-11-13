@@ -444,8 +444,9 @@ read-only mode on, so its server lists no write tools:
 - The reads are allowed at every access value, whichever toolsets are on; a method a toolset turns off is unavailable
   rather than denied.
 - Agents without the base allow rule are unchanged. The block is added once, even after a reload. Such an agent does
-  not get the `github_api` read allows either, so its `github_api` reads ask, and a script's or `events_list`'s reads
-  are refused with `PERMISSION_DENIED`, unless its own rules allow them: add
+  not get the `github_api` read allows either, so its `github_api` reads ask, and a script's reads are refused with
+  `PERMISSION_DENIED`, unless its own rules allow them (`events_list` needs only an allow for `github_events_list`,
+  which Jelly writes for its agents): add
   `{ "action": "github_api", "resource": "GET *", "effect": "allow" }`, and the same for `HEAD *`, `POST /markdown`,
   `POST /markdown/raw` and `QUERY /graphql` as you need them.
 - OpenCode applies the last rule that matches. So the agent's own later rules still win (Plan keeps its rules, and
@@ -487,8 +488,8 @@ Ask before every GitHub MCP tool, reads included:
 ```
 
 Under this rule `github_events_list` asks, and once approved its inner reads fail with `PERMISSION_DENIED`, because
-they run unattended and cannot ask; add `{ "action": "github_api", "resource": "GET *", "effect": "allow" }` after it to
-avoid that (it also lets `github_api` GETs run without asking).
+they run unattended, assert `github_events_list` on each `GET /path`, and cannot ask; add
+`{ "action": "github_events_list", "resource": "*", "effect": "allow" }` after it to avoid that.
 
 `github_api` asserts every request on its own resource, reads included, and the block allows its reads (`GET *`,
 `HEAD *`, `POST /markdown`, `POST /markdown/raw` and `QUERY /graphql`) at every access value. To stop a read, deny it
@@ -642,8 +643,11 @@ events_list({ since?, cursor?, limit?, account?, source? })
 | `source` | `github`, the one source. |
 
 It asserts `github_events_list`, then makes only GET requests, through `github_api`'s own spec with the plugin's
-sign-in. Each GET asserts `github_api` on its own `GET /path` first, unattended: it runs only under an allow rule, which
-the block has, and a rule that asks or denies it refuses it with `PERMISSION_DENIED` before the request is sent:
+sign-in. Each GET asserts the tool's own permission, `github_events_list`, on its own `GET /path` first, not
+`github_api`, unattended: it runs only under an allow rule for `github_events_list` (the block has one, and Jelly writes
+one for its agents, which have no base allow), and a rule that asks or denies it refuses it with `PERMISSION_DENIED`
+before the request is sent. It sends nothing but the four GETs below; another path, a redirect elsewhere or a change
+is refused before it is sent:
 
 - the owner: GitHub's `get_me` through OpenCode's executor, or `GET /user` where GitHub's MCP server is not there
   (`host`, or another server named `github`); `github:` and the login. The cursor holds a digest of it, so after a
@@ -833,7 +837,7 @@ passed through unchanged.
 | `TOKEN_CHECK_FAILED` | GitHub could not check the token, or returned no account name. | Try again later. |
 | `READ_ONLY` | A `github_api` call would change GitHub, and `access` is `"read-only"` (or the deprecated `readOnly: true`). | Tell the user that this needs the plugin option `access: "all"`, which they set in opencode.json; each change then runs without asking, unless they keep `ask-changes`. |
 | `AUTH_REQUIRED` | `github_api` has no GitHub sign-in to use. | Run /connect and choose GitHub (GitHub Enterprise with `host`). |
-| `PERMISSION_DENIED` | A rule asks or denies a call, and the caller is a script or `events_list`: an `ask` cannot be answered and a `deny` refuses. For `github_api` the rule must name the request's own `METHOD /path`. | Add or narrow the rule for the session or for its agent. |
+| `PERMISSION_DENIED` | A rule asks or denies a call, and the caller is a script or `events_list`: an `ask` cannot be answered and a `deny` refuses. For `github_api` the rule must name the request's own `METHOD /path`; for `events_list`'s reads it is `github_events_list` on the same resource. | Add or narrow the rule for the session or for its agent. |
 | `API_INPUT_INVALID` | The `github_api` input does not fit, for example `download` with a method other than GET. | Fix the github_api input and call it again. |
 | `API_PATH_INVALID` | The path is not a relative API path, has a `.` or `..` segment (also percent-encoded), or percent-encodes a character it can hold as itself. | Pass a relative API path such as /repos/OWNER/REPO/pulls. |
 | `API_GRAPHQL_PATH` | `/graphql` was called through method and path. | Pass { graphql: { query, variables } } instead. |

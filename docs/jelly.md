@@ -23,7 +23,9 @@ the plugin's `access` option, to restrict one.
 - Ask: none. Every tool is allowed by default, in Jelly as in OpenCode.
 - Off: none.
 - Everything else runs, as the plugin's own rules let it. That includes `github_events_list`, the plugin's own read
-  for Memory's collector, which runs it unattended, so it never asks. A `deny` or `ask` rule of your own replaces it, per tool.
+  for Memory's collector, which runs it unattended, so it never asks. Its inner GETs assert `github_events_list` itself
+  on each `GET /path`, not `github_api`, so the allow Jelly writes for it is all the collection needs. A `deny` or `ask`
+  rule of your own replaces it, per tool.
 
 A function that changes GitHub still needs a token that may: GitHub itself refuses a write the
 token cannot make, and `github_api` asserts `github_api` on the call's own `METHOD /path` before
