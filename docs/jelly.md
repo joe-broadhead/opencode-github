@@ -59,6 +59,10 @@ The `github` sign-in declares `"hostClient": { "id": "github", "option": "client
 OAuth App by the name `github` (a deployment's own) writes its client ID into `clientId` in each agent's engine
 document, never over one the agent's own options set. A Jelly before 0.3.2 refuses this declaration's new key.
 
+`clientId` may name a GitHub App: its user tokens expire after 8 hours and the plugin renews them with their refresh
+token, and the `appSlug` option gives the link that installs the App (see
+[A GitHub App](configuration.md#a-github-app)).
+
 Token sign-in is always offered. Device sign-in appears only when you or your organisation set `clientId`; then
 Jelly offers it first: it shows the code with Copy code and connects once the person approves, which works from a
 web tab too, because nothing returns to a loopback port. With the token, Jelly opens the pre-filled token page, and

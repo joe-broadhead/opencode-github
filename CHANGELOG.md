@@ -2,6 +2,34 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Device sign-in with a GitHub App.** `clientId` takes a GitHub App's client ID as well as an OAuth App's; the plugin
+  tells them apart by the token GitHub returns (`ghu_` for a GitHub App, `gho_` for an OAuth App). A GitHub App's
+  expiring user token (8 hours) is renewed with its refresh token (6 months) before it expires, with no client secret,
+  and the new refresh token replaces the old one. A refresh token GitHub refuses (`bad_refresh_token`, or older than six
+  months) asks for a new sign-in, as `SIGN_IN_REJECTED`; an unreachable or failing GitHub asks to try again
+  (`REFRESH_UNREACHABLE`, `REFRESH_FAILED`).
+- `appSlug`, the GitHub App's URL name, for the link that installs it.
+- A GitHub App sign-in that reaches no installation says so in its `/connect` label and in `/github-status`'s next
+  step, with the install link, until a later renewal finds one.
+
+### Changed
+
+- `github_api` words a GitHub App's 403 ("Resource not accessible by integration") by permission and installation: it
+  names the permission from `X-Accepted-GitHub-Permissions` and the account from the path, and links the install page.
+  A GitHub App's 404 also says the App may not be installed there. OAuth App and token sign-ins keep their scope and
+  fine-grained permission wording.
+- `scopes: []` sends no `scope` with the device code request. A GitHub App ignores the OAuth App scopes, so the default
+  does it no harm.
+
+### Fixed
+
+- The host test of the Code Mode catalogue reads the request that carries the catalogue, not the session-title request
+  OpenCode 2.2.4 can send after it.
+
 ## [0.0.0] - 2026-11-10
 <!-- kit-release: the GitHub release v0.0.0 -->
 
