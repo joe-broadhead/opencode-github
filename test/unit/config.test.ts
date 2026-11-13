@@ -72,7 +72,9 @@ describe("loadOptions", () => {
     [{ access: "write" }, 'Invalid plugin option "access"'],
     [{ lockdown: 1 }, 'Invalid plugin option "lockdown"'],
     [{ unknownTools: "allow" }, 'Invalid plugin option "unknownTools"'],
-    [{ clientId: "has spaces" }, `Invalid plugin option "clientId": use the OAuth App's client ID`],
+    [{ clientId: "has spaces" }, `Invalid plugin option "clientId": use the app's client ID`],
+    [{ appSlug: "Has Spaces" }, `Invalid plugin option "appSlug": use the GitHub App's URL name`],
+    [{ appSlug: "-dash" }, 'Invalid plugin option "appSlug"'],
     [{ clientId: "x".repeat(101) }, 'Invalid plugin option "clientId"'],
     [{ scopes: ["Repo"] }, 'Invalid plugin option "scopes.0": use a GitHub OAuth scope name such as repo or read:org.'],
     [{ scopes: ["repo", "repo"] }, 'Invalid plugin option "scopes": list each scope once.'],
@@ -127,6 +129,7 @@ describe("constants", () => {
   it("has no default client ID, so only token sign-in is offered unless clientId is set", () => {
     expect(loadOptions({}).clientId).toBeUndefined()
     expect(loadOptions({ clientId: "Ov23liExample" }).clientId).toBe("Ov23liExample")
+    expect(loadOptions({ clientId: "Iv23liExample", appSlug: "jelly-dev" }).appSlug).toBe("jelly-dev")
   })
 
   it("defaults to the read-only toolsets that repo and read:org cover: 49 reads once ui_get is hidden", () => {

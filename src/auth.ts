@@ -3,11 +3,10 @@
 // (GitHub has no dynamic client registration, so it cannot succeed) with GitHub device
 // flow and a fine-grained personal access token (src/sign-in.ts). The MCP transport sends the
 // integration's active oauth-type credential as a Bearer token, whichever method made it,
-// and reconnects when it changes. No refresh hook is registered: OAuth App tokens do not
-// expire, a personal token is replaced by signing in again, and OpenCode treats
-// `expires: 0` as expiring when a refresh hook exists.
+// and reconnects when it changes. The device method's refresh hook renews a GitHub App's
+// expiring token (src/sign-in.ts); a personal token is replaced by signing in again.
 //
-// The device method is offered only when there is an OAuth App client ID; without one only
+// The device method is offered only when there is a client ID; without one only
 // the token method appears. A server named github that the user configured is not this
 // plugin's: its integration and its own sign-in are left alone.
 import type { Plugin } from "@opencode/plugin"

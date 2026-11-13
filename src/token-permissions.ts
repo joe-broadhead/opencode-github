@@ -1,6 +1,7 @@
 // The fine-grained personal access token permissions that the default toolsets read with,
 // keyed by the parameter names GitHub's new-token page accepts, with the names it shows.
-// Device sign-in needs none of them: its `repo read:org` scopes cover the same reads.
+// Device sign-in needs none of them: an OAuth App's `repo read:org` scopes cover the same reads, and a GitHub App has
+// its own permissions.
 
 /** Repository permissions, all read-only, prefilled on the token page. */
 export const TOKEN_PERMISSIONS = {

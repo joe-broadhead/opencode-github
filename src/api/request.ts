@@ -9,6 +9,7 @@ import { link, mkdir, open, readFile, realpath, rename, rm, stat } from "node:fs
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import type { Endpoints } from "../config.js"
 import { GitHubPluginError } from "../errors.js"
+import { installStep, isAppToken, ownerOf } from "../github-app.js"
 import { permissionName } from "../token-permissions.js"
 import { permissionPath } from "./names.js"
 import { ACCEPT, type ApiOutput, type GraphqlInput, type RestInput } from "./contract.js"
@@ -37,6 +38,8 @@ type CallDeps = {
   readonly service: string
   /** Whether device sign-in is offered (a clientId is set), so a token problem can point to it. */
   readonly deviceSignIn?: boolean
+  /** The GitHub App's URL name, for the link that installs it. */
+  readonly appSlug?: string
   readonly fetch: Fetch
   readonly signal?: AbortSignal
   /** The project folder; download and upload files must be inside it. */
@@ -169,7 +172,7 @@ export async function callRest(input: RestInput, target: RestTarget, deps: CallD
     const overwrite = input.download.overwrite === true
     const file = await downloadTarget(deps.root, input.download.path, overwrite)
     const response = await send(target.url, { method: input.method, headers, body }, deps, { follow: "storage", what: target.resource })
-    if (!response.ok) return finish(response, await readBody(response, input.method), deps)
+    if (!response.ok) return finish(response, await readBody(response, input.method), deps, target.path)
     const saved = await save(response, file, { overwrite, maxBytes: deps.maxDownloadBytes ?? MAX_DOWNLOAD_BYTES })
     return { ...base(response), download: saved, truncated: false }
   }
@@ -177,7 +180,7 @@ export async function callRest(input: RestInput, target: RestTarget, deps: CallD
   const follow: Follow = input.method === "GET" || input.method === "HEAD" ? "api" : "never"
   const response = await send(target.url, { method: input.method, headers, body }, deps, { follow, what: target.resource })
   const first = await readBody(response, input.method)
-  if (!input.paginate || input.method !== "GET" || !response.ok) return finish(response, first, deps)
+  if (!input.paginate || input.method !== "GET" || !response.ok) return finish(response, first, deps, target.path)
 
   // Pages: join arrays, or the one array of a list object such as { total_count, items }.
   const maxPages = input.maxPages ?? DEFAULT_MAX_PAGES
@@ -189,7 +192,7 @@ export async function callRest(input: RestInput, target: RestTarget, deps: CallD
   while (next && pages < maxPages && itemCount(data) < maxItems) {
     const page = await send(next, { method: "GET", headers }, deps, { follow: "api", what: target.resource })
     const read = await readBody(page, "GET")
-    if (!page.ok) return finish(page, read, deps)
+    if (!page.ok) return finish(page, read, deps, target.path)
     const joined = join_(data, read.data)
     if (joined === undefined) break
     data = joined
@@ -198,7 +201,7 @@ export async function callRest(input: RestInput, target: RestTarget, deps: CallD
     next = nextLink(page, deps.endpoints)
   }
   const capped = capItems(data, maxItems)
-  const output = finish(last, { ...first, data: capped.data }, deps)
+  const output = finish(last, { ...first, data: capped.data }, deps, target.path)
   return { ...output, pagination: { pages, items: itemCount(capped.data), more: next !== undefined || capped.dropped } }
 }
 
@@ -417,9 +420,10 @@ function base(response: Response): Omit<ApiOutput, "truncated"> {
 }
 
 /** The output for a response: status, rate limit, a capped body, and a next step for failures. */
-function finish(response: Response, body: Body, deps: CallDeps): ApiOutput {
+/** `path` is the REST path sent, which names the account a GitHub App may not be installed on. */
+function finish(response: Response, body: Body, deps: CallDeps, path?: string): ApiOutput {
   const output: ApiOutput = { ...base(response), ...(body.contentType ? { contentType: body.contentType } : {}), truncated: body.truncated }
-  const nextStep = failureStep(response, deps, body.data)
+  const nextStep = failureStep(response, deps, body.data, path)
   if (body.binary !== undefined) {
     const save = deps.script ? "save it with github_api's download in an OpenCode session, as scripts never write files" : "pass download: { path } to save it"
     return { ...output, truncated: false, nextStep: nextStep ?? `The response is ${body.binary} bytes of ${body.contentType}; ${save}.` }
@@ -439,12 +443,21 @@ function finish(response: Response, body: Body, deps: CallDeps): ApiOutput {
   }
 }
 
-function failureStep(response: Response, deps: CallDeps, data: unknown): string | undefined {
+function failureStep(response: Response, deps: CallDeps, data: unknown, path: string | undefined): string | undefined {
   if (response.ok) return undefined
   if (response.status === 401) return `GitHub rejected the saved sign-in. Run /connect and choose ${deps.service} to sign in again.`
   if (response.headers.get("x-ratelimit-remaining") === "0") {
     const reset = Number(response.headers.get("x-ratelimit-reset"))
     return `The rate limit is used up. Try again after ${Number.isFinite(reset) ? new Date(reset * 1000).toISOString() : "the reset time"}.`
+  }
+  const message = (data as { message?: unknown } | undefined)?.message
+  // A GitHub App user token: GitHub Apps have permissions and installations, not OAuth scopes.
+  const app = isAppToken(deps.token)
+  const owner = ownerOf(path)
+  if (response.status === 403 && (app || (typeof message === "string" && /not accessible by integration/i.test(message)))) {
+    const needed = acceptedPermissions(response.headers.get("x-accepted-github-permissions"))
+    const what = needed.length > 0 ? `the permission ${needed.join(" or ")}` : "a permission this endpoint needs"
+    return `The GitHub App you signed in with lacks ${what}, or is not installed on ${owner ?? "that account or organization"}. ${installStep(deps.endpoints, deps.appSlug)}, or ask its owner to add the permission.`
   }
   const accepted = scopes(response.headers.get("x-accepted-oauth-scopes"))
   const granted = scopes(response.headers.get("x-oauth-scopes"))
@@ -456,12 +469,14 @@ function failureStep(response: Response, deps: CallDeps, data: unknown): string 
       : `The token lacks the scope ${scope}. Create a token with it on GitHub (Settings, Developer settings, Personal access tokens), then run /connect and choose ${deps.service} to replace it.`
   }
   // A fine-grained token without the permission an endpoint needs. GitHub names it in X-Accepted-GitHub-Permissions.
-  const message = (data as { message?: unknown } | undefined)?.message
   if (response.status === 403 && typeof message === "string" && /not accessible by personal access token/i.test(message)) {
     const needed = acceptedPermissions(response.headers.get("x-accepted-github-permissions"))
     const what = needed.length > 0 ? `the fine-grained permission ${needed.join(" or ")}` : "a fine-grained permission this endpoint needs"
     const instead = deps.deviceSignIn ? `, or run /connect, choose ${deps.service} and sign in with GitHub instead of a token` : ""
     return `The token lacks ${what}. Add it to the token on GitHub (Settings, Developer settings, Personal access tokens)${instead}.`
+  }
+  if (response.status === 404 && app) {
+    return `GitHub answers 404 for a wrong path, for one the account cannot see, and for a repository the GitHub App you signed in with is not installed on. Check the path; if it is right, the App may not be installed on ${owner ?? "that account or organization"}: ${installStep(deps.endpoints, deps.appSlug).replace(/^I/, "i")}.`
   }
   if (response.status === 404) return `GitHub answers 404 for a wrong path and for one the account cannot see on ${new URL(deps.endpoints.api).host}. Check the path and the account's access.`
   return undefined

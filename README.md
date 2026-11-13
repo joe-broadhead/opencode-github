@@ -54,9 +54,12 @@ all read-only:
 Leave out any you don't need; only the tools that use them fail. Listing an organisation's repository security
 advisories needs write access to Repository security advisories, so it fails with a read-only token.
 
-Organisations can set `clientId` to their own OAuth App (Device Flow on, no client secret); `/connect` then also
-offers **Sign in with GitHub**, a device sign-in with the scopes `repo` and `read:org`, which needs none of the token
-permissions above.
+Organisations can set `clientId` to their own OAuth App or GitHub App (Device Flow on, no client secret); `/connect`
+then also offers **Sign in with GitHub**, a device sign-in that needs none of the token permissions above. With an
+OAuth App it asks for the scopes `repo` and `read:org`. With a GitHub App the token has the App's permissions, only
+where the App is installed, and expires after 8 hours; the plugin renews it with its refresh token, and asks for a new
+sign-in only when GitHub refuses that (after six months at the latest). Install the App on the accounts and
+organisations it should read; `appSlug` gives the install link, and a sign-in that reaches no installation says so.
 
 **The browser.** In the TUI, press `o` or Enter to open the link in your browser (`c` copies a device code). The CLI,
 `opencode auth login GitHub`, opens the browser automatically.
@@ -326,8 +329,8 @@ Options go in the plugin's entry in `opencode.json`:
 }
 ```
 
-The options are `toolsets`, `access`, `lockdown`, `unknownTools`, `clientId`, `scopes`, `allowUntestedHost` and
-`host`. `readOnly` is deprecated: it maps onto `access`.
+The options are `toolsets`, `access`, `lockdown`, `unknownTools`, `clientId`, `appSlug`, `scopes`,
+`allowUntestedHost` and `host`. `readOnly` is deprecated: it maps onto `access`.
 
 **`unknownTools`** decides only whether GitHub tools the plugin does not know are listed. `"ask"` (the default) keeps
 them, and they follow the `github_*` rule and `access` like every other tool: they run at the default, ask at
@@ -364,7 +367,8 @@ overrides user and project config, so members only sign in:
 }
 ```
 
-`clientId` is needed only to use your organisation's own GitHub OAuth App (Device Flow on, no client secret).
+`clientId` is needed only to use your organisation's own GitHub OAuth App or GitHub App (Device Flow on, no client
+secret). For a GitHub App, add `"appSlug": "<the App's URL name>"` for the install link; `scopes` does not apply to it.
 
 - If the organisation restricts OAuth App access, its private repositories stay hidden from device sign-in until an
   owner approves the app. Members can request approval on GitHub under **Settings → Applications → Authorized OAuth
@@ -407,6 +411,10 @@ Error codes:
 | `SIGN_IN_CODE_UNKNOWN` | GitHub did not recognise the device code. Start the sign-in again. |
 | `SIGN_IN_FAILED` | GitHub ended the device sign-in with another error, named in the message. Start the sign-in again. |
 | `SIGN_IN_UNREACHABLE` | github.com could not be reached. Check your network, then start the sign-in again. |
+| `SIGN_IN_REJECTED` | GitHub refused to renew a GitHub App sign-in: its refresh token was revoked, already used, or is older than six months. Run `/connect` and choose GitHub to sign in again. |
+| `SIGN_IN_UNAVAILABLE` | OpenCode could not load the saved sign-in for `github_api`. Try again; if it keeps failing, run `/connect` and choose GitHub to sign in again. |
+| `REFRESH_UNREACHABLE` | github.com could not be reached to renew a GitHub App sign-in. Check your network, then try again. |
+| `REFRESH_FAILED` | GitHub could not renew a GitHub App sign-in right now. Try again later. |
 | `SIGN_IN_UNEXPECTED_RESPONSE` | GitHub answered the device sign-in with something unexpected. Start the sign-in again. |
 | `DEVICE_FLOW_DISABLED` | The OAuth App has Device Flow turned off. Enable it in the app's settings, or use a fine-grained personal access token. |
 | `CLIENT_ID_UNKNOWN` | GitHub does not know the `clientId`. Check the plugin option `clientId`, or use a fine-grained personal access token. |
@@ -460,8 +468,8 @@ still stores its token.
 1. Sign out: `opencode auth logout GitHub <login>`, where `<login>` is the account's label in `/connect`, your GitHub
    login (with `host`: `opencode auth logout "GitHub Enterprise" <login>`). Without `<login>` it asks you to pick the
    account, which works only in an interactive terminal. Then, on GitHub, delete the token under **Settings →
-   Developer settings → Personal access tokens**, or, after a device sign-in, revoke the OAuth App under **Settings →
-   Applications → Authorized OAuth Apps**.
+   Developer settings → Personal access tokens**, or, after a device sign-in, revoke the app under **Settings →
+   Applications → Authorized OAuth Apps** (or **Authorized GitHub Apps**).
 2. Run `opencode plugin remove github:joe-broadhead/opencode-github#v0.0.0` (the spec you installed), then `opencode reload`.
 3. Data folders: none. The plugin stores nothing of its own.
 4. Remove the default rules you copied into agents' own `permissions`.

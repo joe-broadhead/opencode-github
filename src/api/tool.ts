@@ -71,6 +71,8 @@ export type ApiDeps = {
   readonly service: string
   /** Whether device sign-in is offered (a clientId is set). */
   readonly deviceSignIn?: boolean
+  /** The GitHub App's URL name, for its install link. */
+  readonly appSlug?: string
   /** The project folder for downloads and uploads. */
   readonly root: string
   /** GitHub Enterprise Server: no MCP tools, only github_api. */
@@ -95,6 +97,16 @@ export type Call = {
   readonly script?: boolean
   /** The rules that decide for a script: the agent's, then the session's. Only the RPC path passes them. */
   readonly rules?: readonly Rule[]
+}
+
+const REJECTED = "GitHub rejected the saved sign-in. Sign in again."
+
+/** The plugin's own error inside what OpenCode threw for a failed renewal, which may wrap it. */
+function pluginError(error: unknown): GitHubPluginError | undefined {
+  for (let current = error, depth = 0; current && depth < 5; current = (current as { cause?: unknown }).cause, depth++) {
+    if (current instanceof GitHubPluginError) return current
+  }
+  return undefined
 }
 
 /** The input, checked against github_api's schema. */
@@ -209,12 +221,23 @@ export async function registerApiTool(
     )
   }
 
-  /** The sign-in github_api uses: the integration's active connection and its credential. */
+  /**
+   * The sign-in github_api uses: the integration's active connection and its credential. Resolving renews a GitHub App's
+   * expiring token; a renewal GitHub refuses marks the account in /connect and asks for a new sign-in.
+   */
   const signIn = async () => {
     const integrationID = deps.integrationID()
     const connection = integrationID ? await ctx.integration.connection.active(integrationID) : undefined
-    const credential = connection ? await ctx.integration.connection.resolve(connection) : undefined
-    return { integrationID, connection, credential }
+    if (!integrationID || !connection) return { integrationID, connection, credential: undefined }
+    try {
+      return { integrationID, connection, credential: await ctx.integration.connection.resolve(connection) }
+    } catch (cause) {
+      const error = pluginError(cause)
+      if (error?.code === "SIGN_IN_REJECTED") {
+        await ctx.integration.connection.status({ integrationID, connection, status: { status: "needs_auth", message: REJECTED } }).catch(() => undefined)
+      }
+      throw error ?? new GitHubPluginError("SIGN_IN_UNAVAILABLE", `OpenCode could not load the ${deps.service} sign-in.`, `Try again; if it keeps failing, run /connect and choose ${deps.service} to sign in again.`)
+    }
   }
 
   const run = async (input: ApiInput, call: Call): Promise<ApiOutput> => {
@@ -248,6 +271,7 @@ export async function registerApiTool(
       endpoints: deps.endpoints,
       service: deps.service,
       deviceSignIn: deps.deviceSignIn === true,
+      ...(deps.appSlug ? { appSlug: deps.appSlug } : {}),
       fetch: send,
       root: deps.root,
       enterprise: deps.enterprise === true,
@@ -258,7 +282,7 @@ export async function registerApiTool(
     // Keep /connect in step: a rejected token needs a new sign-in; a working one clears that.
     if (output.status === 401) {
       await ctx.integration.connection
-        .status({ integrationID, connection, status: { status: "needs_auth", message: "GitHub rejected the saved sign-in. Sign in again." } })
+        .status({ integrationID, connection, status: { status: "needs_auth", message: REJECTED } })
         .catch(() => undefined)
     } else if (output.status < 400 && (await statusShown(ctx, integrationID, "id" in connection ? connection.id : undefined))) {
       await ctx.integration.connection.status({ integrationID, connection, status: undefined }).catch(() => undefined)

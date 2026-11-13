@@ -403,6 +403,43 @@ describe("callRest", () => {
     expect((await call("/e")).nextStep).toMatch(/^The token lacks a fine-grained permission this endpoint needs\./)
   })
 
+  it("words a GitHub App's 403 and 404 by permission and installation, never by scope", async () => {
+    const APP_TOKEN = "ghu_" + "a".repeat(36)
+    const { fetch } = fakeFetch({
+      "https://api.github.com/repos/acme/web/issues": () =>
+        json(
+          { message: "Resource not accessible by integration" },
+          // GitHub can also send the classic scope headers to an App token; they must not decide the wording.
+          { status: 403, headers: { "x-accepted-github-permissions": "issues=read", "x-accepted-oauth-scopes": "repo", "x-oauth-scopes": "" } },
+        ),
+      "https://api.github.com/repos/acme/private": () => json({ message: "Not Found" }, { status: 404 }),
+    })
+    const call = (path: string, extra: Record<string, unknown> = {}) => {
+      const input = rest({ method: "GET", path })
+      return callRest(input, restTarget(input, GITHUB_COM), { ...deps(fetch), token: APP_TOKEN, deviceSignIn: true, ...extra })
+    }
+    expect((await call("/repos/acme/web/issues", { appSlug: "jelly-dev" })).nextStep).toBe(
+      "The GitHub App you signed in with lacks the permission Issues (read), or is not installed on acme. Install it at https://github.com/apps/jelly-dev/installations/new, or ask its owner to add the permission.",
+    )
+    expect((await call("/repos/acme/web/issues")).nextStep).toBe(
+      "The GitHub App you signed in with lacks the permission Issues (read), or is not installed on acme. Install the GitHub App on that account or organization, or ask its owner to add the permission.",
+    )
+    expect((await call("/repos/acme/private", { appSlug: "jelly-dev" })).nextStep).toBe(
+      "GitHub answers 404 for a wrong path, for one the account cannot see, and for a repository the GitHub App you signed in with is not installed on. Check the path; if it is right, the App may not be installed on acme: install it at https://github.com/apps/jelly-dev/installations/new.",
+    )
+  })
+
+  it("names the App's permission for 'not accessible by integration' even when the token's kind is unknown", async () => {
+    const { fetch } = fakeFetch({
+      "https://api.github.com/orgs/acme/members": () =>
+        json({ message: "Resource not accessible by integration" }, { status: 403, headers: { "x-accepted-github-permissions": "members=read" } }),
+    })
+    const input = rest({ method: "GET", path: "/orgs/acme/members" })
+    expect((await callRest(input, restTarget(input, GITHUB_COM), { ...deps(fetch), token: "x".repeat(40) })).nextStep).toMatch(
+      /^The GitHub App you signed in with lacks the permission .+ \(read\), or is not installed on acme\. /,
+    )
+  })
+
   it("reports an unreachable host without the token", async () => {
     const input = rest({ method: "GET", path: "/nowhere" })
     const error = await callRest(input, restTarget(input, GITHUB_COM), deps(fakeFetch({}).fetch)).catch((cause: Error) => cause)

@@ -38,7 +38,13 @@ export default Plugin.define({
     try {
       keep(await registerPermissionDefaults(ctx, options.access))
       const api = endpoints(options)
-      const signIn = { ...(options.clientId ? { clientId: options.clientId } : {}), scopes: options.scopes, endpoints: api }
+      const signIn = {
+        ...(options.clientId ? { clientId: options.clientId } : {}),
+        ...(options.appSlug ? { appSlug: options.appSlug } : {}),
+        scopes: options.scopes,
+        endpoints: api,
+        service: options.host ? ENTERPRISE_NAME : "GitHub",
+      }
       let source: Pick<StatusDeps, "conflict" | "integrationID" | "tools" | "enterprise">
       // Whether the github server is this plugin's, for the tools RPC.
       let managed: () => boolean
@@ -69,6 +75,7 @@ export default Plugin.define({
           enterprise: options.host !== undefined,
           toolsets: options.toolsets,
           deviceSignIn: options.clientId !== undefined,
+          ...(options.appSlug ? { appSlug: options.appSlug } : {}),
           root: ctx.location.directory,
           integrationID: source.integrationID,
         }),
@@ -79,6 +86,7 @@ export default Plugin.define({
       keep(
         await registerStatus(ctx, {
           options,
+          endpoints: api,
           hostVersion: ctx.app.version,
           skills: SKILL_IDS.map((id) => ({ id, path: skillPath(id) })),
           ...(hostWarning ? { hostWarning } : {}),

@@ -1,13 +1,14 @@
 // One status, computed fresh on every call (no locks, caches or caps), behind the
 // /github-status command and the RPC method the TUI view uses.
 import type { Plugin } from "@opencode/plugin"
-import type { Options } from "./config.js"
+import type { Endpoints, Options } from "./config.js"
 import { GitHubPluginError } from "./errors.js"
 import { HOST_RANGE, TESTED_HOSTS, isTestedHost } from "./host-version.js"
 import { lowerResource, neverMatches } from "./api/names.js"
 import { API_ACTION } from "./api/tool.js"
 import { type Rule, defaultRules, matches, unguardedAgents } from "./permissions.js"
 import { AGENT_STEP, GithubRpc, NOTHING_TO_DO, SERVER_NAME, type SkillPath, type Status, formatStatus } from "./rpc.js"
+import { installationsOf, notInstalledNote } from "./sign-in.js"
 import { PLUGIN_VERSION } from "./version.js"
 
 export const STATUS_COMMAND = "github-status"
@@ -15,13 +16,15 @@ const UNAVAILABLE = new GitHubPluginError("STATUS_UNAVAILABLE", "GitHub status i
 
 type StatusContext = {
   readonly mcp: Pick<Plugin.Context["mcp"], "list">
-  readonly integration: { readonly connection: Pick<Plugin.Context["integration"]["connection"], "active"> }
+  readonly integration: { readonly connection: Pick<Plugin.Context["integration"]["connection"], "active" | "resolve"> }
   readonly agent: Pick<Plugin.Context["agent"], "list">
   readonly skill: Pick<Plugin.Context["skill"], "list">
 }
 
 export type StatusDeps = {
-  readonly options: Pick<Options, "access" | "readOnly" | "toolsets" | "unknownTools" | "deprecation">
+  readonly options: Pick<Options, "access" | "readOnly" | "toolsets" | "unknownTools" | "deprecation" | "appSlug">
+  /** Where GitHub is, for a GitHub App's install link. */
+  readonly endpoints: Endpoints
   readonly hostVersion: string
   readonly hostWarning?: string
   /** From registerMcp: undefined until known, true while another server named github is used. */
@@ -47,17 +50,20 @@ export async function computeStatus(ctx: StatusContext, deps: StatusDeps): Promi
     ),
   ])
   let state: Status["state"]
-  let account: string | undefined
+  let signedIn: SignedIn | undefined
   if (deps.enterprise) {
     // No MCP server: the sign-in on the plugin's own integration is the whole state.
     const integrationID = deps.integrationID()
-    account = integrationID ? await accountOf(ctx, integrationID) : undefined
-    state = account ? "connected" : "sign_in_required"
+    signedIn = integrationID ? await accountOf(ctx, integrationID) : undefined
+    state = signedIn ? "connected" : "sign_in_required"
   } else {
     const server = servers.data.find((item) => item.name === SERVER_NAME)
     state = stateOf(server?.status.status, deps.conflict(), deps.integrationID() !== undefined)
-    account = server?.integrationID && state !== "conflict" ? await accountOf(ctx, server.integrationID) : undefined
+    signedIn = server?.integrationID && state !== "conflict" ? await accountOf(ctx, server.integrationID) : undefined
   }
+  const account = signedIn?.account
+  // A GitHub App sign-in that reaches no installation sees no repository: say so until the App is installed.
+  const installStep = state === "connected" && signedIn?.installations === 0 ? notInstalledNote(deps.endpoints, deps.options.appSlug) : undefined
   const unguarded = unguardedAgents(agents.data, deps.options.access)
   const unmatched = unmatchedRules(agents.data)
   const shadowed = shadowedSkills(deps.skills, listed ?? [])
@@ -80,6 +86,7 @@ export async function computeStatus(ctx: StatusContext, deps: StatusDeps): Promi
     ...(deps.enterprise ? { enterprise: deps.enterprise } : {}),
     nextStep:
       (deps.enterprise ? enterpriseStep(state) : connectionStep(state)) ??
+      installStep ??
       ruleStep(unmatched) ??
       (unguarded.length > 0 ? AGENT_STEP : undefined) ??
       skillStep(shadowed) ??
@@ -132,9 +139,25 @@ function stateOf(server: ServerState | undefined, conflict: boolean | undefined,
   return server === "needs_auth" ? "sign_in_required" : server
 }
 
-async function accountOf(ctx: StatusContext, integrationID: string): Promise<string | undefined> {
+type SignedIn = { readonly account: string; readonly installations?: number }
+
+/**
+ * The active account, and for a GitHub App sign-in how many installations it reaches. The login comes from the
+ * credential when it has one: the label OpenCode stored at sign-in may carry an install note that is no longer true.
+ */
+async function accountOf(ctx: StatusContext, integrationID: string): Promise<SignedIn | undefined> {
   const connection = await ctx.integration.connection.active(integrationID).catch(() => undefined)
-  return connection?.type === "credential" ? connection.label : undefined
+  if (connection?.type !== "credential") return undefined
+  let credential: Awaited<ReturnType<StatusContext["integration"]["connection"]["resolve"]>> | undefined
+  try {
+    credential = connection.method === "oauth" ? await ctx.integration.connection.resolve(connection) : undefined
+  } catch {
+    credential = undefined
+  }
+  if (credential?.type !== "oauth") return { account: connection.label }
+  const login = credential.metadata?.login
+  const installations = installationsOf(credential)
+  return { account: typeof login === "string" ? login : connection.label, ...(installations !== undefined ? { installations } : {}) }
 }
 
 function enterpriseStep(state: Status["state"]): string | undefined {
