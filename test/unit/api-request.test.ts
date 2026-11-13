@@ -429,6 +429,39 @@ describe("callRest", () => {
     )
   })
 
+  it("keeps SAML, secondary-limit and other 403s of a GitHub App token out of the permission and install wording", async () => {
+    const APP_TOKEN = "ghu_" + "a".repeat(36)
+    const { fetch } = fakeFetch({
+      "https://api.github.com/repos/acme/web": () =>
+        json(
+          { message: "Resource protected by organization SAML enforcement. You must grant your OAuth token access to this organization." },
+          { status: 403, headers: { "x-github-sso": "required; url=https://github.com/orgs/acme/sso?authorization_request=abc" } },
+        ),
+      "https://api.github.com/repos/acme/evil-sso": () =>
+        json({ message: "Resource protected by organization SAML enforcement." }, { status: 403, headers: { "x-github-sso": "required; url=https://evil.example.com/sso" } }),
+      "https://api.github.com/repos/acme/busy": () => json({ message: "You have exceeded a secondary rate limit." }, { status: 403, headers: { "retry-after": "60" } }),
+      "https://api.github.com/repos/acme/busy-message": () => json({ message: "You have exceeded a secondary rate limit. Please wait a few minutes." }, { status: 403 }),
+      "https://api.github.com/repos/acme/primary": () =>
+        json({ message: "API rate limit exceeded" }, { status: 403, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1793404800" } }),
+      "https://api.github.com/repos/acme/blocked": () => json({ message: "Repository access blocked" }, { status: 403, headers: { "x-accepted-oauth-scopes": "repo", "x-oauth-scopes": "" } }),
+    })
+    const call = (path: string) => {
+      const input = rest({ method: "GET", path })
+      return callRest(input, restTarget(input, GITHUB_COM), { ...deps(fetch), token: APP_TOKEN, deviceSignIn: true, appSlug: "jelly-dev" })
+    }
+    expect((await call("/repos/acme/web")).nextStep).toBe(
+      "The organization requires SAML single sign-on for this sign-in. Open https://github.com/orgs/acme/sso?authorization_request=abc to authorize it, then try again.",
+    )
+    expect((await call("/repos/acme/evil-sso")).nextStep).toBe(
+      "The organization requires SAML single sign-on for this sign-in. Authorize it for the organization on GitHub, then try again.",
+    )
+    expect((await call("/repos/acme/busy")).nextStep).toBe("GitHub's secondary rate limit stopped this call. Wait 60 seconds, then try again, and make fewer calls at once.")
+    expect((await call("/repos/acme/busy-message")).nextStep).toBe("GitHub's secondary rate limit stopped this call. Wait a minute, then try again, and make fewer calls at once.")
+    expect((await call("/repos/acme/primary")).nextStep).toBe("The rate limit is used up. Try again after 2026-10-31T00:00:00.000Z.")
+    // Neither the integration message nor a permission header: no claim about permissions, installs or scopes.
+    expect((await call("/repos/acme/blocked")).nextStep).toBeUndefined()
+  })
+
   it("names the App's permission for 'not accessible by integration' even when the token's kind is unknown", async () => {
     const { fetch } = fakeFetch({
       "https://api.github.com/orgs/acme/members": () =>

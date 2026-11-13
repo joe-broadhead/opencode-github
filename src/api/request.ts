@@ -451,17 +451,30 @@ function failureStep(response: Response, deps: CallDeps, data: unknown, path: st
     return `The rate limit is used up. Try again after ${Number.isFinite(reset) ? new Date(reset * 1000).toISOString() : "the reset time"}.`
   }
   const message = (data as { message?: unknown } | undefined)?.message
-  // A GitHub App user token: GitHub Apps have permissions and installations, not OAuth scopes.
+  const said = (pattern: RegExp) => typeof message === "string" && pattern.test(message)
+  // A secondary rate limit: a 403 or 429 with Retry-After, or GitHub's message, whatever the token.
+  if ((response.status === 403 || response.status === 429) && (response.headers.has("retry-after") || said(/secondary rate limit/i))) {
+    const wait = Number(response.headers.get("retry-after"))
+    return `GitHub's secondary rate limit stopped this call. Wait ${Number.isFinite(wait) && wait > 0 ? `${wait} seconds` : "a minute"}, then try again, and make fewer calls at once.`
+  }
+  // An organization's SAML single sign-on, which the sign-in has not passed yet.
+  const sso = response.headers.get("x-github-sso")
+  if (response.status === 403 && sso) {
+    const url = ssoUrl(sso, deps.endpoints)
+    return `The organization requires SAML single sign-on for this sign-in. ${url ? `Open ${url} to authorize it` : "Authorize it for the organization on GitHub"}, then try again.`
+  }
+  // A GitHub App user token: GitHub Apps have permissions and installations, not OAuth scopes. Its wording is only for
+  // the 403s about them: GitHub's "not accessible by integration", or one that names the permission it accepts.
   const app = isAppToken(deps.token)
   const owner = ownerOf(path)
-  if (response.status === 403 && (app || (typeof message === "string" && /not accessible by integration/i.test(message)))) {
+  if (response.status === 403 && (said(/not accessible by integration/i) || (app && response.headers.has("x-accepted-github-permissions")))) {
     const needed = acceptedPermissions(response.headers.get("x-accepted-github-permissions"))
     const what = needed.length > 0 ? `the permission ${needed.join(" or ")}` : "a permission this endpoint needs"
     return `The GitHub App you signed in with lacks ${what}, or is not installed on ${owner ?? "that account or organization"}. ${installStep(deps.endpoints, deps.appSlug)}, or ask its owner to add the permission.`
   }
   const accepted = scopes(response.headers.get("x-accepted-oauth-scopes"))
   const granted = scopes(response.headers.get("x-oauth-scopes"))
-  if (response.status === 403 && accepted.length > 0 && !accepted.some((scope) => granted.includes(scope))) {
+  if (response.status === 403 && !app && accepted.length > 0 && !accepted.some((scope) => granted.includes(scope))) {
     const scope = accepted.join(" or ")
     // The scopes option only shapes device sign-in; a pasted token carries the scopes it was created with.
     return deps.deviceSignIn
@@ -480,6 +493,12 @@ function failureStep(response: Response, deps: CallDeps, data: unknown, path: st
   }
   if (response.status === 404) return `GitHub answers 404 for a wrong path and for one the account cannot see on ${new URL(deps.endpoints.api).host}. Check the path and the account's access.`
   return undefined
+}
+
+/** The SAML authorization link in X-GitHub-SSO ("required; url=…"), only when it is on GitHub's own web host. */
+function ssoUrl(header: string, endpoints: Endpoints): string | undefined {
+  const url = URL.parse(/url=(\S+)/.exec(header)?.[1] ?? "")
+  return url && url.protocol === "https:" && url.host === new URL(endpoints.web).host ? url.href : undefined
 }
 
 /** "actions=read; contents=read" as ["Actions (read)", "Contents (read)"]. */

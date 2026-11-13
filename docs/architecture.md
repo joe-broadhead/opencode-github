@@ -59,8 +59,10 @@ token (`ghu_`, 8 hours, with a `ghr_` refresh token) it exchanges the refresh to
 `SIGN_IN_REJECTED`. Every other credential, such as an OAuth App's token, which never expires, comes back unchanged
 without a request (OpenCode then saves the same value). `src/github-app.ts` tells the two apart by the token: `ghu_`
 is a GitHub App's, `gho_` an OAuth App's, and otherwise an empty `scope` means a GitHub App. A GitHub App's credential
-also records how many installations it reaches (`GET /user/installations`); with none, the label and the status say
-so, and each renewal checks again.
+also records how many installations it reaches at sign-in (`GET /user/installations`). The renewal makes no other
+request than the exchange, which has its own 10-second limit inside OpenCode's 30, so nothing delays the rotated
+pair. While the record says none, `/github-status` asks GitHub again and says so with the install link. The label is
+the login alone: OpenCode sets it only at sign-in and offers no way to change it, so it never names a state.
 
 The host creates the integration after plugin setup, and creates it again when the server's config changes. So the
 plugin registers its transform once the integration exists, and again whenever the host's own method reappears. It

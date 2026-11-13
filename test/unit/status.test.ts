@@ -80,11 +80,14 @@ function deps(overrides: Partial<StatusDeps> = {}): StatusDeps {
 }
 
 describe("computeStatus", () => {
-  it("says once a GitHub App sign-in reaches no installation, with the install link, and shows the login alone", async () => {
+  it("says while a GitHub App sign-in reaches no installation, with the install link, asking GitHub again each time", async () => {
+    let live = 0
+    const seen: string[] = []
+    const fetch = async (url: string) => (seen.push(url), Response.json({ total_count: live }))
     const note = (installations: number, appSlug?: string) =>
       computeStatus(
-        fakeCtx({ server: "connected", label: "octocat (GitHub App not installed: install it on an account or organization)", metadata: { login: "octocat", githubApp: true, installations } }).ctx,
-        deps({ options: loadOptions(appSlug ? { appSlug } : {}) }),
+        fakeCtx({ server: "connected", label: "octocat", metadata: { login: "octocat", githubApp: true, installations } }).ctx,
+        deps({ options: loadOptions(appSlug ? { appSlug } : {}), fetch }),
       )
     const none = await note(0, "jelly-dev")
     expect(none.account).toBe("octocat")
@@ -93,6 +96,10 @@ describe("computeStatus", () => {
     )
     expect((await note(0)).nextStep).toContain("Install the GitHub App on that account or organization.")
     expect((await note(2, "jelly-dev")).nextStep).toBe("Nothing to do.")
+    expect(seen).toEqual(["https://api.github.com/user/installations?per_page=1", "https://api.github.com/user/installations?per_page=1"])
+    // Installed after sign-in: the sign-in still records none, and the status asks GitHub again.
+    live = 1
+    expect((await note(0, "jelly-dev")).nextStep).toBe("Nothing to do.")
   })
 
   it.each([

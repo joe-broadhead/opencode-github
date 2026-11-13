@@ -8,6 +8,7 @@ import { lowerResource, neverMatches } from "./api/names.js"
 import { API_ACTION } from "./api/tool.js"
 import { type Rule, defaultRules, matches, unguardedAgents } from "./permissions.js"
 import { AGENT_STEP, GithubRpc, NOTHING_TO_DO, SERVER_NAME, type SkillPath, type Status, formatStatus } from "./rpc.js"
+import { type Fetch, fetchInstallationCount } from "./device-flow.js"
 import { installationsOf, notInstalledNote } from "./sign-in.js"
 import { PLUGIN_VERSION } from "./version.js"
 
@@ -25,6 +26,8 @@ export type StatusDeps = {
   readonly options: Pick<Options, "access" | "readOnly" | "toolsets" | "unknownTools" | "deprecation" | "appSlug">
   /** Where GitHub is, for a GitHub App's install link. */
   readonly endpoints: Endpoints
+  /** For the installation check; the global fetch unless a test sets one. */
+  readonly fetch?: Fetch
   readonly hostVersion: string
   readonly hostWarning?: string
   /** From registerMcp: undefined until known, true while another server named github is used. */
@@ -54,12 +57,12 @@ export async function computeStatus(ctx: StatusContext, deps: StatusDeps): Promi
   if (deps.enterprise) {
     // No MCP server: the sign-in on the plugin's own integration is the whole state.
     const integrationID = deps.integrationID()
-    signedIn = integrationID ? await accountOf(ctx, integrationID) : undefined
+    signedIn = integrationID ? await accountOf(ctx, deps, integrationID) : undefined
     state = signedIn ? "connected" : "sign_in_required"
   } else {
     const server = servers.data.find((item) => item.name === SERVER_NAME)
     state = stateOf(server?.status.status, deps.conflict(), deps.integrationID() !== undefined)
-    signedIn = server?.integrationID && state !== "conflict" ? await accountOf(ctx, server.integrationID) : undefined
+    signedIn = server?.integrationID && state !== "conflict" ? await accountOf(ctx, deps, server.integrationID) : undefined
   }
   const account = signedIn?.account
   // A GitHub App sign-in that reaches no installation sees no repository: say so until the App is installed.
@@ -140,12 +143,13 @@ function stateOf(server: ServerState | undefined, conflict: boolean | undefined,
 }
 
 type SignedIn = { readonly account: string; readonly installations?: number }
+type AccountDeps = Pick<StatusDeps, "endpoints" | "fetch">
 
 /**
  * The active account, and for a GitHub App sign-in how many installations it reaches. The login comes from the
  * credential when it has one: the label OpenCode stored at sign-in may carry an install note that is no longer true.
  */
-async function accountOf(ctx: StatusContext, integrationID: string): Promise<SignedIn | undefined> {
+async function accountOf(ctx: StatusContext, deps: AccountDeps, integrationID: string): Promise<SignedIn | undefined> {
   const connection = await ctx.integration.connection.active(integrationID).catch(() => undefined)
   if (connection?.type !== "credential") return undefined
   let credential: Awaited<ReturnType<StatusContext["integration"]["connection"]["resolve"]>> | undefined
@@ -156,7 +160,12 @@ async function accountOf(ctx: StatusContext, integrationID: string): Promise<Sig
   }
   if (credential?.type !== "oauth") return { account: connection.label }
   const login = credential.metadata?.login
-  const installations = installationsOf(credential)
+  // Recorded at sign-in only. While it says none, ask GitHub again, so the note goes as soon as the App is installed.
+  const recorded = installationsOf(credential)
+  const installations =
+    recorded === 0
+      ? ((await fetchInstallationCount(credential.access, { fetch: deps.fetch ?? ((url, init) => fetch(url, init)), endpoints: deps.endpoints })) ?? recorded)
+      : recorded
   return { account: typeof login === "string" ? login : connection.label, ...(installations !== undefined ? { installations } : {}) }
 }
 

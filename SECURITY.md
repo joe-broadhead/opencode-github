@@ -21,7 +21,7 @@ The plugin's own code connects only to these GitHub endpoints:
 | `https://api.githubcopilot.com/mcp/` | GitHub's MCP server. OpenCode's MCP client makes these requests. |
 | `https://github.com/login/device/code` and `https://github.com/login/oauth/access_token` | Device sign-in, only when `clientId` is set, and renewing a GitHub App's expiring token with its refresh token. |
 | `https://api.github.com/user` | Checking a credential and reading its GitHub login. |
-| `https://api.github.com/user/installations` | After a GitHub App device sign-in, and at a renewal while it had none: how many installations the token reaches. |
+| `https://api.github.com/user/installations` | After a GitHub App device sign-in, and from `/github-status` while it had none: how many installations the token reaches. |
 | `https://<host>/login/…`, `https://<host>/api/v3`, `/api/graphql` and `/api/uploads` | Only with the `host` option: sign-in and `github_api` on your GitHub Enterprise Server, instead of the github.com endpoints. |
 | `https://api.github.com` and `https://uploads.github.com` | The `github_api` tool. It refuses any other host. A download follows GitHub's redirects to its file storage (logs, artifacts, release assets) without the token; other calls never leave the API. |
 

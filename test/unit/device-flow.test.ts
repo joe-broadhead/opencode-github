@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { type Fetch, fetchInstallationCount, fetchLogin, pollAccessToken, refreshAccessToken, requestDeviceCode } from "../../src/device-flow.js"
+import { type Fetch, REFRESH_TIMEOUT_MS, fetchInstallationCount, fetchLogin, pollAccessToken, refreshAccessToken, requestDeviceCode } from "../../src/device-flow.js"
 
 const TOKEN = "gho_" + "S".repeat(36)
 const DEVICE_CODE = "device-code-secret"
@@ -291,6 +291,16 @@ describe("refreshing a GitHub App's user token", () => {
     const message = await messageOf(refreshAccessToken({ clientId: "Iv23.client", refreshToken: REFRESH, service: "GitHub", fetch }))
     expect(message).toBe("SIGN_IN_REJECTED: GitHub rejected the saved sign-in. Next step: Run /connect and choose GitHub to sign in again.")
     expect(message).not.toContain(REFRESH)
+  })
+
+  it("gives up on a GitHub that does not answer within its own limit, well inside OpenCode's 30 seconds", async () => {
+    expect(REFRESH_TIMEOUT_MS).toBeLessThanOrEqual(10_000)
+    const hanging: Fetch = (_url, init) =>
+      new Promise((_resolve, reject) => init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true }))
+    const started = Date.now()
+    const message = await messageOf(refreshAccessToken({ clientId: "c", refreshToken: REFRESH, service: "GitHub", fetch: hanging, timeoutMs: 50 }))
+    expect(message).toMatch(/^REFRESH_UNREACHABLE: /)
+    expect(Date.now() - started).toBeLessThan(5_000)
   })
 
   it("asks to try again, not to sign in again, when GitHub cannot be reached or fails", async () => {

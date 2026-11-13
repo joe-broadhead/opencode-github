@@ -714,8 +714,11 @@ tokens** on. Then:
   refresh token (revoked, already used, or older than six months), the next call fails with `SIGN_IN_REJECTED` and
   `/connect` asks for a new sign-in.
 - **Installations.** The token reaches only repositories where the App is installed. After sign-in the plugin asks
-  GitHub how many installations it reaches; with none, the account's label in `/connect` and `/github-status`'s next
-  step say so, with the install link when `appSlug` is set. A later renewal checks again.
+  GitHub how many installations it reaches; with none, `/github-status`'s next step says so, with the install link
+  when `appSlug` is set, and asks GitHub again each time until the App is installed. The `/connect` label is the login
+  alone, because OpenCode sets it only at sign-in.
+- **Renewal limits.** The renewal is one request with its own 10-second limit, well inside the 30 seconds OpenCode
+  allows, so a slow GitHub fails it cleanly (`REFRESH_UNREACHABLE`; the next call tries again) instead of being cut off.
 - **Permissions.** A call the App has no permission for, or makes on an account it is not installed on, fails with
   "Resource not accessible by integration". `github_api`'s next step names the permission GitHub asked for and the
   account, and links the install page.

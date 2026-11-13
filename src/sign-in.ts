@@ -141,31 +141,30 @@ export function signIn(input: SignInInput, stopped: AbortSignal): { attach(edito
     },
   })
 
-  // Renews a GitHub App's expiring token; every other credential comes back unchanged, without a request.
+  // Renews a GitHub App's expiring token; every other credential comes back unchanged, without a request. The exchange
+  // is the only request: the new pair is returned as soon as GitHub sends it, so nothing else can delay it past
+  // OpenCode's limit. /github-status checks installations itself.
   const deviceRefresh = async (clientId: string, credential: Credential.OAuth): Promise<Credential.OAuth> => {
     if (!credential.refresh || !credential.expires) return credential
     const metadata = (credential.metadata ?? {}) as Record<string, unknown> & AppMetadata
     if (metadata.refreshExpires !== undefined && metadata.refreshExpires <= Date.now()) throw signInAgain(service)
     const token = await refreshAccessToken({ clientId, refreshToken: credential.refresh, service, signal: stopped, fetch: send, endpoints })
-    // An App that reached no installation is checked again, so the install note goes once the App is installed.
-    const installations = metadata.installations === 0 ? await fetchInstallationCount(token.accessToken, { signal: stopped, fetch: send, endpoints }) : undefined
     return oauthCredential(DEVICE_METHOD_ID, token.accessToken, {
       refresh: token.refreshToken ?? "",
       expires: token.expiresIn ? Date.now() + token.expiresIn * 1000 : 0,
       metadata: {
         ...metadata,
         scope: token.scope,
-        ...(installations !== undefined ? { installations } : {}),
         ...(token.refreshTokenExpiresIn ? { refreshExpires: Date.now() + token.refreshTokenExpiresIn * 1000 } : {}),
       },
     })
   }
 
+  // OpenCode stores the label once, at sign-in, and offers no way to change it: so it is the login alone, never a state
+  // that can go stale. /github-status says when a GitHub App reaches no installation.
   const label = (credential: Credential.OAuth) => {
     const login = credential.metadata?.login
-    if (typeof login !== "string") return undefined
-    if (installationsOf(credential) !== 0) return login
-    return `${login} (GitHub App not installed: ${input.appSlug ? `${endpoints.web}/apps/${input.appSlug}/installations/new` : "install it on an account or organization"})`
+    return typeof login === "string" ? login : undefined
   }
 
   return {

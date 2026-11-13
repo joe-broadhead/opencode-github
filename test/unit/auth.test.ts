@@ -587,23 +587,30 @@ describe("GitHub App device sign-in", () => {
     await auth.dispose()
   })
 
-  it("says in the label when the App reaches no installation, and checks again on the next renewal", async () => {
-    const { host, auth } = await signedOutHost()
-    const { credential } = await appSignIn(host, 0)
-    expect(credential.metadata).toMatchObject({ installations: 0 })
-    expect(host.implementation(DEVICE_METHOD_ID).label?.(credential)).toBe("octocat (GitHub App not installed: install it on an account or organization)")
-    await vi.advanceTimersByTimeAsync(2_000)
-    expect((await resolve(host, credential)).metadata).toMatchObject({ installations: 1 })
-    await auth.dispose()
-  })
-
-  it("links the install page in the label when appSlug is set", async () => {
+  it("labels the account with the login alone, since OpenCode never updates a label, and records no installation", async () => {
     const host = fakeHost()
     host.registerServer()
     const auth = await registerAuth(host.ctx, { ...INPUT, appSlug: "jelly-dev" })
     await vi.advanceTimersByTimeAsync(0)
     const { credential } = await appSignIn(host, 0)
-    expect(host.implementation(DEVICE_METHOD_ID).label?.(credential)).toBe("octocat (GitHub App not installed: https://github.com/apps/jelly-dev/installations/new)")
+    expect(credential.metadata).toMatchObject({ installations: 0 })
+    expect(host.implementation(DEVICE_METHOD_ID).label?.(credential)).toBe("octocat")
+    await auth.dispose()
+  })
+
+  it("returns the rotated pair without waiting for an installation count that never answers", async () => {
+    const { host, auth } = await signedOutHost()
+    const { credential, calls } = await appSignIn(host, 0)
+    await vi.advanceTimersByTimeAsync(2_000)
+    // From now on the installation count would hang: the renewal must not touch it.
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      calls.push({ url, init })
+      if (url === OAUTH_URL) return json({ access_token: NEW_TOKEN, expires_in: 28800, refresh_token: NEW_REFRESH, scope: "", token_type: "bearer" })
+      return new Promise<Response>(() => undefined)
+    })
+    const renewed = await resolve(host, credential)
+    expect(renewed).toMatchObject({ access: NEW_TOKEN, refresh: NEW_REFRESH, metadata: { installations: 0 } })
+    expect(calls.map((call) => call.url).filter((url) => url === INSTALLATIONS_URL)).toHaveLength(1)
     await auth.dispose()
   })
 

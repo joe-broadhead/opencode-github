@@ -13,6 +13,11 @@ const installationsUrl = (endpoints: Endpoints) => `${endpoints.api}/user/instal
 const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
 const SLOW_DOWN_SECONDS = 5
 const LOGIN_TIMEOUT_MS = 10_000
+/**
+ * OpenCode gives a refresh hook 30 seconds. The exchange has its own, shorter limit, so a slow GitHub fails the renewal
+ * well inside that window rather than being cut off by OpenCode after GitHub may have rotated the pair.
+ */
+export const REFRESH_TIMEOUT_MS = 10_000
 const RESTART = "Start the sign-in again."
 const expired = () => new GitHubPluginError("SIGN_IN_EXPIRED", "The GitHub sign-in code expired before it was entered.", RESTART)
 
@@ -119,11 +124,15 @@ export async function refreshAccessToken(input: {
   readonly signal?: AbortSignal
   readonly fetch: Fetch
   readonly endpoints?: Endpoints
+  /** REFRESH_TIMEOUT_MS unless a test sets a shorter one. */
+  readonly timeoutMs?: number
 }): Promise<AccessToken> {
   const url = accessTokenUrl(input.endpoints ?? GITHUB_COM)
   let body: Record<string, unknown>
   try {
-    body = await postForm(input.fetch, url, { client_id: input.clientId, grant_type: "refresh_token", refresh_token: input.refreshToken }, input.signal)
+    const timeout = AbortSignal.timeout(input.timeoutMs ?? REFRESH_TIMEOUT_MS)
+    const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout
+    body = await postForm(input.fetch, url, { client_id: input.clientId, grant_type: "refresh_token", refresh_token: input.refreshToken }, signal)
   } catch (error) {
     if (!(error instanceof GitHubPluginError)) throw error
     throw error.code === "SIGN_IN_UNREACHABLE"
