@@ -4,9 +4,11 @@
 // login, repository and link is made up.
 import { describe, expect, it } from "vitest"
 import type { ApiOutput } from "../../src/api/contract.js"
+import { registerApiTool } from "../../src/api/tool.js"
+import { DEFAULT_TOOLSETS, GITHUB_COM } from "../../src/config.js"
 import { GitHubPluginError } from "../../src/errors.js"
 import { EVENT_LIMITS, PAGE, assertEventsListConformance, encodeCursor, resultProblems, type EventsListResult } from "../../src/host/events-list.js"
-import { defaultRules } from "../../src/permissions.js"
+import { type Rule, defaultRules } from "../../src/permissions.js"
 import { EVENTS_ACTION, EVENTS_INPUT, SETTLE_MS, SOURCE, commitItem, eventsMethod, issueItem, listEvents, loginOf, notificationItem, runEvents } from "../../src/source-events.js"
 
 const NOW = Date.parse("2026-11-08T12:00:00Z")
@@ -244,5 +246,73 @@ describe("the tool and the tools RPC method", () => {
     expect(method).toMatchObject({ name: "events_list", action: "github_events_list", input: EVENTS_INPUT })
     expect(defaultRules()).toContainEqual({ action: "github_events_list", resource: "*", effect: "allow" })
     expect((await method.run({ since: "2999-01-01" }, { ...call, signal: new AbortController().signal, progress: async () => {} })) as EventsListResult).toMatchObject({ source: "github", events: [] })
+  })
+})
+
+// Every inner read asserts github_api on its own GET /path through github_api's real spec, before any network I/O, so a
+// session rule that denies the action, or one of the paths, stops it with nothing sent.
+describe("events_list's inner reads", () => {
+  const call = { sessionID: "ses_1", agent: "build", messageID: "msg_1", id: "call_1" }
+  const BASE: Rule[] = [{ action: "*", resource: "*", effect: "allow" }, ...defaultRules("all")]
+
+  async function wired(session: readonly Rule[]) {
+    const fetched: string[] = []
+    const asserted: string[] = []
+    const ctx = {
+      tool: { transform: async () => ({ dispose: async () => {} }), list: async () => [] },
+      permission: { assert: async (request: { action: string; resources: string[] }) => void asserted.push(`${request.action} ${request.resources[0]}`) },
+      integration: {
+        get: async () => ({ data: { connections: [] } }),
+        connection: {
+          active: async () => ({ type: "credential", id: "cred_1", label: LOGIN, method: "oauth" }),
+          resolve: async () => ({ type: "oauth", access: "gho_" + "t".repeat(36), refresh: "", expires: 0 }),
+          status: async () => {},
+        },
+      },
+      session: { get: async () => ({ permissions: session }) },
+      agent: { get: async () => ({ data: { permissions: BASE } }) },
+    }
+    const api = await registerApiTool(ctx as never, {
+      access: "all",
+      readOnly: false,
+      endpoints: GITHUB_COM,
+      service: "GitHub",
+      root: "/",
+      toolsets: DEFAULT_TOOLSETS,
+      integrationID: () => "mcp_1",
+      fetch: async (url) => {
+        fetched.push(new URL(url).pathname)
+        const path = new URL(url).pathname
+        const body = path === "/user" ? { login: LOGIN } : path === "/notifications" ? [] : { total_count: 0, incomplete_results: false, items: [] }
+        return new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } })
+      },
+    })
+    const deps = { ctx: { tool: ctx.tool, permission: ctx.permission }, api, managed: () => false, now: () => NOW }
+    return { run: () => runEvents(deps as never, { since: SINCE }, call), fetched, asserted }
+  }
+
+  it("asserts github_events_list, then github_api on each GET /path before it is sent", async () => {
+    const { run, fetched, asserted } = await wired([])
+    expect((await run()).events).toEqual([])
+    expect(fetched).toEqual(["/user", "/search/issues", "/search/commits", "/notifications"])
+    expect(asserted).toEqual([`${EVENTS_ACTION} *`, "github_api GET /user", "github_api GET /search/issues", "github_api GET /search/commits", "github_api GET /notifications"])
+  })
+
+  it("sends nothing when the session denies github_api", async () => {
+    const { run, fetched, asserted } = await wired([{ action: "github_api", resource: "*", effect: "deny" }])
+    await expect(run()).rejects.toThrow(/^PERMISSION_DENIED: GET \/user needs a prior allow rule for github_api, and a deny rule refuses it\./)
+    expect(fetched).toEqual([])
+    expect(asserted).toEqual([`${EVENTS_ACTION} *`])
+  })
+
+  it.each([
+    ["GET /search/*", ["/user"]],
+    ["GET /notifications", ["/user", "/search/issues", "/search/commits"]],
+  ])("refuses a read the session denies (%s) before its request, and an ask too, as nobody can answer it", async (resource, sent) => {
+    for (const effect of ["deny", "ask"] as const) {
+      const { run, fetched } = await wired([{ action: "github_api", resource, effect }])
+      await expect(run()).rejects.toThrow(/^PERMISSION_DENIED: GET \/(search|notifications)/)
+      expect(fetched).toEqual(sent)
+    }
   })
 })

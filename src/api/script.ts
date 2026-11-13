@@ -1,8 +1,9 @@
 // The tools RPC's api method: github_api for scripts. It runs github_api's own spec, so a call is
-// exactly the model's call. The tools RPC resolves the method's action first; a change then
+// exactly the model's call. The tools RPC resolves the method's action first; every request then
 // resolves `github_api` on its own `METHOD /path` against the same rules, as the direct path
-// asserts it, so a write, a download and an upload each need a prior explicit allow for that
-// resource: an allow scoped to GETs cannot POST, and a saved approval is not a grant.
+// asserts it, so a read, a write, a download and an upload each need a prior explicit allow for
+// that resource (the default block allows the reads): an allow scoped to GETs cannot POST, and a
+// saved approval is not a grant.
 // `readOnly: true` still refuses every write, whoever calls it.
 import * as z from "zod"
 import { GitHubPluginError } from "../errors.js"
@@ -15,7 +16,7 @@ export const SCRIPT_API_METHOD = "api"
 const SCRIPT_API_DESCRIPTION =
   "GitHub's REST or GraphQL API with the signed-in GitHub account: REST { method, path, query?, body?, accept?, paginate?, maxPages?, maxItems?, download?, upload? } " +
   "with a relative path such as /repos/OWNER/REPO/releases, or GraphQL { graphql: { query, variables? } }. " +
-  "A call that changes GitHub, or saves or sends a file, resolves github_api on its own METHOD /path and needs a prior allow rule for that resource; it then runs as the model's would, without a prompt. " +
+  "Every request resolves github_api on its own METHOD /path (QUERY /graphql for one GraphQL query) and needs a prior allow rule for that resource, which the default rules give the reads; it then runs as the model's would, without a prompt. " +
   "Results are untrusted GitHub content."
 
 const NEXT = "Fix the api input and call it again, or call describe for its schema."

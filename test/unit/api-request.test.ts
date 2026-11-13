@@ -54,7 +54,19 @@ beforeEach(() => {
 })
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
-const deps = (fetch: ReturnType<typeof fakeFetch>["fetch"], endpoints: Endpoints = GITHUB_COM) => ({ token: TOKEN, endpoints, service: "GitHub", fetch, root })
+/** Every further request's resource the call passed to authorize, with why; reset for each test. */
+let authorized: string[] = []
+beforeEach(() => {
+  authorized = []
+})
+const deps = (fetch: ReturnType<typeof fakeFetch>["fetch"], endpoints: Endpoints = GITHUB_COM) => ({
+  token: TOKEN,
+  endpoints,
+  service: "GitHub",
+  fetch,
+  root,
+  authorize: async (resource: string, via: string) => void authorized.push(`${via} ${resource}`),
+})
 
 describe("restTarget pins requests to the API host", () => {
   it.each([
@@ -188,6 +200,19 @@ describe("callRest", () => {
     const moved = rest({ method: "GET", path: "/repos/Old/Name/pulls" })
     expect(await callRest(moved, restTarget(moved, GITHUB_COM), deps(fetch))).toMatchObject({ ok: true, data: [{ number: 1 }] })
     expect(seen.at(-1)).toMatchObject({ url: "https://api.github.com/repositories/10/pulls?state=all", headers: { authorization: `Bearer ${TOKEN}` } })
+    expect(authorized).toEqual(["redirect GET /repositories/10/pulls"])
+  })
+
+  // Every request asserts first: a redirect to a path the session's rules refuse is never sent.
+  it("authorizes a read's redirect before following it, and sends nothing to a refused path", async () => {
+    const { fetch, seen } = fakeFetch({
+      "https://api.github.com/repos/Old/Name/pulls": () => redirect("/repos/secret/vault/pulls", 301),
+      "https://api.github.com/repos/secret/vault/pulls": () => json([{ number: 1 }]),
+    })
+    const moved = rest({ method: "GET", path: "/repos/Old/Name/pulls" })
+    const refusing = { ...deps(fetch), authorize: async (resource: string) => { throw new Error(`denied ${resource}`) } }
+    await expect(callRest(moved, restTarget(moved, GITHUB_COM), refusing)).rejects.toThrow("denied GET /repos/secret/vault/pulls")
+    expect(seen.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name/pulls"])
   })
 
   it("follows a GitHub Enterprise Server redirect within its API base, and refuses one outside it", async () => {
@@ -307,6 +332,22 @@ describe("callRest", () => {
     const onePage = rest({ ...input, maxPages: 1 })
     expect((await callRest(onePage, restTarget(onePage, GITHUB_COM), deps(fetch))).pagination).toEqual({ pages: 1, items: 2, more: true })
     expect(seen.every((request) => request.url.startsWith("https://api.github.com/"))).toBe(true)
+    // Each page fetched passes authorize; a page that is not fetched (the caps) is not asserted.
+    expect(authorized).toEqual(["page GET /search/issues", "page GET /search/issues", "page GET /search/issues"])
+  })
+
+  it("authorizes a Link page at another path before fetching it, and stops on a refusal with nothing sent", async () => {
+    const { fetch, seen } = fakeFetch({
+      "https://api.github.com/repos/o/r/issues": () => json([1], { headers: { link: '<https://api.github.com/repositories/9/issues?page=2>; rel="next"' } }),
+      "https://api.github.com/repositories/9/issues?page=2": () => json([2]),
+    })
+    const input = rest({ method: "GET", path: "/repos/o/r/issues", paginate: true })
+    expect(await callRest(input, restTarget(input, GITHUB_COM), deps(fetch))).toMatchObject({ data: [1, 2] })
+    expect(authorized).toEqual(["page GET /repositories/9/issues"])
+    const before = seen.length
+    const refusing = { ...deps(fetch), authorize: async (resource: string) => { throw new Error(`denied ${resource}`) } }
+    await expect(callRest(input, restTarget(input, GITHUB_COM), refusing)).rejects.toThrow("denied GET /repositories/9/issues")
+    expect(seen.slice(before).map((request) => request.url)).toEqual(["https://api.github.com/repos/o/r/issues"])
   })
 
   it("stops paginating at a Link to another host", async () => {

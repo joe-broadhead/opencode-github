@@ -19,6 +19,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- `github_api` reads in an agent without the base `* * allow` rule now ask. The plugin's block, which allows them, goes
+  only into agents with that rule; before this release such reads ran unchecked. In those agents a script's or
+  `events_list`'s reads are refused with `PERMISSION_DENIED` unless allowed. To allow them, add
+  `{ "action": "github_api", "resource": "GET *", "effect": "allow" }` to the agent's rules, and the same for `HEAD *`,
+  `POST /markdown`, `POST /markdown/raw` and `QUERY /graphql` as needed.
 - `github_api` words a GitHub App's 403 ("Resource not accessible by integration") by permission and installation: it
   names the permission from `X-Accepted-GitHub-Permissions` and the account from the path, and links the install page.
   A GitHub App's 404 also says the App may not be installed there. SAML single sign-on (`X-GitHub-SSO`, with its
@@ -32,6 +37,14 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- **Every GitHub request asserts its permission first.** `github_api` asserted only changes and downloads, so its reads
+  (GET, HEAD, `POST /markdown`, a GraphQL query), the redirects and `Link` pages it followed, and `github_events_list`'s
+  searches, notifications and `GET /user` were sent without checking the calling session's rules: a session rule that
+  denied `github_api`, or one read path, did not stop them. Now each request asserts `github_api` on its own
+  `METHOD /path` (`QUERY /graphql` for a single GraphQL query) before any network I/O, a redirect or page at another
+  path included. The default block allows the read resources at every access value, so nothing new asks; a rule of
+  your own that asks for or denies a read now decides it. `events_list` runs its GETs as an unattended call, so an ask
+  or a deny refuses them with `PERMISSION_DENIED` and nothing is sent.
 - The host test of the Code Mode catalogue reads the request that carries the catalogue, not the session-title request
   OpenCode 2.2.4 can send after it.
 

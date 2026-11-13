@@ -133,11 +133,13 @@ A REST error status, such as 404, is a result with `ok: false`, not an RPC error
 the API is followed, as for the model; one outside the API is `API_REDIRECT_OFF_HOST`. For job logs, call the
 `get_job_logs` method.
 
-**A non-GET/HEAD `api` call resolves the same write permission the direct path asserts** — action `github_api`, resource
-`METHOD /path`, with the names GitHub reads without regard to case in lower case — **from a prior explicit `allow`
-only.** An ask is refused with `PERMISSION_DENIED` before dispatch, and a saved "Always allow" does not count, so a
-change, a `download` (a file write inside the project) and an `upload` each need that rule in the agent's or the
-session's rules. **An allow scoped to GETs cannot POST:** a rule whose resource is `GET …` does not match
+**Every `api` request resolves the same permission the direct path asserts** — action `github_api`, resource
+`METHOD /path` (`QUERY /graphql` for a single GraphQL query), with the names GitHub reads without regard to case in
+lower case — **from a prior explicit `allow` only**, before it is sent. The plugin's block allows the reads, so a read
+needs nothing more unless a rule of yours asks for or denies its path. An ask is refused with `PERMISSION_DENIED`
+before dispatch, and a saved "Always allow" does not count, so a change, a `download` (a file write inside the
+project) and an `upload` each need that rule in the agent's or the session's rules. A redirect within the API and a
+`Link` page at another path resolve their own path the same way. **An allow scoped to GETs cannot POST:** a rule whose resource is `GET …` does not match
 `POST /repos/…`, so the change is refused and nothing is sent. An allow on resource `*` covers every method and path.
 `access: "read-only"` still refuses every change, whoever calls it.
 
@@ -145,7 +147,8 @@ session's rules. **An allow scoped to GETs cannot POST:** a rule whose resource 
 
 `events_list` runs the plugin's own `github_events_list`, Memory's source of GitHub events
 ([configuration](configuration.md#events-list)). It asserts `github_events_list`, then makes only GET requests, as
-the `api` method does, plus `get_me` where GitHub's MCP server is there. Its errors are the `EVENTS_` codes in the
+the `api` method does, each resolving and asserting `github_api` on its own `GET /path` first, plus `get_me` where
+GitHub's MCP server is there. Its errors are the `EVENTS_` codes in the
 configuration guide's Errors table.
 
 ## Errors

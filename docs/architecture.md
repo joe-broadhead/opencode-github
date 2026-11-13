@@ -100,14 +100,17 @@ from `src/sign-in.ts`. The status reads the sign-in from that integration and na
 `github_api`, not pinned). It also describes the `github` namespace: the skills, `search` for parameters, whether
 changes run now, and where scripts are documented.
 `src/api/classify.ts` decides read or write: REST by method, GraphQL by scanning
-the document's operations with a small tokenizer that skips strings, block strings and comments. Reads run; writes
-call `ctx.permission.assert` with `METHOD /path` as the resource and save pattern, and are refused while read-only.
+the document's operations with a small tokenizer that skips strings, block strings and comments. Every request calls
+`ctx.permission.assert` before it is sent, with its `METHOD /path` as the resource and save pattern (`QUERY /graphql`
+for a single GraphQL query, `POST /graphql` for any other document); `defaultRules` allows the read resources
+(`API_READS` in `src/permissions.ts`) at every access value, and writes are refused while read-only.
 The resource writes the names GitHub reads without regard to case in lower case (`src/api/names.ts`).
 `src/api/hints.ts` maps a few GET paths to the GitHub tool that covers them; `run` names it in a working result's
 `nextStep` when its toolset is on (not with `host`), and never refuses the call.
 `src/api/request.ts` builds the URL on the configured API base (uploads on the uploads base), refuses anything that
 could leave it, sends the integration's active token, and handles redirects by hand with `redirect: "manual"`: never
-for a change, within the API base for a read (reads never assert, so neither do their redirects), and to storage
+for a change, within the API base for a read (after `authorize` asserts the new path; a `Link` page at another path
+too), and to storage
 hosts only for a download, without `Authorization`. It joins `Link` pages under the API base path, caps the inline result, and streams downloads into the
 project with a SHA-256. The tool filter leaves `github_api` alone even though it shares the `github_` prefix.
 
@@ -180,9 +183,10 @@ A call is `{ sessionID, input }`. The shared module (`src/host/tools-rpc.ts`):
    `execute(input, { sessionID, agent, messageID, id, signal, progress })` with a new call id, so OpenCode checks
    `github_<tool>` on `*` itself and sends its own credential; and returns `{ output?, text }`;
 4. for `api`: runs `scriptApi` (`src/api/script.ts`), which checks the input with `github_api`'s whole schema and runs
-   `github_api`'s own `run` with the call's context. A read asserts nothing; a write, a `download` and an `upload`
-   assert `github_api` themselves, with the script call's source, so they run only under the prior `allow` the module
-   resolved.
+   `github_api`'s own `run` with the call's context. Every request — a read, a write, a `download`, an `upload`, a
+   redirect within the API and a `Link` page at another path — resolves `github_api` on its own resource against the
+   agent's and the session's rules, then asserts it with the script call's source, so it runs only under a prior
+   `allow`. `events_list` runs its GETs through the same spec as a script call.
 
 While a call runs, its id is live. A `permission.hook("evaluate")` turns an `ask` whose source id is live into a deny,
 so an inner action a method needs is named in the refusal and no prompt waits. It changes nothing else; the forbidden-API scan

@@ -289,6 +289,17 @@ describe("writes, lockdown and the user's own rules", () => {
     expect(await host.client.permission.list({ sessionID })).toEqual([])
   })
 
+  // Every github_api request asserts its own METHOD /path first: at ask-changes a read runs without a prompt, as the
+  // block allows it by resource, and a session's deny on one read path refuses that read with nothing sent.
+  test("github_api reads run unprompted at ask-changes; a session deny on a read path sends nothing", async () => {
+    const before = host.fake.requests.length
+    expect(await attempt(host, await session(host), "build", "github_api", "reject", { method: "GET", path: "/repos/octo/hello" })).toEqual({ asked: undefined, ok: true })
+    const denied = await session(host, "build", [{ action: "github_api", resource: "GET /notifications", effect: "deny" }])
+    expect(await attempt(host, denied, "build", "github_api", "reject", { method: "GET", path: "/notifications" })).toMatchObject({ asked: undefined, ok: false })
+    expect(host.fake.requests.slice(before).filter((request) => !("toolsets" in request)).map((request) => `${request.method} ${request.path}`)).toEqual(["GET /repos/octo/hello"])
+    expect(await host.client.permission.list({ sessionID: denied })).toEqual([])
+  })
+
   test("the per-agent fix guards a config-only agent and keeps the user's rules winning", async () => {
     const sessionID = await session(host, "reviewer")
     expect(await attempt(host, sessionID, "reviewer", "github_brand_new_tool")).toMatchObject({ asked: "github_brand_new_tool", ok: false })
@@ -414,6 +425,17 @@ describe(`GitHub Enterprise Server on OpenCode ${SDK_VERSION}`, () => {
     // The fake GitHub has no search, so the first search fails, as EVENTS_READ_FAILED.
     expect(await script(host, "events_list", { sessionID, input: { since: "2026-10-01" } })).toMatchObject({ type: "failed", code: "EVENTS_READ_FAILED" })
     expect(host.fake.requests.slice(before).every((request) => request.method === "GET")).toBe(true)
+  })
+
+  // events_list asserts each inner read: a session deny on the search paths stops it before any search is sent.
+  test("events_list's inner reads assert github_api: a session deny on GET /search/* sends no search", async () => {
+    const before = host.fake.requests.length
+    const denied = await session(host, "build", [{ action: "github_api", resource: "GET /search/*", effect: "deny" }])
+    const listed = await attempt(host, denied, "build", "github_events_list", "reject", { since: "2026-11-01" })
+    expect(listed).toMatchObject({ asked: undefined, ok: false })
+    expect(String((listed as { error?: string }).error)).toContain("GET /search/issues needs a prior allow rule for github_api, and a deny rule refuses it")
+    expect(host.fake.requests.slice(before).map((request) => `${request.method} ${request.path}`)).toEqual(["GET /user"])
+    expect(await host.client.permission.list({ sessionID: denied })).toEqual([])
   })
 
   test("a script reads through api with the GitHub Enterprise sign-in, and a rule scoped to the change's resource refuses it", async () => {

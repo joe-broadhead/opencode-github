@@ -162,12 +162,12 @@ describe("github_api", () => {
     expect(missing).toEqual([])
   })
 
-  // QA GITHUB-5: rendering Markdown is a read, also while read-only.
-  it("runs POST /markdown and /markdown/raw as reads, without asking, also while read-only", async () => {
+  // QA GITHUB-5: rendering Markdown is a read, also while read-only; it asserts its resource like every request.
+  it("runs POST /markdown and /markdown/raw as reads, also while read-only, asserting each first", async () => {
     const api = setUp({ readOnly: true })
     await api.run({ method: "POST", path: "/markdown", body: { text: "**hi**" } })
     await api.run({ method: "POST", path: "/markdown/raw", body: "**hi**" })
-    expect(api.asserts).toEqual([])
+    expect(api.asserts.map((request) => (request.resources as string[])[0])).toEqual(["POST /markdown", "POST /markdown/raw"])
     expect(api.requests.map((request) => `${request.method} ${request.url}`)).toEqual(["POST https://api.github.com/markdown", "POST https://api.github.com/markdown/raw"])
     expect(await message(api.run({ method: "POST", path: "/markdown/x", body: {} }))).toMatch(/^READ_ONLY: /)
   })
@@ -186,12 +186,17 @@ describe("github_api", () => {
     expect(readOnly.requests).toEqual([])
   })
 
-  it("runs reads without asking: GET, HEAD and a single GraphQL query", async () => {
+  // Every request asserts github_api on its own resource before it is sent, reads included, so a session's rule decides.
+  it("asserts every read before sending it: GET and HEAD on METHOD /path, a single GraphQL query on QUERY /graphql", async () => {
     const api = setUp({ readOnly: true })
     expect((await api.run({ method: "GET", path: "/user" })).output).toMatchObject({ ok: true, status: 200, data: { ok: 1 } })
     await api.run({ method: "HEAD", path: "/user" })
     await api.run({ graphql: { query: "query { viewer { login } }" } })
-    expect(api.asserts).toEqual([])
+    expect(api.asserts).toEqual([
+      expect.objectContaining({ action: "github_api", resources: ["GET /user"], save: ["GET /user"], source: { type: "tool", messageID: "msg_1", id: "call_1" } }),
+      expect.objectContaining({ action: "github_api", resources: ["HEAD /user"] }),
+      expect.objectContaining({ action: "github_api", resources: ["QUERY /graphql"], metadata: { graphql: [{ type: "query", fields: ["viewer"] }] } }),
+    ])
     expect(api.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
       "GET https://api.github.com/user",
       "HEAD https://api.github.com/user",
@@ -254,13 +259,35 @@ describe("github_api", () => {
     expect(api.requests).toEqual([{ url: "https://api.github.com/repos/Owner/Prod/hooks/1", method: "DELETE" }])
   })
 
-  // GITHUB-R2: reads never ask, so a read's redirect within the API (a renamed repository) does not either.
-  it("follows a read's redirect to another API path without asking", async () => {
+  // GITHUB-R2: a read follows a redirect within the API (a renamed repository) only after asserting the new path.
+  it("asserts a read's redirect to another API path before following it, and sends nothing there on a refusal", async () => {
     const answers = { "https://api.github.com/repos/Old/Name": () => new Response(null, { status: 301, headers: { location: "https://api.github.com/repositories/10" } }) }
-    const api = setUp({ answers, readOnly: true, decline: true })
+    const api = setUp({ answers, readOnly: true })
     expect((await api.run({ method: "GET", path: "/repos/Old/Name" })).output).toMatchObject({ ok: true })
-    expect(api.asserts).toEqual([])
+    expect(api.asserts.map((request) => [(request.resources as string[])[0], request.metadata])).toEqual([
+      ["GET /repos/old/name", { method: "GET", path: "/repos/Old/Name" }],
+      ["GET /repositories/10", { method: "GET", path: "/repos/Old/Name", redirect: "GET /repositories/10" }],
+    ])
     expect(api.requests.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name", "https://api.github.com/repositories/10"])
+    const refused = setUp({ answers, decline: (resource) => resource === "GET /repositories/10" })
+    expect(await message(refused.run({ method: "GET", path: "/repos/Old/Name" }))).toBe("declined")
+    expect(refused.requests.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name"])
+  })
+
+  it("refuses a read the rules decline before any request, for every read shape", async () => {
+    for (const input of [
+      { method: "GET", path: "/search/issues", query: { q: "involves:octocat" } },
+      { method: "GET", path: "/notifications" },
+      { method: "HEAD", path: "/user" },
+      { method: "POST", path: "/markdown", body: { text: "x" } },
+      { graphql: { query: "query { viewer { login } }" } },
+      { method: "GET", path: "/repos/o/r/issues", paginate: true },
+    ]) {
+      const api = setUp({ decline: true })
+      expect(await message(api.run(input))).toBe("declined")
+      expect(api.asserts).toHaveLength(1)
+      expect(api.requests).toEqual([])
+    }
   })
 
   it("never follows a write's redirect: one ask, one request, and an error naming the new path", async () => {
@@ -291,7 +318,10 @@ describe("github_api", () => {
   it("asks before saving a download, with the file as the resource, even while read-only", async () => {
     const api = setUp({ readOnly: true })
     await api.run({ method: "GET", path: "/repos/o/r/zipball", download: { path: "out/r.zip" } })
-    expect(api.asserts).toEqual([expect.objectContaining({ action: "github_api", resources: ["download out/r.zip"], save: ["download out/r.zip"] })])
+    expect(api.asserts).toEqual([
+      expect.objectContaining({ action: "github_api", resources: ["GET /repos/o/r/zipball"] }),
+      expect.objectContaining({ action: "github_api", resources: ["download out/r.zip"], save: ["download out/r.zip"] }),
+    ])
   })
 
   // QA GITHUB-6: the user is never asked to approve a download that cannot be saved.
@@ -303,7 +333,7 @@ describe("github_api", () => {
     expect(api.asserts).toEqual([])
     expect(api.requests).toEqual([])
     await api.run({ method: "GET", path: "/repos/o/r/zipball", download: { path: "out/r.zip", overwrite: true } })
-    expect(api.asserts).toEqual([expect.objectContaining({ resources: ["download out/r.zip"] })])
+    expect(api.asserts).toEqual([expect.objectContaining({ resources: ["GET /repos/o/r/zipball"] }), expect.objectContaining({ resources: ["download out/r.zip"] })])
   })
 
   it("refuses bad input with a coded error and sends nothing", async () => {
