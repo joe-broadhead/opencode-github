@@ -141,8 +141,8 @@ describe("github_api checks the path it sends", () => {
         expect(api.sent, path).toEqual([])
         continue
       }
-      expect(api.asserted).toEqual([`download out/${round}.bin`])
       const described = describeCall(input as never, GHES)
+      expect(api.asserted).toEqual([described.resource, `download out/${round}.bin`])
       expect(`GET /api/v3${described.target!.path}`).toBe(`GET ${new URL(api.sent[0]!).pathname}`)
     }
   }, 30_000)

@@ -22,9 +22,10 @@ describe("defaultRules", () => {
     expect(rules.slice(1)).toEqual([
       ...allReadTools().map((name) => ({ action: `github_${name}`, resource: "*", effect: "allow" })),
       { action: "github_events_list", resource: "*", effect: "allow" },
+      ...["GET *", "HEAD *", "POST /markdown", "POST /markdown/raw", "QUERY /graphql"].map((resource) => ({ action: "github_api", resource, effect: "allow" })),
       ...allWriteTools().map((name) => ({ action: `github_${name}`, resource: "*", effect: "allow" })),
     ])
-    expect(rules).toHaveLength(allReadTools().length + allWriteTools().length + 2)
+    expect(rules).toHaveLength(allReadTools().length + allWriteTools().length + 7)
     expect(rules.filter((rule) => rule.effect !== "allow")).toEqual([])
     const evaluated = [BASE, ...rules]
     for (const action of ["github_get_me", "github_create_pull_request", "github_events_list", "github_brand_new_tool", "bash"]) expect(evaluate(evaluated, action)).toBe("allow")
@@ -48,6 +49,23 @@ describe("defaultRules", () => {
     expect(evaluate(rules, "github_create_pull_request")).toBe("deny")
     expect(evaluate(rules, "github_brand_new_tool")).toBe("deny")
     expect(evaluate(rules, "bash")).toBe("allow")
+  })
+
+  // github_api asserts every request on its own resource: the block allows its reads at every access value, and its
+  // changes fall to the github_* rule.
+  it.each(["all", "ask-changes", "read-only"] as const)("allows github_api's reads by resource at %s, and leaves its changes to access", (access) => {
+    const rules = [BASE, ...defaultRules(access)]
+    for (const resource of ["GET /search/issues", "GET /notifications", "GET /user", "HEAD /user", "POST /markdown", "POST /markdown/raw", "QUERY /graphql"]) {
+      expect(effectOf(rules, "github_api", resource)).toBe("allow")
+    }
+    const change = access === "all" ? "allow" : access === "ask-changes" ? "ask" : "deny"
+    for (const resource of ["POST /repos/octo/hello/releases", "POST /graphql", "DELETE /repos/octo/hello", "download a.zip"]) {
+      expect(effectOf(rules, "github_api", resource)).toBe(change)
+    }
+    // A user rule after the block still wins: a deny on the search path refuses that read alone.
+    const denied = [...rules, { action: "github_api", resource: "GET /search/*", effect: "deny" as const }]
+    expect(effectOf(denied, "github_api", "GET /search/issues")).toBe("deny")
+    expect(effectOf(denied, "github_api", "GET /notifications")).toBe("allow")
   })
 
   // R3: a github_api call resolves its own resource, not just its action, so an allow scoped to GETs cannot POST.

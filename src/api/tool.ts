@@ -1,8 +1,10 @@
 // The github_api tool: GitHub's REST and GraphQL API with the account the github sign-in
-// holds, for what GitHub's MCP tools cannot do. Reads (GET, HEAD, one GraphQL query) run
-// without asking. Every write asks through OpenCode's permission rules as `github_api` on
-// `METHOD /path` (owner, repo and other names in lower case), and is refused while the plugin is
-// read-only. Saving a download asks too.
+// holds, for what GitHub's MCP tools cannot do. Every request asserts `github_api` on its own
+// `METHOD /path` (owner, repo and other names in lower case; `QUERY /graphql` for one GraphQL
+// query, `POST /graphql` for any other document) before it is sent, as the calling session, so
+// the session's rules decide reads as well as changes. The default rules allow the reads at
+// every access value; a change is refused while the plugin is read-only. Saving a download is
+// asserted too.
 import type { Plugin } from "@opencode/plugin"
 import { Error as ToolError } from "@opencode/plugin/promise/tool"
 import type { Access, Endpoints, Toolset } from "../config.js"
@@ -16,6 +18,10 @@ import { toolFor, toolHint } from "./hints.js"
 import { type Fetch, callGraphql, callRest, downloadTarget, restTarget } from "./request.js"
 
 export const API_ACTION = "github_api"
+/** The resource a GraphQL document with exactly one operation, a query, asserts: it reads, so the default rules allow it. */
+export const GRAPHQL_READ = "QUERY /graphql"
+/** The resource any other GraphQL document asserts: it may change GitHub. */
+export const GRAPHQL_WRITE = "POST /graphql"
 
 /** The plain file, which an agent reads; the GitHub page wraps it in HTML. */
 const SCRIPTING_DOC = "https://raw.githubusercontent.com/joe-broadhead/opencode-github/HEAD/docs/scripting.md"
@@ -123,9 +129,10 @@ export function parseInput(raw: unknown): ApiInput {
 export function describeCall(input: ApiInput, endpoints: Endpoints) {
   if ("graphql" in input) {
     const operations = graphqlOperations(input.graphql.query)
+    const kind = graphqlKind(input.graphql.query)
     return {
-      kind: graphqlKind(input.graphql.query),
-      resource: "POST /graphql",
+      kind,
+      resource: kind === "read" ? GRAPHQL_READ : GRAPHQL_WRITE,
       metadata: { graphql: operations ? operations.map((operation) => ({ type: operation.type, fields: operation.fields })) : "unreadable" },
     }
   }
@@ -205,12 +212,12 @@ export async function registerApiTool(
   }
 
   /**
-   * R3: a script's change resolves the same write permission the direct path asserts — `github_api` on the call's own
+   * R3: a script's request resolves the same permission the direct path asserts — `github_api` on the request's own
    * `METHOD /path` — from a prior explicit `allow` only. The tools RPC has resolved the method's action already; this is
-   * the change's own resource, so an allow scoped to GETs cannot authorise a POST. An ask has nobody to answer it, and
+   * the request's own resource, so an allow scoped to GETs cannot authorise a POST. An ask has nobody to answer it, and
    * a saved approval is not part of the rules, so both are refused before anything is sent.
    */
-  const allowChange = (rules: readonly Rule[], resource: string) => {
+  const allowed = (rules: readonly Rule[], resource: string) => {
     const effect = effectOf(rules, API_ACTION, resource)
     if (effect === "allow") return
     const why = effect === "ask" ? "the rules ask, and a script cannot answer an approval prompt" : "a deny rule refuses it"
@@ -219,6 +226,28 @@ export async function registerApiTool(
       `${resource} needs a prior allow rule for ${API_ACTION}, and ${why}.`,
       `Add { "action": "${API_ACTION}", "resource": "${resource}", "effect": "allow" } to the session or to its agent, before the rule that asks or denies.`,
     )
+  }
+
+  /**
+   * One call's permission gate. Every request the call makes — the first, a redirect within the API and a `Link` page
+   * at another path — passes `github_api` on its own resource before it is sent: a script's resolves the rules first,
+   * then each asserts, as the caller's session. A resource already passed in this call is not asserted again.
+   */
+  const gate = (call: Call) => {
+    const passed = new Set<string>()
+    let rules: Promise<readonly Rule[]> | undefined
+    const check = async (resource: string) => {
+      if (call.script) allowed(await (rules ??= scriptRules(call)), resource)
+    }
+    return {
+      check,
+      async pass(resource: string, metadata: Record<string, unknown>) {
+        if (passed.has(resource)) return
+        await check(resource)
+        await assert(call, resource, metadata)
+        passed.add(resource)
+      },
+    }
   }
 
   /**
@@ -244,23 +273,20 @@ export async function registerApiTool(
     const described = describeCall(input, deps.endpoints)
     // An existing file is refused before the prompt, so the user never approves a call that cannot save.
     const download = !("graphql" in input) && input.download ? await downloadTarget(deps.root, input.download.path, input.download.overwrite === true) : undefined
-    if (call.script) {
-      const rules = await scriptRules(call)
-      if (described.kind === "write") allowChange(rules, described.resource)
-      if (download) allowChange(rules, `download ${download.relative}`)
+    const permit = gate(call)
+    await permit.check(described.resource)
+    if (download) await permit.check(`download ${download.relative}`)
+    if (described.kind === "write" && deps.readOnly) {
+      throw new GitHubPluginError(
+        "READ_ONLY",
+        `${described.resource} changes GitHub, and the plugin is read-only.`,
+        // The reader is the model: it tells the user, rather than editing the config to raise its own access.
+        "Tell the user that this needs the plugin option access: \"all\", which they set in opencode.json; each change then runs without asking, unless they keep ask-changes.",
+      )
     }
-    if (described.kind === "write") {
-      if (deps.readOnly) {
-        throw new GitHubPluginError(
-          "READ_ONLY",
-          `${described.resource} changes GitHub, and the plugin is read-only.`,
-          // The reader is the model: it tells the user, rather than editing the config to raise its own access.
-          "Tell the user that this needs the plugin option access: \"all\", which they set in opencode.json; each change then runs without asking, unless they keep ask-changes.",
-        )
-      }
-      await assert(call, described.resource, described.metadata)
-    }
-    if (download) await assert(call, `download ${download.relative}`, { ...described.metadata, download: download.relative })
+    // Reads assert too, so a session's rule for github_api decides every request, before any network I/O.
+    await permit.pass(described.resource, described.metadata)
+    if (download) await permit.pass(`download ${download.relative}`, { ...described.metadata, download: download.relative })
 
     const { integrationID, connection, credential } = await signIn()
     if (!integrationID || !connection || credential?.type !== "oauth") {
@@ -273,6 +299,7 @@ export async function registerApiTool(
       deviceSignIn: deps.deviceSignIn === true,
       ...(deps.appSlug ? { appSlug: deps.appSlug } : {}),
       fetch: send,
+      authorize: (resource: string, via: string) => permit.pass(resource, { ...described.metadata, [via]: resource }),
       root: deps.root,
       enterprise: deps.enterprise === true,
       ...(call.signal ? { signal: call.signal } : {}),

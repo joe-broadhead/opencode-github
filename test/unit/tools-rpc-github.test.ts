@@ -33,7 +33,7 @@ async function setUp(
     /** GitHub's answer per URL; anything else is 200. */
     answers?: Record<string, () => Response>
     /** Asserts refused as the tools RPC's hook refuses an ask: a Tool.Error with the request as its cause. */
-    refuse?: boolean
+    refuse?: boolean | ((resource: string) => boolean)
   } = {},
 ) {
   const agents = input.agents ?? { build: BASE }
@@ -53,9 +53,9 @@ async function setUp(
     },
     permission: {
       hook: async () => ({ dispose: async () => {} }),
-      assert: async (request: { action: string }) => {
+      assert: async (request: { action: string; resources: string[] }) => {
         asserts.push(request)
-        if (input.refuse) throw Object.assign(new Error("A script cannot answer an approval prompt."), { _tag: "Tool.Error", error: { request } })
+        if (typeof input.refuse === "function" ? input.refuse(request.resources[0]!) : input.refuse) throw Object.assign(new Error("A script cannot answer an approval prompt."), { _tag: "Tool.Error", error: { request } })
       },
     },
     session: {
@@ -160,12 +160,12 @@ describe("GitHub's tools RPC", () => {
 })
 
 describe("the api method", () => {
-  it("runs a REST read through github_api's spec as the session, with no assert", async () => {
+  it("runs a REST read through github_api's spec as the session, asserting its own GET /path first", async () => {
     const h = await setUp()
     const output = await h.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/octo/repo", query: { per_page: 5 } })
     expect(output).toMatchObject({ ok: true, status: 200, data: { full_name: "octo/repo" }, trust: { githubContent: "untrusted" } })
     expect(h.requests).toEqual([{ url: "https://api.github.com/repos/octo/repo?per_page=5", method: "GET" }])
-    expect(h.asserts).toEqual([])
+    expect(h.asserts).toMatchObject([{ action: API_ACTION, resources: ["GET /repos/octo/repo"], source: { type: "tool", id: expect.stringMatching(/^script:/) } }])
     expect(h.runs).toEqual([expect.objectContaining({ sessionID: "ses_build", agent: "build", id: expect.stringMatching(/^script:/) })])
     expect(JSON.stringify(output)).not.toContain(TOKEN)
   })
@@ -208,9 +208,30 @@ describe("the api method", () => {
     const h = await setUp()
     expect(await h.call(SCRIPT_API_METHOD, { method: "POST", path: "/markdown", body: { text: "x" } })).toMatchObject({ ok: true })
     expect(await h.call(SCRIPT_API_METHOD, { graphql: { query: "query { viewer { login } }", variables: { a: 1 } } })).toMatchObject({ ok: true })
-    // Neither changes GitHub, so neither asserts.
-    expect(h.asserts).toEqual([])
+    // Neither changes GitHub; each still asserts its own resource.
+    expect(h.asserts).toMatchObject([{ resources: ["POST /markdown"] }, { resources: ["QUERY /graphql"] }])
     expect(h.requests).toHaveLength(2)
+  })
+
+  // Every read resolves github_api on its own resource before dispatch: a session limited to exact allow rules runs
+  // only what they name, and a deny for one path refuses it with no request and no assert.
+  it.each([
+    ["a search", { method: "GET", path: "/search/issues", query: { q: "involves:octocat" } }, "GET /search/issues"],
+    ["notifications", { method: "GET", path: "/notifications" }, "GET /notifications"],
+    ["a GraphQL query", { graphql: { query: "query { viewer { login } }" } }, "QUERY /graphql"],
+    ["a Markdown render", { method: "POST", path: "/markdown", body: { text: "x" } }, "POST /markdown"],
+  ])("refuses %s that a rule denies, before any request, and runs it under an allow", async (_name, input, resource) => {
+    const denied = await setUp({ agents: { build: [...BASE, { action: "github_api", resource, effect: "deny" }] } })
+    const refused = await denied.call(SCRIPT_API_METHOD, input)
+    expect(refused).toMatchObject({ type: "failed", data: { code: "PERMISSION_DENIED" } })
+    expect(refused.message).toContain(`${resource} needs a prior allow rule for github_api, and a deny rule refuses it`)
+    expect(denied.requests).toEqual([])
+    expect(denied.asserts).toEqual([])
+    // The same read under the allow rules runs, after one assert of that resource.
+    const allowed = await setUp()
+    expect(await allowed.call(SCRIPT_API_METHOD, input)).toMatchObject({ ok: true })
+    expect(allowed.asserts).toMatchObject([{ resources: [resource] }])
+    expect(allowed.requests).toHaveLength(1)
   })
 
   it("refuses a download when the rule would ask, before any request", async () => {
@@ -220,16 +241,20 @@ describe("the api method", () => {
     expect(asked.asserts).toEqual([])
   })
 
-  // GITHUB-R2: a script's read follows a redirect within the API with no assert, as the model's does; never one off the API.
-  it("follows a script's redirect within the API without an assert, and never one off the API", async () => {
+  // GITHUB-R2: a script's read follows a redirect within the API after asserting the new path, as the model's does;
+  // never one off the API.
+  it("follows a script's redirect within the API after asserting it, refuses a refused one, and never one off the API", async () => {
     const answers = {
       "https://api.github.com/repos/Old/Name": () => new Response(null, { status: 301, headers: { location: "/repositories/10" } }),
       "https://api.github.com/repos/o/r/actions/jobs/1/logs": () => new Response(null, { status: 302, headers: { location: "https://blob.example.net/l?sig=x" } }),
     }
-    const h = await setUp({ answers, refuse: true })
+    const h = await setUp({ answers })
     expect(await h.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/Old/Name" })).toMatchObject({ ok: true })
-    expect(h.asserts).toEqual([])
+    expect(h.asserts).toMatchObject([{ resources: ["GET /repos/old/name"] }, { resources: ["GET /repositories/10"] }])
     expect(h.requests.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name", "https://api.github.com/repositories/10"])
+    const refused = await setUp({ answers, refuse: (resource) => resource === "GET /repositories/10" })
+    expect(await refused.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/Old/Name" })).toMatchObject({ type: "failed", data: { code: "PERMISSION_DENIED" } })
+    expect(refused.requests.map((request) => request.url)).toEqual(["https://api.github.com/repos/Old/Name"])
     expect(await h.call(SCRIPT_API_METHOD, { method: "GET", path: "/repos/o/r/actions/jobs/1/logs" })).toMatchObject({
       type: "failed",
       data: { code: "API_REDIRECT_OFF_HOST", next: "For job logs, call get_job_logs with return_content: true; for other files, pass download: { path }, which follows GitHub's storage redirects without the token." },

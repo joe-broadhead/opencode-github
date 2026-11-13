@@ -1,9 +1,10 @@
 // Sends one github_api call. Requests go only to the configured API base (uploads to the
 // uploads base); the token goes only to those origins. Redirects are handled by hand: a change
-// (any method but GET and HEAD) never follows one; a read follows one within the API base (reads
-// never ask, so neither does their redirect), and refuses one to another host; a download also
+// (any method but GET and HEAD) never follows one; a read follows one within the API base, after
+// `authorize` passes the new path's resource, and refuses one to another host; a download also
 // follows GitHub's redirects to its storage hosts (logs, artifacts and release assets), without
-// the Authorization header. Results are capped for inline display.
+// the Authorization header. A `Link` page passes `authorize` on its own path too. Results are
+// capped for inline display.
 import { createHash } from "node:crypto"
 import { link, mkdir, open, readFile, realpath, rename, rm, stat } from "node:fs/promises"
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
@@ -41,6 +42,11 @@ type CallDeps = {
   /** The GitHub App's URL name, for the link that installs it. */
   readonly appSlug?: string
   readonly fetch: Fetch
+  /**
+   * Passes `github_api` on a further request's resource before it is sent: a redirect within the API (`via`
+   * "redirect") or a `Link` page (`via` "page"). The caller has passed the first request's resource already.
+   */
+  readonly authorize: (resource: string, via: "redirect" | "page") => Promise<void>
   readonly signal?: AbortSignal
   /** The project folder; download and upload files must be inside it. */
   readonly root: string
@@ -190,7 +196,8 @@ export async function callRest(input: RestInput, target: RestTarget, deps: CallD
   let last = response
   let next = nextLink(response, deps.endpoints)
   while (next && pages < maxPages && itemCount(data) < maxItems) {
-    const page = await send(next, { method: "GET", headers }, deps, { follow: "api", what: target.resource })
+    await deps.authorize(next.resource, "page")
+    const page = await send(next.url, { method: "GET", headers }, deps, { follow: "api", what: target.resource })
     const read = await readBody(page, "GET")
     if (!page.ok) return finish(page, read, deps, target.path)
     const joined = join_(data, read.data)
@@ -254,8 +261,10 @@ async function send(
     const onApi = next.protocol === "https:" ? apiTarget(next, method as RestInput["method"], deps.endpoints) : undefined
     if (hop >= MAX_REDIRECTS) throw new GitHubPluginError("API_REDIRECT_LOOP", `GitHub redirected more than ${MAX_REDIRECTS} times.`, "Try again later.")
     if (next.protocol !== "https:") throw new GitHubPluginError("API_REDIRECT_INSECURE", "GitHub redirected to a non-HTTPS address.", "Try again later.")
-    if (onApi) current = onApi.url
-    else if (policy.follow === "storage") current = next
+    if (onApi) {
+      await deps.authorize(onApi.resource, "redirect")
+      current = onApi.url
+    } else if (policy.follow === "storage") current = next
     else {
       throw new GitHubPluginError(
         "API_REDIRECT_OFF_HOST",
@@ -520,13 +529,16 @@ function scopes(header: string | null): string[] {
     .filter(Boolean)
 }
 
-function nextLink(response: Response, endpoints: Endpoints): URL | undefined {
+/**
+ * The next page, as a REST target on the API base; a link off the API base, or one whose path the plugin would not send
+ * as written, ends the pagination.
+ */
+function nextLink(response: Response, endpoints: Endpoints): RestTarget | undefined {
   const link = response.headers.get("link")
   const match = link && /<([^>]+)>\s*;\s*rel="next"/.exec(link)
   if (!match) return undefined
   const url = URL.parse(match[1]!)
-  // Only pages under the API base; anything else ends the pagination.
-  return url && onApiBase(url, endpoints) ? url : undefined
+  return url ? quietly(() => apiTarget(url, "GET", endpoints)) : undefined
 }
 
 /** The list inside a page: the page itself, or the only array field of a list object. */
