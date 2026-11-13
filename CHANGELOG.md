@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.1] - 2026-11-13
 
 ### Added
 
@@ -13,6 +13,9 @@ All notable changes to this project are documented here. The format follows [Kee
   months) asks for a new sign-in, as `SIGN_IN_REJECTED`; an unreachable or failing GitHub asks to try again
   (`REFRESH_UNREACHABLE`, `REFRESH_FAILED`).
 - `appSlug`, the GitHub App's URL name, for the link that installs it.
+- The `jelly` settings declare their choices: `access` is drawn as Allowed, Ask before changes or Read only, with
+  Jelly's own line for each, and `unknownTools` as List them (`ask`) or Hide them (`hide`) (needs a jelly that includes
+  app#1301).
 - A GitHub App sign-in that reaches no installation says so in `/github-status`'s next step, with the install link.
   The status asks GitHub again each time, so the note goes once the App is installed. The `/connect` label stays the
   login alone: OpenCode sets it only at sign-in.
