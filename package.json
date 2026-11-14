@@ -55,7 +55,8 @@
     "check": "npm run typecheck && npm test && npm run test:kit && npm run build && npm run lint && npm run icons && npm run actionlint && npm run test:pack && npm run test:tui && npm run test:host && npm run test:stock",
     "e2e": "npm run build && bun scripts/e2e-live.mjs",
     "drift": "node scripts/drift.mjs",
-    "release:check": "node scripts/release-check.mjs"
+    "release:check": "node scripts/release-check.mjs",
+    "capture": "node scripts/capture-tools.mjs"
   },
   "devDependencies": {
     "@babel/core": "7.29.7",
