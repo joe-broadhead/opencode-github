@@ -101,7 +101,8 @@
     "vendor": {
       "id": "github",
       "name": "GitHub",
-      "domain": "github.com"
+      "domain": "github.com",
+      "mark": true
     }
   },
   "jelly": {
