@@ -6,12 +6,12 @@ Set options in the plugin's entry in `opencode.json`:
 {
   "plugins": [
     {
-      "package": "github:joe-broadhead/opencode-github#v0.0.1",
+      "package": "github:joe-broadhead/opencode-github#v0.0.2",
       "options": {
         "toolsets": ["context", "repos", "issues", "pull_requests"],
         "access": "ask-changes",
         "lockdown": false,
-        "unknownTools": "ask"
+        "unknownTools": "list"
       }
     }
   ]
@@ -22,7 +22,7 @@ Every option is optional. An unknown option or a wrong value
 stops the plugin from loading with an error that names the option, for example:
 
 ```text
-OPTIONS_INVALID: Invalid plugin option "toolset": this option does not exist. Next step: Fix the options for github:joe-broadhead/opencode-github#v0.0.1 in opencode.json.
+OPTIONS_INVALID: Invalid plugin option "toolset": this option does not exist. Next step: Fix the options for github:joe-broadhead/opencode-github#v0.0.2 in opencode.json.
 ```
 
 ## Options
@@ -33,7 +33,7 @@ OPTIONS_INVALID: Invalid plugin option "toolset": this option does not exist. Ne
 | `access` | `"all"` | What the generated default rules allow: `"all"` (every tool runs), `"ask-changes"` (reads run, every change asks) or `"read-only"` (reads run, every change is denied, and GitHub's `X-MCP-Readonly` header turns its own write tools off). See [Permissions](#permissions). |
 | `readOnly` | none | Deprecated: `true` means `access: "read-only"` and `false` means `access: "all"`, with a note in status. An explicit `access` wins. |
 | `lockdown` | `false` | With `true`, sends GitHub's `X-MCP-Lockdown: true` header. See [`lockdown`](#lockdown). |
-| `unknownTools` | `"ask"` | `"ask"` keeps GitHub tools the plugin does not know visible, so the default block's `github_*` rule decides them (allowed at the default `access`). `"hide"` removes them. See [`unknownTools`](#unknowntools). |
+| `unknownTools` | `"ask"` | `"list"`, or `"ask"` (the same value), keeps GitHub tools the plugin does not know visible, so the default block's `github_*` rule decides them (allowed at the default `access`). `"hide"` removes them. See [`unknownTools`](#unknowntools). |
 | `clientId` | none (token sign-in only) | A GitHub OAuth App or GitHub App for device sign-in; with it `/connect` also offers **Sign in with GitHub**. Letters, digits, `.`, `_` and `-`, up to 100 characters. See [`clientId` and `scopes`](#clientid-and-scopes). |
 | `appSlug` | none | The GitHub App's URL name (`github.com/apps/<appSlug>`), for the link that installs it. Lower-case letters, digits and `-`. See [A GitHub App](#a-github-app). |
 | `scopes` | `["repo", "read:org"]` | Scopes that device sign-in with an OAuth App asks for, each once; `[]` sends none. A GitHub App ignores them. Tokens are not affected. |
@@ -684,9 +684,9 @@ permission rules.
 
 GitHub adds, renames and removes tools over time. A GitHub tool that is not in the plugin's catalog is "unknown":
 
-- With `"ask"` (the default), it stays visible, and the default block's `github_*` rule decides it: it runs like every
+- With `"list"`, or `"ask"` (the same value, and the default), it stays visible, and the default block's `github_*` rule decides it: it runs like every
   other tool at the default `access`, asks at `"ask-changes"` and is denied at `"read-only"`. Known tools keep working.
-  The value's name is older than the all-allow default: it does not make an unknown tool ask, and it cannot. To make
+  `"ask"` is the older name, from before the all-allow default: it does not make an unknown tool ask, and it cannot. To make
   one ask or stop, set `access`, or add a rule for it.
 - With `"hide"`, the plugin removes it from the agents' tools.
 
@@ -723,7 +723,7 @@ To use your own OAuth App, register it under **GitHub Settings → Developer set
 tick **Enable Device Flow**, do not generate a client secret, and set its client ID:
 
 ```json
-{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.1", "options": { "clientId": "<your OAuth App client ID>" } }] }
+{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.2", "options": { "clientId": "<your OAuth App client ID>" } }] }
 ```
 
 `scopes` changes what device sign-in asks for, for example `["public_repo"]` for public repositories only. Scopes
@@ -759,7 +759,7 @@ tokens** on. Then:
   account, and links the install page.
 
 ```json
-{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.1", "options": { "clientId": "<the GitHub App's client ID>", "appSlug": "<its URL name>" } }] }
+{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.2", "options": { "clientId": "<the GitHub App's client ID>", "appSlug": "<its URL name>" } }] }
 ```
 
 ## `host` (GitHub Enterprise Server)
@@ -776,7 +776,7 @@ GitHub's hosted MCP server does not support GitHub Enterprise Server. With `host
 - the status names the server and says that only `github_api` works.
 
 ```json
-{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.1", "options": { "host": "github.example.com", "clientId": "<the server's OAuth App client ID>" } }] }
+{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.2", "options": { "host": "github.example.com", "clientId": "<the server's OAuth App client ID>" } }] }
 ```
 
 For GitHub's MCP tools on the server, run GitHub's `github-mcp-server` yourself as a local MCP server with
@@ -812,7 +812,7 @@ passed through unchanged.
 
 | Code | When | Next step |
 | --- | --- | --- |
-| `OPTIONS_INVALID` | An option is unknown or has a wrong value. The message names the option. | Fix the options for github:joe-broadhead/opencode-github#v0.0.1 in opencode.json. |
+| `OPTIONS_INVALID` | An option is unknown or has a wrong value. The message names the option. | Fix the options for github:joe-broadhead/opencode-github#v0.0.2 in opencode.json. |
 | `HOST_UNTESTED` | OpenCode is outside `>=2.2.3 <2.3.0` and `allowUntestedHost` is not set. | Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true. |
 | `SKILLS_INVALID` | A skill file shipped with the plugin is missing or malformed. | Reinstall the plugin. |
 | `STATUS_UNAVAILABLE` | OpenCode did not report the `github` server's state. | Try again in a few seconds; if it persists, restart OpenCode. |

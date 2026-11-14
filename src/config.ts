@@ -101,7 +101,15 @@ const OptionsSchema = z.strictObject({
    */
   readOnly: z.boolean().optional(),
   lockdown: z.boolean().default(false),
-  unknownTools: z.enum(["ask", "hide"]).default("ask"),
+  /**
+   * Whether GitHub tools the plugin does not know are listed: `"list"` or `"ask"` (the same value, and the default)
+   * keeps them, and the `github_*` rule and `access` decide them; `"hide"` removes them. `"ask"` is the older name: it
+   * never made a tool ask.
+   */
+  unknownTools: z
+    .enum(["list", "ask", "hide"])
+    .default("ask")
+    .transform((value) => (value === "list" ? "ask" : value)),
   /**
    * An OAuth App or a GitHub App for device sign-in, set by the user or an organisation; without it only token sign-in
    * is offered.
@@ -150,7 +158,7 @@ export function loadOptions(raw: unknown): Options {
     throw new GitHubPluginError(
       "OPTIONS_INVALID",
       path ? `Invalid plugin option "${path}": ${message}.` : `Invalid plugin options: ${message}.`,
-      "Fix the options for github:joe-broadhead/opencode-github#v0.0.1 in opencode.json.",
+      "Fix the options for github:joe-broadhead/opencode-github#v0.0.2 in opencode.json.",
     )
   }
   const { readOnly, ...rest } = result.data

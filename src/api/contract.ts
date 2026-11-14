@@ -12,7 +12,7 @@ export const ACCEPT = {
 const Scalar = z.union([z.string(), z.number(), z.boolean()])
 
 export const RestInput = z.strictObject({
-  method: z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]).describe("HTTP method. GET and HEAD read; others change GitHub and ask first, except POST /markdown and /markdown/raw."),
+  method: z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]).describe("HTTP method. GET and HEAD read, and so do POST /markdown and /markdown/raw; every other request changes GitHub, and follows the access option like any change."),
   path: z
     .string()
     .min(2)

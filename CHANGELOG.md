@@ -2,10 +2,20 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.2] - 2026-11-14
+
+### Added
+
+- `unknownTools` takes `"list"`, the same value as `"ask"` (still the default, and the value Jelly's setting saves):
+  it keeps tools the plugin does not know listed, and never made one ask.
 
 ### Changed
 
+- `github_api`'s `method` description, and the comments in `src/api/classify.ts` and `scripts/drift.mjs`, no longer
+  say a change or an unknown tool asks first: at the default `access: "all"` it runs, at `ask-changes` it asks, and at
+  `read-only` it is denied.
+- `package.json` is `"private": true`: the plugin installs from its GitHub release tag
+  (`github:joe-broadhead/opencode-github#v<version>`), never from npm.
 - The icon is now GitHub's own Invertocat, `GitHub_Invertocat_Black_Clearspace.svg` from GitHub's logo kit (brand.github.com), unmodified, on a white rounded holding tile, in place of the family's branch-and-node mark; `opencode.vendor.mark` is `true`.
 
 ## [0.0.1] - 2026-11-13

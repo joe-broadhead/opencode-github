@@ -18,18 +18,18 @@ GitHub is a trademark of GitHub, Inc.; this unofficial plugin is not endorsed by
 ## Install
 
 ```sh
-opencode plugin add github:joe-broadhead/opencode-github#v0.0.1
+opencode plugin add github:joe-broadhead/opencode-github#v0.0.2
 ```
 
 Run `opencode reload`, or restart OpenCode. Then run `/github-status`: it shows `Connection: sign-in required` until
 you sign in, and `opencode mcp list` shows `github  needs authentication`.
 
-Each release has its own tag, and a Git install does not update by itself. To move to a newer release, remove the old entry with `opencode plugin remove github:joe-broadhead/opencode-github#v0.0.0`, then add the new tag with `opencode plugin add github:joe-broadhead/opencode-github#v<version>`.
+Each release has its own tag, and a Git install does not update by itself. To move to a newer release, remove the old entry with `opencode plugin remove github:joe-broadhead/opencode-github#v0.0.1`, then add the new tag with `opencode plugin add github:joe-broadhead/opencode-github#v<version>`.
 
 Or add the plugin to `opencode.json` instead, with the same spec:
 
 ```json
-{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.1" }] }
+{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.2" }] }
 ```
 
 The install takes the GitHub release tag. Its commit carries the built `dist/`, so the install runs no build.
@@ -141,7 +141,7 @@ asks first. Restrict it in any of these three ways:
    | `"read-only"` | the read tools | nothing: every write is **denied**, and GitHub's own server lists no write tools |
 
    ```json
-   { "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.1", "options": { "access": "read-only" } }] }
+   { "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.2", "options": { "access": "read-only" } }] }
    ```
 
    `readOnly: true` and `false` still work: they mean `"read-only"` and `"all"`, and `/github-status` says they are
@@ -332,17 +332,18 @@ Options go in the plugin's entry in `opencode.json`:
 
 ```json
 {
-  "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.1", "options": { "toolsets": ["context", "repos", "issues"] } }]
+  "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.2", "options": { "toolsets": ["context", "repos", "issues"] } }]
 }
 ```
 
 The options are `toolsets`, `access`, `lockdown`, `unknownTools`, `clientId`, `appSlug`, `scopes`,
 `allowUntestedHost` and `host`. `readOnly` is deprecated: it maps onto `access`.
 
-**`unknownTools`** decides only whether GitHub tools the plugin does not know are listed. `"ask"` (the default) keeps
-them, and they follow the `github_*` rule and `access` like every other tool: they run at the default, ask at
-`"ask-changes"` and are denied at `"read-only"`. The value's name is older than the all-allow default and does not
-make a tool ask; to make one ask or stop, use `access` or a rule. `"hide"` removes them from the agents' tool list.
+**`unknownTools`** decides only whether GitHub tools the plugin does not know are listed. `"list"`, or `"ask"` (the
+same value, and the default), keeps them, and they follow the `github_*` rule and `access` like every other tool: they
+run at the default, ask at `"ask-changes"` and are denied at `"read-only"`. `"ask"` is the older name, from before the
+all-allow default, and does not make a tool ask; to make one ask or stop, use `access` or a rule. `"hide"` removes them
+from the agents' tool list.
 
 **GitHub Enterprise Server.** Set `host` to the server's host name, such as `"host": "github.example.com"`. GitHub's
 hosted MCP server does not support GitHub Enterprise Server, so the plugin then registers no MCP tools and
@@ -362,7 +363,7 @@ overrides user and project config, so members only sign in:
 {
   "plugins": [
     {
-      "package": "github:joe-broadhead/opencode-github#v0.0.1",
+      "package": "github:joe-broadhead/opencode-github#v0.0.2",
       "options": {
         "clientId": "<your organisation's OAuth App client ID>",
         "scopes": ["repo", "read:org"],
@@ -477,7 +478,7 @@ still stores its token.
    account, which works only in an interactive terminal. Then, on GitHub, delete the token under **Settings →
    Developer settings → Personal access tokens**, or, after a device sign-in, revoke the app under **Settings →
    Applications → Authorized OAuth Apps** (or **Authorized GitHub Apps**).
-2. Run `opencode plugin remove github:joe-broadhead/opencode-github#v0.0.1` (the spec you installed), then `opencode reload`.
+2. Run `opencode plugin remove github:joe-broadhead/opencode-github#v0.0.2` (the spec you installed), then `opencode reload`.
 3. Data folders: none. The plugin stores nothing of its own.
 4. Remove the default rules you copied into agents' own `permissions`.
 

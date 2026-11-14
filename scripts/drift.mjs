@@ -1,6 +1,7 @@
 // Maintainer-run drift check (Node): compares GitHub's live MCP tools with the catalog in
 // src/tools.ts and warns about changes. It changes nothing, and it
-// is not a runtime check: unknown tools ask by default whatever it reports.
+// is not a runtime check: whatever it reports, an unknown tool follows the github_* rule and
+// access (it runs at the default "all"), unless unknownTools is "hide".
 //   GITHUB_DRIFT_TOKEN=<token> npm run drift
 // For each catalogued toolset it opens an MCP session with X-MCP-Toolsets: <toolset> and
 // X-MCP-Readonly: false, lists the tools (JSON or SSE responses, following nextCursor) and

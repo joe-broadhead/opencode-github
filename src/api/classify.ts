@@ -2,7 +2,8 @@
 // POST_READS, which only render text; every other request writes.
 // GraphQL: a document reads only when it holds exactly one operation and that operation
 // is a query. Anything else, including a document this scanner cannot follow, writes, so
-// it asks first.
+// it is a change: it runs at the default access, asks at ask-changes and is denied at
+// read-only.
 
 type Kind = "read" | "write"
 

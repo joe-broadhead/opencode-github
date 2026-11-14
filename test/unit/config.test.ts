@@ -29,6 +29,14 @@ describe("loadOptions", () => {
     }
   })
 
+  // "ask" is the older name of "list": it never made a tool ask. Both keep unknown tools listed.
+  it("takes unknownTools \"list\" as the same value as \"ask\"", () => {
+    expect(loadOptions({ unknownTools: "list" }).unknownTools).toBe("ask")
+    expect(loadOptions({ unknownTools: "ask" }).unknownTools).toBe("ask")
+    expect(loadOptions({ unknownTools: "hide" }).unknownTools).toBe("hide")
+    expect(() => loadOptions({ unknownTools: "show" })).toThrow(/OPTIONS_INVALID|Invalid plugin option/)
+  })
+
   it("accepts every option", () => {
     const options = {
       toolsets: ["context", "actions", "gists"],
@@ -85,7 +93,7 @@ describe("loadOptions", () => {
     const error = failure(raw)
     expect(error.code).toBe("OPTIONS_INVALID")
     expect(error.message).toContain(message)
-    expect(error.nextStep).toBe("Fix the options for github:joe-broadhead/opencode-github#v0.0.1 in opencode.json.")
+    expect(error.nextStep).toBe("Fix the options for github:joe-broadhead/opencode-github#v0.0.2 in opencode.json.")
     expect(error.message.endsWith(`Next step: ${error.nextStep}`)).toBe(true)
   })
 

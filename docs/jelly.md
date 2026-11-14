@@ -79,10 +79,12 @@ value into the option of the same name:
 
 - `access`, a choice of three: **Allowed** (`all`, the default), **Ask before changes** (`ask-changes`) and **Read
   only** (`read-only`), with Jelly's own line for each.
-- `unknownTools`, a choice of two: **List them** (`ask`, the default) and **Hide them** (`hide`).
+- `unknownTools`, a choice of two: **List them** (`ask`, the default) and **Hide them** (`hide`). The options parser
+  also takes `list`, the same value as `ask`; the declaration keeps `ask`, so a value Jelly saved before still matches.
 - `lockdown`, a switch, off by default.
 
-The two closed sets are the options parser's own, so Jelly never saves a value the plugin refuses. A Jelly that does
+Every value of the two declared closed sets is one the options parser takes (for `unknownTools` the parser also
+takes `list`, which the declaration leaves out), so Jelly never saves a value the plugin refuses. A Jelly that does
 not know declared choices (before app#1301) refuses the whole declaration. `clientId`, `appSlug` and `host` are free
 text with a pattern, and `toolsets` and `scopes` are lists, so they are not declared. `test/unit/jelly.test.ts` checks
 the settings against Jelly's setting rules, restated in `test/support/jelly-settings.ts`, and each declared value
