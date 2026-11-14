@@ -6,7 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
-- The icon is now GitHub's own Invertocat, `GitHub_Invertocat_Black_Clearspace.svg` from GitHub's logo kit (brand.github.com), unmodified, in place of the family's branch-and-node mark; `opencode.vendor.mark` is `true`.
+- The icon is now GitHub's own Invertocat, `GitHub_Invertocat_Black_Clearspace.svg` from GitHub's logo kit (brand.github.com), unmodified, on a white rounded holding tile, in place of the family's branch-and-node mark; `opencode.vendor.mark` is `true`.
 
 ## [0.0.1] - 2026-11-13
 

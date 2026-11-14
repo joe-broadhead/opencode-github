@@ -93,7 +93,8 @@ When you add a rule here, add it to the scan and its self-test too.
 - Ship prebuilt `dist/` and no `.d.ts` files. No install, `prepare` or `prepack` scripts.
 - **The icons** `assets/icon.svg`, `assets/icon-128.png` and `assets/icon-256.png` are GitHub's own Invertocat:
   `GitHub_Invertocat_Black_Clearspace.svg` from GitHub's logo kit (https://brand.github.com/foundations/logo), its path
-  unchanged in its own 128×128 canvas, with the PNGs rendered from it. `opencode.vendor.mark` is `true`, so
+  unchanged in its own 128×128 canvas (which already holds GitHub's clear space), on a white rounded holding tile so it
+  stays visible on dark backgrounds, with the PNGs rendered from it. `opencode.vendor.mark` is `true`, so
   `scripts/check-icons.mjs` (a byte-identical copy of the kit's) checks it as the vendor's own mark and requires the
   README's trademark line. Do not recolour, redraw or combine it. `opencode.icons` declares the three files, and the
   three `exports` and three `files` entries ship them.
