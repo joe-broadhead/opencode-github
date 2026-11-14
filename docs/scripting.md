@@ -146,8 +146,9 @@ project) and an `upload` each need that rule in the agent's or the session's rul
 ## Events list
 
 `events_list` runs the plugin's own `github_events_list`, Memory's source of GitHub events
-([configuration](configuration.md#events-list)). It asserts `github_events_list`, then makes only GET requests, as
-the `api` method does, each resolving and asserting `github_api` on its own `GET /path` first, plus `get_me` where
+([configuration](configuration.md#events-list)). It asserts `github_events_list`, then makes only its four GET
+requests through the `api` method's spec, each resolving and asserting `github_events_list` (not `github_api`) on its
+own `GET /path` first, so an allow for the tool is enough in an agent without a base allow, plus `get_me` where
 GitHub's MCP server is there. Its errors are the `EVENTS_` codes in the
 configuration guide's Errors table.
 

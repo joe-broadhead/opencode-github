@@ -105,6 +105,14 @@ export type Call = {
   readonly rules?: readonly Rule[]
 }
 
+/**
+ * A plugin read that runs github_api's spec under its own permission (events_list): every request asserts `action`, not
+ * `github_api`, on its own `METHOD /path`, so the grant for that tool covers exactly its reads, and a request whose
+ * resource is not one of `resources` (another path, a redirect or a page elsewhere, any change) is refused before it
+ * is sent. Never set from a caller's input: only the plugin's own code passes it.
+ */
+export type ApiScope = { readonly action: string; readonly resources: readonly string[] }
+
 const REJECTED = "GitHub rejected the saved sign-in. Sign in again."
 
 /** The plugin's own error inside what OpenCode threw for a failed renewal, which may wrap it. */
@@ -185,14 +193,14 @@ async function statusShown(ctx: ApiContext, integrationID: string, connectionID:
 export async function registerApiTool(
   ctx: ApiContext,
   deps: ApiDeps,
-): Promise<{ dispose(): Promise<void>; run(input: ApiInput, call: Call): Promise<ApiOutput>; signedIn(): Promise<boolean> }> {
+): Promise<{ dispose(): Promise<void>; run(input: ApiInput, call: Call, scope?: ApiScope): Promise<ApiOutput>; signedIn(): Promise<boolean> }> {
   const send: Fetch = deps.fetch ?? ((url, init) => fetch(url, init))
 
-  const assert = (call: Call, resource: string, metadata: Record<string, unknown>) =>
+  const assert = (call: Call, action: string, resource: string, metadata: Record<string, unknown>) =>
     ctx.permission.assert({
       sessionID: call.sessionID as never,
       agent: call.agent as never,
-      action: API_ACTION,
+      action,
       resources: [resource],
       save: [resource],
       metadata,
@@ -217,34 +225,47 @@ export async function registerApiTool(
    * the request's own resource, so an allow scoped to GETs cannot authorise a POST. An ask has nobody to answer it, and
    * a saved approval is not part of the rules, so both are refused before anything is sent.
    */
-  const allowed = (rules: readonly Rule[], resource: string) => {
-    const effect = effectOf(rules, API_ACTION, resource)
+  const allowed = (rules: readonly Rule[], action: string, resource: string) => {
+    const effect = effectOf(rules, action, resource)
     if (effect === "allow") return
     const why = effect === "ask" ? "the rules ask, and a script cannot answer an approval prompt" : "a deny rule refuses it"
     throw new GitHubPluginError(
       "PERMISSION_DENIED",
-      `${resource} needs a prior allow rule for ${API_ACTION}, and ${why}.`,
-      `Add { "action": "${API_ACTION}", "resource": "${resource}", "effect": "allow" } to the session or to its agent, before the rule that asks or denies.`,
+      `${resource} needs a prior allow rule for ${action}, and ${why}.`,
+      `Add { "action": "${action}", "resource": "${resource}", "effect": "allow" } to the session or to its agent, before the rule that asks or denies.`,
+    )
+  }
+
+  /** A scoped read reaches only its documented resources; anything else is refused before it is sent. */
+  const inScope = (scope: ApiScope, resource: string) => {
+    if (scope.resources.includes(resource)) return
+    throw new GitHubPluginError(
+      "PERMISSION_DENIED",
+      `${scope.action} reads only ${scope.resources.join(", ")}, not ${resource}.`,
+      "This is a bug in the plugin: report it with the request it names.",
     )
   }
 
   /**
    * One call's permission gate. Every request the call makes — the first, a redirect within the API and a `Link` page
-   * at another path — passes `github_api` on its own resource before it is sent: a script's resolves the rules first,
-   * then each asserts, as the caller's session. A resource already passed in this call is not asserted again.
+   * at another path — passes `github_api` (or a scope's own action) on its own resource before it is sent: a script's
+   * resolves the rules first, then each asserts, as the caller's session. A resource already passed in this call is
+   * not asserted again.
    */
-  const gate = (call: Call) => {
+  const gate = (call: Call, scope: ApiScope | undefined) => {
+    const action = scope?.action ?? API_ACTION
     const passed = new Set<string>()
     let rules: Promise<readonly Rule[]> | undefined
     const check = async (resource: string) => {
-      if (call.script) allowed(await (rules ??= scriptRules(call)), resource)
+      if (scope) inScope(scope, resource)
+      if (call.script) allowed(await (rules ??= scriptRules(call)), action, resource)
     }
     return {
       check,
       async pass(resource: string, metadata: Record<string, unknown>) {
         if (passed.has(resource)) return
         await check(resource)
-        await assert(call, resource, metadata)
+        await assert(call, action, resource, metadata)
         passed.add(resource)
       },
     }
@@ -269,11 +290,13 @@ export async function registerApiTool(
     }
   }
 
-  const run = async (input: ApiInput, call: Call): Promise<ApiOutput> => {
+  const run = async (input: ApiInput, call: Call, scope?: ApiScope): Promise<ApiOutput> => {
     const described = describeCall(input, deps.endpoints)
+    // A scoped read is refused outside its resources before a download target is even looked at.
+    if (scope) inScope(scope, described.resource)
     // An existing file is refused before the prompt, so the user never approves a call that cannot save.
     const download = !("graphql" in input) && input.download ? await downloadTarget(deps.root, input.download.path, input.download.overwrite === true) : undefined
-    const permit = gate(call)
+    const permit = gate(call, scope)
     await permit.check(described.resource)
     if (download) await permit.check(`download ${download.relative}`)
     if (described.kind === "write" && deps.readOnly) {

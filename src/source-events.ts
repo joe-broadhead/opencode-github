@@ -1,7 +1,9 @@
 // events_list for GitHub: what the signed-in person did or was involved in since a cursor, as Memory's events
 // (src/host/events-list.ts), oldest first, for Memory's collector and other scripts. It only reads: GET requests
 // through github_api's own spec, with the plugin's sign-in, and GitHub's get_me through OpenCode's executor. Each GET
-// asserts `github_api` on its own `GET /path` as the caller, unattended: it runs only under a prior allow rule.
+// asserts the tool's own permission, `github_events_list`, on its `GET /path` as the caller, unattended: it runs only
+// under a prior allow rule, and the grant for the tool (Jelly writes one for a declared read) covers exactly these
+// reads. It reaches nothing but EVENTS_READS.
 //
 // Three streams, each with its own position in the one cursor:
 // - issues and pull requests the person is involved in (`involves:`), from /search/issues sorted by update, oldest
@@ -16,7 +18,7 @@ import { createHash } from "node:crypto"
 import type { Plugin } from "@opencode/plugin"
 import { Error as ToolError } from "@opencode/plugin/promise/tool"
 import type { ApiInput, ApiOutput } from "./api/contract.js"
-import type { Call } from "./api/tool.js"
+import type { ApiScope, Call } from "./api/tool.js"
 import { GitHubPluginError } from "./errors.js"
 import {
   type EventsListResult,
@@ -39,6 +41,13 @@ export const SOURCE = "github"
 export const ACCOUNT = "default"
 /** The tool's permission action: github_events_list. */
 export const EVENTS_ACTION = `${SERVER_NAME}_${EVENTS_TOOL_NAME}`
+/**
+ * The only requests events_list sends, each asserted as EVENTS_ACTION on its own resource: the owner where GitHub's
+ * get_me is not there, the two searches and notifications. Any other resource, a redirect elsewhere included, is
+ * refused before it is sent.
+ */
+export const EVENTS_READS = ["GET /user", "GET /search/issues", "GET /search/commits", "GET /notifications"] as const
+const EVENTS_SCOPE: ApiScope = { action: EVENTS_ACTION, resources: EVENTS_READS }
 
 /** GitHub's search index lags a little behind a change; an event is listed once it is this old. */
 export const SETTLE_MS = 5 * 60_000
@@ -346,7 +355,7 @@ export const EVENTS_OUTPUT = {
 export interface EventsDeps {
   readonly ctx: { readonly tool: Pick<Plugin.Context["tool"], "list">; readonly permission: Pick<Plugin.Context["permission"], "assert"> }
   /** github_api's spec, as `registerApiTool` returns it. */
-  readonly api: { run(input: ApiInput, call: Call): Promise<ApiOutput> }
+  readonly api: { run(input: ApiInput, call: Call, scope?: ApiScope): Promise<ApiOutput> }
   /** Whether the github server is the plugin's, so its get_me is GitHub's. */
   readonly managed: () => boolean
   readonly now?: () => number
@@ -354,8 +363,9 @@ export interface EventsDeps {
 
 /**
  * The tool's and the method's one run: asserts github_events_list for the caller, then lists, with GETs only. Each GET
- * runs as an unattended call of github_api's spec, so it resolves and asserts `github_api` on its own `GET /path`
- * before it is sent: a rule that asks or denies refuses it, and nothing is sent.
+ * runs as an unattended call of github_api's spec under EVENTS_SCOPE, so it resolves and asserts `github_events_list`
+ * (not `github_api`) on its own `GET /path` before it is sent: an agent with no base allow rule, as Jelly's are, needs
+ * only the tool's own allow; a rule that asks or denies refuses it, and nothing is sent.
  */
 export async function runEvents(deps: EventsDeps, input: unknown, call: Call): Promise<EventsListResult> {
   await deps.ctx.permission.assert({
@@ -367,7 +377,7 @@ export async function runEvents(deps: EventsDeps, input: unknown, call: Call): P
     metadata: {},
     source: { type: "tool", messageID: call.messageID as never, id: call.id as never },
   })
-  const get: Get = (path, query) => deps.api.run({ method: "GET", path, query }, { ...call, script: true })
+  const get: Get = (path, query) => deps.api.run({ method: "GET", path, query }, { ...call, script: true }, EVENTS_SCOPE)
   const me: Me = async () => {
     const tool = deps.managed() ? (await deps.ctx.tool.list()).find((entry) => entry.id === `${SERVER_NAME}_get_me`) : undefined
     if (tool) {
