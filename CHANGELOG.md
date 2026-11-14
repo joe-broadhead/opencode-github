@@ -14,7 +14,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - `github_api`'s `method` description, and the comments in `src/api/classify.ts` and `scripts/drift.mjs`, no longer
   say a change or an unknown tool asks first: at the default `access: "all"` it runs, at `ask-changes` it asks, and at
   `read-only` it is denied.
-
+- `package.json` is `"private": true`: the plugin installs from its GitHub release tag
+  (`github:joe-broadhead/opencode-github#v<version>`), never from npm.
 - The icon is now GitHub's own Invertocat, `GitHub_Invertocat_Black_Clearspace.svg` from GitHub's logo kit (brand.github.com), unmodified, on a white rounded holding tile, in place of the family's branch-and-node mark; `opencode.vendor.mark` is `true`.
 
 ## [0.0.1] - 2026-11-13
