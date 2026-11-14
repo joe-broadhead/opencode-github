@@ -3,7 +3,9 @@
 Connects OpenCode to GitHub's hosted MCP server, so your agents can read and, if you allow it, change issues, pull
 requests, code and more with GitHub's own tools.
 
-Unofficial; not affiliated with GitHub. GitHub is a trademark of GitHub, Inc.
+Unofficial; not affiliated with GitHub.
+
+GitHub is a trademark of GitHub, Inc.; this unofficial plugin is not endorsed by them.
 
 ## Requirements
 
