@@ -4,7 +4,16 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- `unknownTools` takes `"list"`, the same value as `"ask"` (still the default, and the value Jelly's setting saves):
+  it keeps tools the plugin does not know listed, and never made one ask.
+
 ### Changed
+
+- `github_api`'s `method` description, and the comments in `src/api/classify.ts` and `scripts/drift.mjs`, no longer
+  say a change or an unknown tool asks first: at the default `access: "all"` it runs, at `ask-changes` it asks, and at
+  `read-only` it is denied.
 
 - The icon is now GitHub's own Invertocat, `GitHub_Invertocat_Black_Clearspace.svg` from GitHub's logo kit (brand.github.com), unmodified, on a white rounded holding tile, in place of the family's branch-and-node mark; `opencode.vendor.mark` is `true`.
 
