@@ -40,7 +40,9 @@ jobs:
       fail-fast: false
       matrix:
         # Linux x64, Linux arm64, macOS arm64 and macOS x64, pinned to image versions.
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-26, macos-26-intel]
+        # A pull request runs the two Linux runners; a push to master, or a run by hand, runs all four, macOS too. macOS
+        # runs on master and for releases only, and the release planner requires that push run with every runner.
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-24.04","ubuntu-24.04-arm"]' || '["ubuntu-24.04","ubuntu-24.04-arm","macos-26","macos-26-intel"]') }}
     runs-on: ${{ matrix.os }}
     # The host, pack and stock stages install each tested OpenCode release (TESTED_HOSTS in src/host-version.ts:
     # 2.2.3, 2.2.4, 2.2.5 and 2.2.6) themselves, with scripts disabled.
