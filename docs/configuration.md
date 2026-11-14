@@ -11,7 +11,7 @@ Set options in the plugin's entry in `opencode.json`:
         "toolsets": ["context", "repos", "issues", "pull_requests"],
         "access": "ask-changes",
         "lockdown": false,
-        "unknownTools": "ask"
+        "unknownTools": "list"
       }
     }
   ]
@@ -33,7 +33,7 @@ OPTIONS_INVALID: Invalid plugin option "toolset": this option does not exist. Ne
 | `access` | `"all"` | What the generated default rules allow: `"all"` (every tool runs), `"ask-changes"` (reads run, every change asks) or `"read-only"` (reads run, every change is denied, and GitHub's `X-MCP-Readonly` header turns its own write tools off). See [Permissions](#permissions). |
 | `readOnly` | none | Deprecated: `true` means `access: "read-only"` and `false` means `access: "all"`, with a note in status. An explicit `access` wins. |
 | `lockdown` | `false` | With `true`, sends GitHub's `X-MCP-Lockdown: true` header. See [`lockdown`](#lockdown). |
-| `unknownTools` | `"ask"` | `"ask"` keeps GitHub tools the plugin does not know visible, so the default block's `github_*` rule decides them (allowed at the default `access`). `"hide"` removes them. See [`unknownTools`](#unknowntools). |
+| `unknownTools` | `"ask"` | `"list"`, or `"ask"` (the same value), keeps GitHub tools the plugin does not know visible, so the default block's `github_*` rule decides them (allowed at the default `access`). `"hide"` removes them. See [`unknownTools`](#unknowntools). |
 | `clientId` | none (token sign-in only) | A GitHub OAuth App or GitHub App for device sign-in; with it `/connect` also offers **Sign in with GitHub**. Letters, digits, `.`, `_` and `-`, up to 100 characters. See [`clientId` and `scopes`](#clientid-and-scopes). |
 | `appSlug` | none | The GitHub App's URL name (`github.com/apps/<appSlug>`), for the link that installs it. Lower-case letters, digits and `-`. See [A GitHub App](#a-github-app). |
 | `scopes` | `["repo", "read:org"]` | Scopes that device sign-in with an OAuth App asks for, each once; `[]` sends none. A GitHub App ignores them. Tokens are not affected. |
@@ -684,9 +684,9 @@ permission rules.
 
 GitHub adds, renames and removes tools over time. A GitHub tool that is not in the plugin's catalog is "unknown":
 
-- With `"ask"` (the default), it stays visible, and the default block's `github_*` rule decides it: it runs like every
+- With `"list"`, or `"ask"` (the same value, and the default), it stays visible, and the default block's `github_*` rule decides it: it runs like every
   other tool at the default `access`, asks at `"ask-changes"` and is denied at `"read-only"`. Known tools keep working.
-  The value's name is older than the all-allow default: it does not make an unknown tool ask, and it cannot. To make
+  `"ask"` is the older name, from before the all-allow default: it does not make an unknown tool ask, and it cannot. To make
   one ask or stop, set `access`, or add a rule for it.
 - With `"hide"`, the plugin removes it from the agents' tools.
 

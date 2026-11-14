@@ -29,6 +29,14 @@ describe("loadOptions", () => {
     }
   })
 
+  // "ask" is the older name of "list": it never made a tool ask. Both keep unknown tools listed.
+  it("takes unknownTools \"list\" as the same value as \"ask\"", () => {
+    expect(loadOptions({ unknownTools: "list" }).unknownTools).toBe("ask")
+    expect(loadOptions({ unknownTools: "ask" }).unknownTools).toBe("ask")
+    expect(loadOptions({ unknownTools: "hide" }).unknownTools).toBe("hide")
+    expect(() => loadOptions({ unknownTools: "show" })).toThrow(/OPTIONS_INVALID|Invalid plugin option/)
+  })
+
   it("accepts every option", () => {
     const options = {
       toolsets: ["context", "actions", "gists"],

@@ -79,7 +79,8 @@ value into the option of the same name:
 
 - `access`, a choice of three: **Allowed** (`all`, the default), **Ask before changes** (`ask-changes`) and **Read
   only** (`read-only`), with Jelly's own line for each.
-- `unknownTools`, a choice of two: **List them** (`ask`, the default) and **Hide them** (`hide`).
+- `unknownTools`, a choice of two: **List them** (`ask`, the default) and **Hide them** (`hide`). The options parser
+  also takes `list`, the same value as `ask`; the declaration keeps `ask`, so a value Jelly saved before still matches.
 - `lockdown`, a switch, off by default.
 
 The two closed sets are the options parser's own, so Jelly never saves a value the plugin refuses. A Jelly that does
