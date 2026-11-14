@@ -41,7 +41,6 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "build": "node scripts/build.mjs",
     "test": "vitest run",
     "test:kit": "node --test scripts/release-kit.test.mjs",
     "test:tui": "npm run build && bun test test/tui",
