@@ -42,7 +42,6 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "build": "node scripts/build.mjs",
     "test": "vitest run",
     "test:conformance": "bun test ./test/conformance",
     "test:kit": "node --test scripts/release-kit.test.mjs",
