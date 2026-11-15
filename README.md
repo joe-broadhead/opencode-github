@@ -104,7 +104,8 @@ Each skill reports findings and changes nothing on GitHub unless you ask.
 **Events list.** `github_events_list`, the plugin's own read, is for Memory's collector and other scripts, not for
 answering questions: what you were involved in since a cursor (changes to issues and pull requests, your commits, and
 other notifications where the sign-in may read them), as normalised events, oldest first. It only reads, with GET
-requests, and never asks. See [Events list](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/configuration.md#events-list).
+requests, and never asks. It is the plugin's source `github.activity` under the shared source contract, which
+`package.json` declares, with the tools RPC method `probe`, which names who is signed in. See [Events list](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/configuration.md#events-list).
 
 **Scripts.** A script or a cron job can call GitHub's tools and `github_api` with no model, through `opencode api`.
 It runs as a session and its agent, and every call resolves the rule for its action, the agent's and then the
@@ -236,6 +237,7 @@ The plugin inserts this block directly after each agent's base rule that allows 
   { "action": "github_search_repositories", "resource": "*", "effect": "allow" },
   { "action": "github_search_users", "resource": "*", "effect": "allow" },
   { "action": "github_events_list", "resource": "*", "effect": "allow" },
+  { "action": "github_probe", "resource": "*", "effect": "allow" },
   { "action": "github_api", "resource": "GET *", "effect": "allow" },
   { "action": "github_api", "resource": "HEAD *", "effect": "allow" },
   { "action": "github_api", "resource": "POST /markdown", "effect": "allow" },
@@ -448,10 +450,11 @@ Error codes:
 | `API_REDIRECT_INSECURE` | GitHub redirected to a non-HTTPS address. Try again later. |
 | `API_REDIRECT_OFF_HOST` | GitHub redirected a read outside its API. For job logs, call `get_job_logs` with `return_content: true`; for other files, pass `download: { path }`. |
 | `API_REDIRECTED` | GitHub redirected a change, which is never followed. The message names the new path: call `github_api` again with that path, so the change is checked for it. |
-| `EVENTS_INVALID_INPUT` | The `events_list` input breaks the shared contract, or names another account or source. | Pass only since, cursor, limit (1 to 500), account and source, as the tool's schema describes. |
-| `EVENTS_CURSOR_INVALID` | The cursor was not issued by GitHub's `events_list` for this account and its signed-in user. | Pass a cursor from a previous result of the same account, or start again with since. |
-| `EVENTS_OWNER_UNKNOWN` | GitHub's `get_me` (or `GET /user`) did not name the signed-in user. | Run /github-status, and sign in again if it shows a problem. |
-| `EVENTS_READ_FAILED` | A search or notifications read for `events_list` failed, or its answer was too large to read whole. | Call events_list again with the same cursor; if it keeps failing, run /github-status. |
+| `INPUT_INVALID` | The `events_list` or `probe` input breaks the source contract, or a listing with a cursor names no account. Pass only since, cursor, limit (1 to 500), account and source, as the tool's schema describes; pass account with a cursor. |
+| `SOURCE_UNKNOWN` | `events_list` or `probe` names a source the plugin does not have. Leave source out, or pass github. |
+| `CURSOR_INVALID` | The cursor was not issued by GitHub's `events_list` for this account and its signed-in user, or was changed. Call events_list without a cursor, with since, to start again. |
+| `ACCOUNT_MISMATCH` | `events_list` or `probe` names another account than the signed-in login, or a cursor issued for another account. Pass the account the cursor was issued for, or sign in to GitHub as that account; probe names the signed-in login. |
+| `UNAVAILABLE` | A search, notifications or `GET /user` read for `events_list` or `probe` failed, its answer was too large to read whole, or the sign-in names no login. Call it again with the same cursor; if it keeps failing, run /github-status. |
 
 Each row's own next step is in the message, and [the error codes](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/configuration.md#errors) give the same set with when each one happens.
 

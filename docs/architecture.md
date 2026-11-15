@@ -9,7 +9,7 @@ permission prompts and the TUI. The plugin uses only public `@opencode/plugin` 2
 | --- | --- | --- |
 | Server | `dist/index.js` (`src/index.ts`) | `github.platform` |
 | Status RPC contract (internal; bundled into both entries) | `src/rpc.ts` | `github.platform` |
-| Tools RPC for scripts (bundled into `dist/index.js`) | `src/host/tools-rpc.ts`, `src/api/script.ts` | `github.platform.tools` |
+| Tools RPC for scripts (bundled into `dist/index.js`) | the source contract's `tools-rpc`, `src/tools-rpc.ts`, `src/api/script.ts`, `src/source-events.ts` | `github.platform.tools` |
 | TUI | `dist/tui.js` (`src/tui/index.tsx`) | `github.platform.tui` |
 
 Setup runs these steps in order and undoes them in reverse on cleanup, or when a later step fails:
@@ -25,7 +25,7 @@ Setup runs these steps in order and undoes them in reverse on cleanup, or when a
 6. `registerAuth` (`src/auth.ts`) attaches the sign-in methods.
 7. `registerSignInStatus` (`src/sign-in-status.ts`) reports a rejected sign-in to `/connect`.
 8. `registerStatus` (`src/status.ts`) adds the `/github-status` command and the RPC handler.
-9. `registerToolsRpc` (`src/host/tools-rpc.ts`) adds the tools RPC for scripts and its `evaluate` hook.
+9. `registerToolsRpc` (the source contract's `tools-rpc`, with GitHub's `PLUGIN` from `src/tools-rpc.ts`) adds the tools RPC for scripts and its `evaluate` hook.
 10. `registerSkills` (`src/skills.ts`) adds the three skills from `skills/*/SKILL.md`.
 
 ## MCP registration
@@ -169,7 +169,7 @@ Its methods are `describe`, one per known tool in `allReadTools()` and `allWrite
 toolset, without `ui_get`), each named after the upstream tool and carrying its class, and `api` (class `write`). The
 table is an allowlist: a tool that GitHub adds later is never a method, and `describe` lists it as unclassified.
 
-A call is `{ sessionID, input }`. The shared module (`src/host/tools-rpc.ts`):
+A call is `{ sessionID, input }`. The shared module (`@we-the-rebel-alliance/source-contract/tools-rpc`, bundled):
 
 1. looks up the session with `ctx.session.get`, and its agent's rules with `ctx.agent.get` in the session's location
    (`SESSION_UNKNOWN`, `SESSION_AGENT_REQUIRED`);
@@ -187,7 +187,8 @@ A call is `{ sessionID, input }`. The shared module (`src/host/tools-rpc.ts`):
    redirect within the API and a `Link` page at another path — resolves `github_api` on its own resource against the
    agent's and the session's rules, then asserts it with the script call's source, so it runs only under a prior
    `allow`. `events_list` runs its GETs through the same spec as a script call, under a scope (`ApiScope`) that
-   resolves and asserts `github_events_list` instead of `github_api` and refuses any resource but its four GETs.
+   resolves and asserts `github_events_list` instead of `github_api` and refuses any resource but its three GETs;
+   `probe` likewise asserts `github_probe` on its one `GET /user`.
 
 While a call runs, its id is live. A `permission.hook("evaluate")` turns an `ask` whose source id is live into a deny,
 so an inner action a method needs is named in the refusal and no prompt waits. It changes nothing else; the forbidden-API scan
