@@ -4,7 +4,7 @@
 // recording proxy that refuses every request; loopback is direct. A start checks the binary's version and that every
 // `opencode debug paths` entry stays inside the root.
 //
-// The binaries come from OPENCODE_BIN_2_2_3, OPENCODE_BIN_2_2_4 and OPENCODE_BIN_2_2_5 (one per TESTED_HOSTS entry).
+// The binaries come from OPENCODE_BIN_2_2_3 to OPENCODE_BIN_2_2_7 and OPENCODE_BIN_2_3_0 (one per TESTED_HOSTS entry).
 // When one is unset, the unmodified npm release is installed with scripts disabled, once per version and test run, into
 // its own temp folder. Temp folders sit under /tmp (scratchDir), and each host gets its own free port.
 import { spawn, spawnSync } from "node:child_process"
