@@ -648,7 +648,8 @@ events_list({ since?, cursor?, limit?, account?, source? })
 
 **The account and the owner are the sign-in's.** `events_list` never asks GitHub who is signed in: the account is the
 login GitHub's `GET /user` named when you signed in (the Account `/github-status` shows), lowercase, and the owner is
-`github:` and that login. A listing names the account it reads; one that names another login than the signed-in one is
+`github:` and that login (`github:<Login>@<host>` with the `host` option, so a GitHub Enterprise Server login never
+shares an owner with a github.com one). A listing names the account it reads; one that names another login than the signed-in one is
 refused with `ACCOUNT_MISMATCH`, and so is a cursor issued for another account, before any GitHub call. The cursor is
 the source contract's bound cursor, tied to this plugin, the source and the account, with a digest of the owner
 inside, so a cursor that was changed, issued before a sign-in to another account, or issued by 0.0.2 or earlier
@@ -661,8 +662,9 @@ one for its agents, which have no base allow), and a rule that asks or denies it
 before the request is sent. It sends nothing but the three GETs below; another path, a redirect elsewhere or a change
 is refused before it is sent:
 
-- **issues and pull requests** the user is involved in: `/search/issues` with `involves:<login> updated:>=<time>`,
-  sorted by update, oldest first. One event each time one changes: kind `issue` or `pr`, the title, the body cut to
+- **issues and pull requests** the user is involved in: `/search/issues` twice, with `is:issue involves:<login>
+  updated:>=<time>` and with `is:pull-request involves:<login> updated:>=<time>` (GitHub refuses a GitHub App token's
+  search for both together), each sorted by update, oldest first, each its own stream in the cursor. One event each time one changes: kind `issue` or `pr`, the title, the body cut to
   4,096 characters, the author and assignees as `github:` actors, the state and labels, and its `html_url`;
 - **commits** the user authored: `/search/commits` with `author:<login> committer-date:>=<time>`, sorted by committer
   date. Kind `commit`, the message, and its `html_url`;
@@ -673,7 +675,8 @@ is refused before it is sent:
 
 The cursor holds a position in each stream. The result merges them by time, and lists only what no stream can still put
 before it. An event is listed once it is 5 minutes old, because GitHub's search lags a little behind a change. GitHub's
-search returns at most 1,000 results for one query; the cursor moves past what was listed, so the next call's query
+search returns at most 1,000 results for one query, and allows 30 search requests a minute: each search reads at most 9
+pages of 50 a call, so a call's three searches make at most 27; the cursor moves past what was listed, so the next call's query
 starts later. An event whose title or text holds a secret, such as a password in a URL, is never listed: it is in the
 page's `refused[]` with `reason: "secret"`, and the cursor moves past it.
 

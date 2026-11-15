@@ -32,7 +32,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - **For Memory: the account is the signed-in login, not `default`.** `events_list` and `probe` take the account and
   the owner from the sign-in: the login GitHub's `GET /user` named when you signed in (the Account `/github-status`
   shows), lowercase as the account, and `github:<Login>` labelled with the login as the owner, the same in every page
-  and in `probe`. `events_list` no longer calls `get_me` or `GET /user`, so its reads are exactly its three GETs. Every
+  and in `probe`. With the `host` option (GitHub Enterprise Server) the owner is `github:<Login>@<host>`, labelled
+  `<Login> (<host>)`, so it never equals a github.com owner. `events_list` no longer calls `get_me` or `GET /user`, so its reads are exactly its three GETs. Every
   event's `account` changes accordingly, and so does its `hash`.
 - **For Memory: pass `account` with every cursor.** A listing with a cursor and no `account` is `INPUT_INVALID`; a
   cursor issued for another account, or an `account` that is not the signed-in login, is `ACCOUNT_MISMATCH`, before any
@@ -49,16 +50,24 @@ All notable changes to this project are documented here. The format follows [Kee
   into `dist/index.js`; there is still no runtime dependency, and `NOTICE` lists the package. `src/host/tools-rpc.ts`
   and `src/host/events-list.ts` are deleted, with their `check-copies` pins; GitHub's part of the RPC is
   `src/tools-rpc.ts`. The RPC id `github.platform.tools`, its other methods and their answers are unchanged.
-- The default rules gain `github_probe` allowed, at every `access`. **For jelly:** nothing to declare: `probe` is a
-  tools RPC method, not a tool, and `github_events_list` stays the one declared source read.
+- **For Memory: issues and pull requests are two streams.** `events_list` searches `is:issue involves:<login>` and
+  `is:pull-request involves:<login>` apart, each with its own position in the cursor, so a GitHub App sign-in, whose
+  token GitHub refuses (HTTP 422) a search for both together, now lists them (before, every `events_list` call failed
+  for it). Each search reads at most 9 pages of 50 a call (it was 20), so a call's three searches stay under GitHub's
+  30 search requests a minute; `more: true` says when there is more.
+- The default rules gain `github_probe` allowed, at every `access`.
+- **For jelly: jelly does not see this source yet, and must change, not the plugin.** Jelly's broker keeps only an
+  events source whose action is dotted and which states `permission.operations`; `github.activity`'s action is
+  `github_events_list` and its grants are verbatim `permission.rules` (as the contract allows, and as its own GitHub
+  example declares), so the broker drops it. Jelly sees it once it reads declarations through the contract's
+  `descriptor` and derives grants with its `permission.sessionRules`. Nothing else changes for jelly: `probe` is a
+  tools RPC method, not a tool, and `github_events_list` stays a declared read.
 
 ### Known limits
 
-- `events_list` fails with `UNAVAILABLE` for a GitHub App sign-in: GitHub refuses a search for issues and pull
-  requests together with a GitHub App user token (HTTP 422), and the search names neither. This is not new in this
-  release. A fine-grained token or a GitHub App cannot read notifications, which are left out.
-- GitHub's search allows 30 requests a minute and at most 1,000 results a query; one call makes up to 20 pages of each
-  search. The README's Known limits cite GitHub's docs.
+- A fine-grained token or a GitHub App cannot read notifications, which are left out.
+- GitHub's search allows 30 requests a minute and at most 1,000 results a query; one call makes up to 9 pages of each
+  of its three searches. The README's Known limits cite GitHub's docs.
 - The conformance kit's page-size check reads a fixed 64 KB rather than the declared 900,000 bytes
   (source-contract#30, item 2), and the probe's `GET /user` cannot be declared as a `permission.identity` operation for
   a source whose grants are `rules` (the schema takes identity only from `operations`): the probe asserts only
