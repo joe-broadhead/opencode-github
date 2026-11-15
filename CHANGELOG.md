@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **For jelly:** a GitHub App sign-in whose `refresh` is `jelly-host-owns-refresh` (an agent's copy, which the
+  person's engine renews) is never sent to GitHub. When OpenCode asks the device method to renew one, it fails at once
+  with `SIGN_IN_REJECTED` and "Run /connect and choose GitHub to sign in again" (or GitHub Enterprise), with no network
+  request. Before, it posted the marker to GitHub's token endpoint, which refused it with the same error.
+
 ## [0.0.4] - 2026-11-15
 
 ### Changed
