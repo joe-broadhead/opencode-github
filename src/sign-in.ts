@@ -18,6 +18,8 @@ import { TOKEN_PERMISSIONS } from "./token-permissions.js"
 
 export const DEVICE_METHOD_ID = "github-device"
 export const TOKEN_METHOD_ID = "github-token"
+/** The refresh value of a copy whose renewal another host (jelly) owns: never sent to GitHub. */
+export const HOST_OWNS_REFRESH = "jelly-host-owns-refresh"
 
 const TOKEN_PATTERN = /^(github_pat_[A-Za-z0-9_]{20,255}|ghp_[A-Za-z0-9]{36,255})$/
 const DEVICE_CODE_TIMEOUT_MS = 10_000
@@ -143,8 +145,11 @@ export function signIn(input: SignInInput, stopped: AbortSignal): { attach(edito
 
   // Renews a GitHub App's expiring token; every other credential comes back unchanged, without a request. The exchange
   // is the only request: the new pair is returned as soon as GitHub sends it, so nothing else can delay it past
-  // OpenCode's limit. /github-status checks installations itself.
+  // OpenCode's limit. /github-status checks installations itself. A copy whose refresh is HOST_OWNS_REFRESH is renewed
+  // by the host that made it, never here: OpenCode only asks when the host failed to put in the next copy, so it asks
+  // for a new sign-in at once, with no request to GitHub.
   const deviceRefresh = async (clientId: string, credential: Credential.OAuth): Promise<Credential.OAuth> => {
+    if (credential.refresh === HOST_OWNS_REFRESH) throw signInAgain(service)
     if (!credential.refresh || !credential.expires) return credential
     const metadata = (credential.metadata ?? {}) as Record<string, unknown> & AppMetadata
     if (metadata.refreshExpires !== undefined && metadata.refreshExpires <= Date.now()) throw signInAgain(service)

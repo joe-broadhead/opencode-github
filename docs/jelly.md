@@ -66,6 +66,11 @@ document, never over one the agent's own options set. A Jelly before 0.3.2 refus
 token, and the `appSlug` option gives the link that installs the App (see
 [A GitHub App](configuration.md#a-github-app)).
 
+An agent's copy of a GitHub App sign-in carries `refresh: "jelly-host-owns-refresh"`: the person's engine renews it
+and Jelly puts the next copy in. The plugin never sends that value to GitHub. If OpenCode asks it to renew such a copy,
+which happens only when the next copy did not arrive, it answers "Run /connect and choose GitHub to sign in again"
+(GitHub Enterprise for the Enterprise sign-in) at once, with no request.
+
 Token sign-in is always offered. Device sign-in appears only when you or your organisation set `clientId`; then
 Jelly offers it first: it shows the code with Copy code and connects once the person approves, which works from a
 web tab too, because nothing returns to a loopback port. With the token, Jelly opens the pre-filled token page, and
