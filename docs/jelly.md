@@ -25,7 +25,8 @@ the plugin's `access` option, to restrict one.
 - Everything else runs, as the plugin's own rules let it. That includes `github_events_list`, the plugin's own read
   for Memory's collector, which runs it unattended, so it never asks. Its inner GETs assert `github_events_list` itself
   on each `GET /path`, not `github_api`, so the allow Jelly writes for it is all the collection needs. A `deny` or `ask`
-  rule of your own replaces it, per tool.
+  rule of your own replaces it, per tool. The source contract's `probe`, a tools RPC method with action `github_probe`,
+  is allowed by the plugin's own rules at every `access` too.
 
 A function that changes GitHub still needs a token that may: GitHub itself refuses a write the
 token cannot make, and `github_api` asserts `github_api` on the call's own `METHOD /path` before
@@ -95,4 +96,4 @@ against the options parser.
 Jelly's curated catalogue pins an exact version. Each release is published under a new version, so a review in
 Jelly can tell the two apart.
 
-The declaration test runs the shared kit, `test/support/jelly-kit.ts`, which checks the declaration and this page against Jelly's plugin authors' standard. `scripts/check-copies.mjs` holds the kit, Jelly's setting rules (`test/support/jelly-settings.ts`), the shared part of the tools RPC (`src/host/tools-rpc.ts`) and the events_list source contract (`src/host/events-list.ts`) equal to the copies every plugin carries.
+The declaration test runs the shared kit, `test/support/jelly-kit.ts`, which checks the declaration and this page against Jelly's plugin authors' standard. `scripts/check-copies.mjs` holds the kit, Jelly's setting rules (`test/support/jelly-settings.ts`), equal to the copies every plugin carries. The tools RPC and the events_list contract are not copies: they are the source contract's, pinned in `package-lock.json`.

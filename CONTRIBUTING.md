@@ -40,6 +40,7 @@ One command runs every local check, in this order. It must pass before every com
 | --- | --- | --- |
 | Types | `npm run typecheck` | `tsc` over `src/`, the TUI and the whole `test/` tree. |
 | Unit tests | `npm test` | Vitest over `test/unit/`. |
+| Conformance | `npm run test:conformance` | The source contract's conformance kit (`@we-the-rebel-alliance/source-contract`, pinned in `package-lock.json`) over the source `package.json` declares, under Bun, on recorded invented GitHub answers (`test/fixtures/sources.json`) with no GitHub call; it writes `reports/conformance-report.json` (git-ignored) for a release to attach. |
 | Build | `npm run build` | esbuild bundles `dist/index.js` (server part) and `dist/tui.js` (TUI part, JSX compiled by Babel with `babel-preset-solid`) as two self-contained files, with the RPC contract (plain JSON Schema) inlined into each and zod only in `dist/index.js`, and fails if anything else lands in `dist/`, `dist/tui.js` is minified, an output imports a module the host does not provide, or the root `NOTICE` no longer lists exactly the bundled packages' licences (`node scripts/build.mjs --notice` rewrites it). |
 | Forbidden APIs | `npm run lint` | Proves with its self-test that every rule fires, then scans `src/`, `test/`, `scripts/` and `dist/` for the APIs listed in [AGENTS.md](AGENTS.md). |
 | Pack and install | `npm run test:pack` | Packs the package, checks its file list and size, installs the tarball into a new project with scripts disabled, loads it in each tested stock OpenCode release (plugin active, `/connect` lists GitHub with its sign-in methods, default rules, status RPC), and imports the server and RPC entries. |
@@ -267,5 +268,5 @@ Each release has its own tag, and a Git install does not update by itself. To mo
 Or add the plugin to `opencode.json` instead, with the same spec:
 
 ```json
-{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.2" }] }
+{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.3" }] }
 ```

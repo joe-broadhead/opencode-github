@@ -15,9 +15,9 @@ const SELF = "scripts/check-forbidden.mjs"
 const SCANNED = ["src", "test", "scripts"]
 
 // The one permission hook: the tools RPC's evaluate hook. A script cannot answer an approval prompt, so it turns an
-// ask on one of the RPC's own script calls in flight into a deny; it only tightens and touches no other call. It is
-// allowed only in the module and in the bundle that inlines it, exactly once in each.
-const HOOK_FILES = ["src/host/tools-rpc.ts", "dist/index.js"]
+// ask on one of the RPC's own script calls in flight into a deny; it only tightens and touches no other call. The
+// module is the source contract's, so the hook is allowed only in the bundle that inlines it, exactly once.
+const HOOK_FILES = ["dist/index.js"]
 const HOOK = /permission\.hook/
 
 // scope "all": src/, test/, scripts/ and dist/. "dist": built JavaScript only. "tui": dist/tui.js only.
@@ -125,19 +125,18 @@ function selfTest() {
     write(clean, "scripts/clean.mjs", CLEAN_SAMPLE)
     // Built output may not import relatively at all, so its clean sample leaves that line out.
     write(clean, "dist/tui.js", CLEAN_SAMPLE.split("\n").filter((line) => !line.includes('"./')).join("\n"))
-    // Out of scope: node: in a dist file other than the TUI entry. The tools RPC's one hook, in the module and the bundle.
+    // Out of scope: node: in a dist file other than the TUI entry. The tools RPC's one hook, in the bundle.
     const hook = 'const hook = await ctx.permission.hook("evaluate", (evaluation) => {'
     write(clean, "dist/index.js", ['import { readFileSync } from "node:fs"', hook].join("\n"))
-    write(clean, "src/host/tools-rpc.ts", hook)
-    // A second hook in the module fails the count.
-    write(bad, "src/host/tools-rpc.ts", [hook, hook].join("\n"))
+    // A second hook in the bundle fails the count.
+    write(bad, "dist/index.js", [hook, hook].join("\n"))
 
     const failures = []
     const badHits = scan(bad)
     RULES.forEach((rule, index) => {
       if (!badHits.some((hit) => hit.rule === rule.name && hit.text === rule.sample.trim().slice(0, 160))) failures.push(`rule ${index} (${rule.name}) did not fire on its bad sample`)
     })
-    if (!badHits.some((hit) => hit.file === "src/host/tools-rpc.ts" && hit.text === "found 2")) failures.push("a second permission hook in src/host/tools-rpc.ts was not caught")
+    if (!badHits.some((hit) => hit.file === "dist/index.js" && hit.text === "found 2")) failures.push("a second permission hook in dist/index.js was not caught")
     const cleanHits = scan(clean)
     for (const hit of cleanHits) failures.push(`clean fixture tripped ${hit.rule} at ${hit.file}:${hit.line}`)
 

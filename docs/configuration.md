@@ -6,7 +6,7 @@ Set options in the plugin's entry in `opencode.json`:
 {
   "plugins": [
     {
-      "package": "github:joe-broadhead/opencode-github#v0.0.2",
+      "package": "github:joe-broadhead/opencode-github#v0.0.3",
       "options": {
         "toolsets": ["context", "repos", "issues", "pull_requests"],
         "access": "ask-changes",
@@ -22,7 +22,7 @@ Every option is optional. An unknown option or a wrong value
 stops the plugin from loading with an error that names the option, for example:
 
 ```text
-OPTIONS_INVALID: Invalid plugin option "toolset": this option does not exist. Next step: Fix the options for github:joe-broadhead/opencode-github#v0.0.2 in opencode.json.
+OPTIONS_INVALID: Invalid plugin option "toolset": this option does not exist. Next step: Fix the options for github:joe-broadhead/opencode-github#v0.0.3 in opencode.json.
 ```
 
 ## Options
@@ -169,6 +169,7 @@ below in full. There is no permission hook.
   {"action":"github_search_repositories","resource":"*","effect":"allow"},
   {"action":"github_search_users","resource":"*","effect":"allow"},
   {"action":"github_events_list","resource":"*","effect":"allow"},
+  {"action":"github_probe","resource":"*","effect":"allow"},
   {"action":"github_api","resource":"GET *","effect":"allow"},
   {"action":"github_api","resource":"HEAD *","effect":"allow"},
   {"action":"github_api","resource":"POST /markdown","effect":"allow"},
@@ -281,6 +282,7 @@ below in full. There is no permission hook.
   {"action":"github_search_repositories","resource":"*","effect":"allow"},
   {"action":"github_search_users","resource":"*","effect":"allow"},
   {"action":"github_events_list","resource":"*","effect":"allow"},
+  {"action":"github_probe","resource":"*","effect":"allow"},
   {"action":"github_api","resource":"GET *","effect":"allow"},
   {"action":"github_api","resource":"HEAD *","effect":"allow"},
   {"action":"github_api","resource":"POST /markdown","effect":"allow"},
@@ -394,6 +396,7 @@ read-only mode on, so its server lists no write tools:
   {"action":"github_search_repositories","resource":"*","effect":"allow"},
   {"action":"github_search_users","resource":"*","effect":"allow"},
   {"action":"github_events_list","resource":"*","effect":"allow"},
+  {"action":"github_probe","resource":"*","effect":"allow"},
   {"action":"github_api","resource":"GET *","effect":"allow"},
   {"action":"github_api","resource":"HEAD *","effect":"allow"},
   {"action":"github_api","resource":"POST /markdown","effect":"allow"},
@@ -624,36 +627,44 @@ see [Scripting](scripting.md#api).
 
 ## Events list
 
-`github_events_list` (`tools.github.events_list` in Code Mode, and the tools RPC method `events_list`) is GitHub's side
-of Memory's sources funnel: the shared `events_list` contract, `src/host/events-list.ts`, which every source plugin
-carries unchanged. It lists what the signed-in user was involved in since a cursor, as normalised events, oldest first.
-It only reads, never asks and calls no model, so Memory's collector can run it unattended.
+`github_events_list` (`tools.github.events_list` in Code Mode, and the tools RPC method `events_list`) is GitHub's
+source under the shared source contract, `@we-the-rebel-alliance/source-contract` v0.1.0 (see [Sources](#sources)). It
+lists what the signed-in user was involved in since a cursor, as normalised events, oldest first. It only reads, never
+asks and calls no model, so Memory's collector can run it unattended.
 
 ```
 events_list({ since?, cursor?, limit?, account?, source? })
-  → { source: "github", account: "default", owner: { id, label }, events, cursor, more, trust: "untrusted" }
+  → { source: "github", account: "<login>", owner: { id: "github:<Login>", label: "<Login>" }, events, cursor, more,
+      refused?, plugin, asOf, trust: "untrusted" }
 ```
 
 | Input | Meaning |
 | --- | --- |
 | `since` | Where to start without a cursor: an ISO date (a UTC day) or date-time with `Z` or an offset. Default: 24 hours ago. |
-| `cursor` | The previous result's cursor. It wins over `since`. |
+| `cursor` | The previous result's cursor. It wins over `since`, and needs `account`. |
 | `limit` | Most events, 1 to 500; 100 by default. A result also stops before 900,000 bytes of JSON. |
-| `account` | `default`, GitHub's one account. |
+| `account` | The signed-in GitHub login, lowercase, as `probe` and every result name it. Required with a cursor. |
 | `source` | `github`, the one source. |
+
+**The account and the owner are the sign-in's.** `events_list` never asks GitHub who is signed in: the account is the
+login GitHub's `GET /user` named when you signed in (the Account `/github-status` shows), lowercase, and the owner is
+`github:` and that login (`github:<Login>@<host>` with the `host` option, so a GitHub Enterprise Server login never
+shares an owner with a github.com one). A listing names the account it reads; one that names another login than the signed-in one is
+refused with `ACCOUNT_MISMATCH`, and so is a cursor issued for another account, before any GitHub call. The cursor is
+the source contract's bound cursor, tied to this plugin, the source and the account, with a digest of the owner
+inside, so a cursor that was changed, issued before a sign-in to another account, or issued by 0.0.2 or earlier
+(account `default`) is `CURSOR_INVALID`: start again with `since`.
 
 It asserts `github_events_list`, then makes only GET requests, through `github_api`'s own spec with the plugin's
 sign-in. Each GET asserts the tool's own permission, `github_events_list`, on its own `GET /path` first, not
 `github_api`, unattended: it runs only under an allow rule for `github_events_list` (the block has one, and Jelly writes
 one for its agents, which have no base allow), and a rule that asks or denies it refuses it with `PERMISSION_DENIED`
-before the request is sent. It sends nothing but the four GETs below; another path, a redirect elsewhere or a change
+before the request is sent. It sends nothing but the three GETs below; another path, a redirect elsewhere or a change
 is refused before it is sent:
 
-- the owner: GitHub's `get_me` through OpenCode's executor, or `GET /user` where GitHub's MCP server is not there
-  (`host`, or another server named `github`); `github:` and the login. The cursor holds a digest of it, so after a
-  sign-in to another account an old cursor is refused;
-- **issues and pull requests** the user is involved in: `/search/issues` with `involves:<login> updated:>=<time>`,
-  sorted by update, oldest first. One event each time one changes: kind `issue` or `pr`, the title, the body cut to
+- **issues and pull requests** the user is involved in: `/search/issues` twice, with `is:issue involves:<login>
+  updated:>=<time>` and with `is:pull-request involves:<login> updated:>=<time>` (GitHub refuses a GitHub App token's
+  search for both together), each sorted by update, oldest first, each its own stream in the cursor. One event each time one changes: kind `issue` or `pr`, the title, the body cut to
   4,096 characters, the author and assignees as `github:` actors, the state and labels, and its `html_url`;
 - **commits** the user authored: `/search/commits` with `author:<login> committer-date:>=<time>`, sorted by committer
   date. Kind `commit`, the message, and its `html_url`;
@@ -664,8 +675,40 @@ is refused before it is sent:
 
 The cursor holds a position in each stream. The result merges them by time, and lists only what no stream can still put
 before it. An event is listed once it is 5 minutes old, because GitHub's search lags a little behind a change. GitHub's
-search returns at most 1,000 results for one query; the cursor moves past what was listed, so the next call's query
-starts later.
+search returns at most 1,000 results for one query, and allows 30 search requests a minute: each search reads at most 9
+pages of 50 a call, so a call's three searches make at most 27; the cursor moves past what was listed, so the next call's query
+starts later. An event whose title or text holds a secret, such as a password in a URL, is never listed: it is in the
+page's `refused[]` with `reason: "secret"`, and the cursor moves past it.
+
+**`probe`** (the tools RPC method, action `github_probe`, allowed by the default rules at every `access`) answers who
+is signed in, `{ source: "github", account, owner, trust }`, with the same account and owner as every page, and nothing
+it reads. It makes one `GET /user`, asserted as `github_probe` on `GET /user`, to confirm the token still belongs to that
+login, and refuses another account with `ACCOUNT_MISMATCH`.
+
+## Sources
+
+`package.json` declares the plugin's one source in its top-level `sources` key, under source-contract version 1, so a
+consumer (Memory, jelly, Artifacts) reads it from the installed package:
+
+| Key | Value |
+| --- | --- |
+| `id` | `github.activity` |
+| `kind`, `reads` | `events`, `event` (its events are kinds `issue`, `pr`, `commit` and `event`) |
+| `tool`, `input` | `events_list`, `{ "source": "github" }` |
+| `accounts.named` | `false`: one sign-in |
+| `permission.events` | `github_events_list` |
+| `permission.rules` | `github_events_list` on `GET /search/issues`, `GET /search/commits` and `GET /notifications`: exactly the reads it makes |
+| `private` | `true`: private repositories and your notifications |
+| `cost` | `free`: GitHub's REST API is not billed; it is rate-limited (see the README's Known limits) |
+| `maxBytes` | 900,000 |
+| `urlHosts` | `github.com` |
+| `sources.rpc`, `sources.probe.action` | `github.platform.tools`, `github_probe` |
+
+The grants are stated verbatim (`rules`) rather than as `operations`, because each read is the tool's own action on a
+`GET /path`, which an operation name cannot express. For the same reason the probe's `GET /user` cannot be declared as
+a `permission.identity` operation: the probe asserts only `github_probe`, on `*` and on `GET /user`. `npm run check`
+runs the contract's conformance kit over the source, on recorded answers with no GitHub call, and writes
+`reports/conformance-report.json` for a release to attach.
 
 ## Repository scope
 
@@ -723,7 +766,7 @@ To use your own OAuth App, register it under **GitHub Settings → Developer set
 tick **Enable Device Flow**, do not generate a client secret, and set its client ID:
 
 ```json
-{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.2", "options": { "clientId": "<your OAuth App client ID>" } }] }
+{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.3", "options": { "clientId": "<your OAuth App client ID>" } }] }
 ```
 
 `scopes` changes what device sign-in asks for, for example `["public_repo"]` for public repositories only. Scopes
@@ -759,7 +802,7 @@ tokens** on. Then:
   account, and links the install page.
 
 ```json
-{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.2", "options": { "clientId": "<the GitHub App's client ID>", "appSlug": "<its URL name>" } }] }
+{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.3", "options": { "clientId": "<the GitHub App's client ID>", "appSlug": "<its URL name>" } }] }
 ```
 
 ## `host` (GitHub Enterprise Server)
@@ -776,7 +819,7 @@ GitHub's hosted MCP server does not support GitHub Enterprise Server. With `host
 - the status names the server and says that only `github_api` works.
 
 ```json
-{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.2", "options": { "host": "github.example.com", "clientId": "<the server's OAuth App client ID>" } }] }
+{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.3", "options": { "host": "github.example.com", "clientId": "<the server's OAuth App client ID>" } }] }
 ```
 
 For GitHub's MCP tools on the server, run GitHub's `github-mcp-server` yourself as a local MCP server with
@@ -812,7 +855,7 @@ passed through unchanged.
 
 | Code | When | Next step |
 | --- | --- | --- |
-| `OPTIONS_INVALID` | An option is unknown or has a wrong value. The message names the option. | Fix the options for github:joe-broadhead/opencode-github#v0.0.2 in opencode.json. |
+| `OPTIONS_INVALID` | An option is unknown or has a wrong value. The message names the option. | Fix the options for github:joe-broadhead/opencode-github#v0.0.3 in opencode.json. |
 | `HOST_UNTESTED` | OpenCode is outside `>=2.2.3 <2.3.0` and `allowUntestedHost` is not set. | Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true. |
 | `SKILLS_INVALID` | A skill file shipped with the plugin is missing or malformed. | Reinstall the plugin. |
 | `STATUS_UNAVAILABLE` | OpenCode did not report the `github` server's state. | Try again in a few seconds; if it persists, restart OpenCode. |
@@ -836,7 +879,7 @@ passed through unchanged.
 | `TOKEN_CHECK_UNREACHABLE` | api.github.com could not be reached. | Check your network, then try again. |
 | `TOKEN_CHECK_FAILED` | GitHub could not check the token, or returned no account name. | Try again later. |
 | `READ_ONLY` | A `github_api` call would change GitHub, and `access` is `"read-only"` (or the deprecated `readOnly: true`). | Tell the user that this needs the plugin option `access: "all"`, which they set in opencode.json; each change then runs without asking, unless they keep `ask-changes`. |
-| `AUTH_REQUIRED` | `github_api` has no GitHub sign-in to use. | Run /connect and choose GitHub (GitHub Enterprise with `host`). |
+| `AUTH_REQUIRED` | `github_api`, `events_list` or `probe` has no GitHub sign-in to use. | Run /connect and choose GitHub (GitHub Enterprise with `host`). |
 | `PERMISSION_DENIED` | A rule asks or denies a call, and the caller is a script or `events_list`: an `ask` cannot be answered and a `deny` refuses. For `github_api` the rule must name the request's own `METHOD /path`; for `events_list`'s reads it is `github_events_list` on the same resource. | Add or narrow the rule for the session or for its agent. |
 | `API_INPUT_INVALID` | The `github_api` input does not fit, for example `download` with a method other than GET. | Fix the github_api input and call it again. |
 | `API_PATH_INVALID` | The path is not a relative API path, has a `.` or `..` segment (also percent-encoded), or percent-encodes a character it can hold as itself. | Pass a relative API path such as /repos/OWNER/REPO/pulls. |
@@ -850,10 +893,11 @@ passed through unchanged.
 | `API_REDIRECT_INSECURE` | GitHub redirected to a non-HTTPS address. | Try again later. |
 | `API_REDIRECTED` | GitHub redirected a change, which is never followed. The message names the new path. | Call github_api again with path <the new path>, so the change is checked for that path. |
 | `API_REDIRECT_OFF_HOST` | GitHub redirected a read outside its API. | For job logs, call get_job_logs with return_content: true; for other files, pass download: { path }, which follows GitHub's storage redirects without the token. A script gets the get_job_logs method instead, and with `host` the step names only download. |
-| `EVENTS_INVALID_INPUT` | The `events_list` input breaks the shared contract, or names another account or source. | Pass only since, cursor, limit (1 to 500), account and source, as the tool's schema describes. |
-| `EVENTS_CURSOR_INVALID` | The cursor was not issued by GitHub's `events_list` for this account and its signed-in user. | Pass a cursor from a previous result of the same account, or start again with since. |
-| `EVENTS_OWNER_UNKNOWN` | GitHub's `get_me` (or `GET /user`) did not name the signed-in user. | Run /github-status, and sign in again if it shows a problem. |
-| `EVENTS_READ_FAILED` | A search or notifications read for `events_list` failed, or its answer was too large to read whole. | Call events_list again with the same cursor; if it keeps failing, run /github-status. |
+| `INPUT_INVALID` | The `events_list` or `probe` input breaks the source contract, or a listing with a cursor names no account. | Pass only since, cursor, limit (1 to 500), account and source, as the tool's schema describes; pass account with a cursor. |
+| `SOURCE_UNKNOWN` | `events_list` or `probe` names a source the plugin does not have. | Leave source out, or pass github. |
+| `CURSOR_INVALID` | The cursor was not issued by GitHub's `events_list` for this account and its signed-in user, or was changed. | Call events_list without a cursor, with since, to start again. |
+| `ACCOUNT_MISMATCH` | `events_list` or `probe` names another account than the signed-in login, or a cursor issued for another account. | Pass the account the cursor was issued for, or sign in to GitHub as that account; probe names the signed-in login. |
+| `UNAVAILABLE` | A search, notifications or `GET /user` read for `events_list` or `probe` failed, its answer was too large to read whole, or the sign-in names no login. | Call it again with the same cursor; if it keeps failing, run /github-status. |
 
 A script's calls through the tools RPC, `github.platform.tools`, have more codes for sessions, permissions and the
 server's state; see [Scripting](scripting.md#errors).

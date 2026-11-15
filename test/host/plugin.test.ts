@@ -422,14 +422,24 @@ describe(`GitHub Enterprise Server on OpenCode ${SDK_VERSION}`, () => {
     expect(mcpRequests(host)).toEqual([])
   })
 
-  test("a script's events_list names the owner with GET /user, and reads GitHub only with GETs", async () => {
+  test("a script's events_list names the owner from the sign-in with no GitHub call, and reads GitHub only with GETs", async () => {
     const sessionID = await session(host)
     const before = host.fake.requests.length
     const empty = await script(host, "events_list", { sessionID, input: { since: "2999-01-01" } })
-    expect(empty.value).toMatchObject({ source: "github", account: "default", owner: { id: expect.stringMatching(/^github:/) }, events: [], more: false, trust: "untrusted" })
-    // The fake GitHub has no search, so the first search fails, as EVENTS_READ_FAILED.
-    expect(await script(host, "events_list", { sessionID, input: { since: "2026-10-01" } })).toMatchObject({ type: "failed", code: "EVENTS_READ_FAILED" })
+    expect(empty.value).toMatchObject({ source: "github", account: expect.stringMatching(/^[a-z0-9-]+$/), owner: { id: expect.stringMatching(/^github:/) }, events: [], more: false, trust: "untrusted" })
+    expect(host.fake.requests.slice(before)).toEqual([])
+    // The fake GitHub has no search, so the first search fails, as UNAVAILABLE.
+    expect(await script(host, "events_list", { sessionID, input: { since: "2026-10-01" } })).toMatchObject({ type: "failed", code: "UNAVAILABLE" })
     expect(host.fake.requests.slice(before).every((request) => request.method === "GET")).toBe(true)
+  })
+
+  test("a script's probe names the same account and owner as events_list, after one GET /user", async () => {
+    const sessionID = await session(host)
+    const listed = await script(host, "events_list", { sessionID, input: { since: "2999-01-01" } })
+    const before = host.fake.requests.length
+    const probed = await script(host, "probe", { sessionID, input: {} })
+    expect(probed.value).toEqual({ source: "github", account: listed.value.account, owner: listed.value.owner, trust: "untrusted" })
+    expect(host.fake.requests.slice(before).map((request) => `${request.method} ${request.path}`)).toEqual(["GET /user"])
   })
 
   // events_list asserts each inner read as github_events_list: a session deny on the search paths stops it before any
@@ -440,7 +450,7 @@ describe(`GitHub Enterprise Server on OpenCode ${SDK_VERSION}`, () => {
     const listed = await attempt(host, denied, "build", "github_events_list", "reject", { since: "2026-11-01" })
     expect(listed).toMatchObject({ asked: undefined, ok: false })
     expect(String((listed as { error?: string }).error)).toContain("GET /search/issues needs a prior allow rule for github_events_list, and a deny rule refuses it")
-    expect(host.fake.requests.slice(before).map((request) => `${request.method} ${request.path}`)).toEqual(["GET /user"])
+    expect(host.fake.requests.slice(before)).toEqual([])
     expect(await host.client.permission.list({ sessionID: denied })).toEqual([])
   })
 
@@ -455,7 +465,7 @@ describe(`GitHub Enterprise Server on OpenCode ${SDK_VERSION}`, () => {
     const listed = await script(host, "events_list", { sessionID, input: { since: "2999-01-01" } })
     expect(JSON.stringify(listed)).not.toContain("PERMISSION_DENIED")
     expect(listed.value).toMatchObject({ source: "github", owner: { id: expect.stringMatching(/^github:/) }, events: [], more: false })
-    expect(host.fake.requests.slice(before).map((request) => `${request.method} ${request.path}`)).toEqual(["GET /user"])
+    expect(host.fake.requests.slice(before)).toEqual([])
 
     const denied = await session(host, "jelly", [deny("github_events_list")])
     const after = host.fake.requests.length

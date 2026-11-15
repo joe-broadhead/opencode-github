@@ -1,6 +1,6 @@
 {
   "name": "@joe-broadhead/opencode-github",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "private": true,
   "description": "Unofficial OpenCode plugin for GitHub",
   "keywords": [
@@ -44,6 +44,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "node scripts/build.mjs",
     "test": "vitest run",
+    "test:conformance": "bun test ./test/conformance",
     "test:kit": "node --test scripts/release-kit.test.mjs",
     "test:tui": "npm run build && bun test test/tui",
     "test:host": "npm run build && node scripts/host-tests.mjs",
@@ -52,7 +53,7 @@
     "actionlint": "node scripts/actionlint.mjs",
     "lint": "node scripts/check-forbidden.mjs --self-test && node scripts/check-forbidden.mjs && node scripts/check-copies.mjs",
     "test:pack": "node scripts/pack-smoke.mjs",
-    "check": "npm run typecheck && npm test && npm run test:kit && npm run build && npm run lint && npm run icons && npm run actionlint && npm run test:pack && npm run test:tui && npm run test:host && npm run test:stock",
+    "check": "npm run typecheck && npm test && npm run test:conformance && npm run test:kit && npm run build && npm run lint && npm run icons && npm run actionlint && npm run test:pack && npm run test:tui && npm run test:host && npm run test:stock",
     "e2e": "npm run build && bun scripts/e2e-live.mjs",
     "drift": "node scripts/drift.mjs",
     "release:check": "node scripts/release-check.mjs",
@@ -68,6 +69,7 @@
     "@opentui/solid": "0.8.0",
     "@types/bun": "1.4.4",
     "@types/node": "24.19.2",
+    "@we-the-rebel-alliance/source-contract": "github:we-the-rebel-alliance/source-contract#v0.1.0",
     "babel-preset-solid": "1.9.16",
     "esbuild": "0.28.2",
     "solid-js": "1.9.18",
@@ -106,6 +108,52 @@
       "domain": "github.com",
       "mark": true
     }
+  },
+  "sources": {
+    "contractVersion": 1,
+    "rpc": "github.platform.tools",
+    "probe": {
+      "action": "github_probe"
+    },
+    "items": [
+      {
+        "id": "github.activity",
+        "kind": "events",
+        "reads": "event",
+        "tool": "events_list",
+        "input": {
+          "source": "github"
+        },
+        "accounts": {
+          "named": false
+        },
+        "permission": {
+          "events": "github_events_list",
+          "rules": [
+            {
+              "action": "github_events_list",
+              "resource": "GET /search/issues"
+            },
+            {
+              "action": "github_events_list",
+              "resource": "GET /search/commits"
+            },
+            {
+              "action": "github_events_list",
+              "resource": "GET /notifications"
+            }
+          ]
+        },
+        "private": true,
+        "cost": {
+          "class": "free"
+        },
+        "maxBytes": 900000,
+        "urlHosts": [
+          "github.com"
+        ]
+      }
+    ]
   },
   "jelly": {
     "title": "GitHub",

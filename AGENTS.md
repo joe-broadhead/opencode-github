@@ -26,18 +26,21 @@ and `dist/`. Do not use:
 - imports of private OpenCode source (`packages/<name>/src`);
 - machine-local home or temporary paths;
 - a `.tsx` or relative import in `dist/`, or a `node:` import in `dist/tui.js`;
-- `ctx.permission.hook` anywhere except exactly once in `src/host/tools-rpc.ts` and once in `dist/index.js`: the
-  tools RPC's `evaluate` hook, which turns an ask on one of its own script calls in flight into a deny, because no one
+- `ctx.permission.hook` anywhere except exactly once in `dist/index.js`, which bundles the source contract's tools RPC:
+  its `evaluate` hook, which turns an ask on one of its own script calls in flight into a deny, because no one
   can answer a script's prompt. It only tightens and touches no other call.
 
 When you add a rule here, add it to the scan and its self-test too.
 
 ## Design
 
-- GitHub's own MCP tools are the tool surface. The plugin adds `github_events_list` (`src/source-events.ts`), Memory's
-  source of GitHub events over the shared `events_list` contract (`src/host/events-list.ts`, carried unchanged and
-  pinned by `scripts/check-copies.mjs`: change it in every source plugin at once); it makes only GETs through
-  `github_api`'s spec, as a script call, so each asserts `github_api` on its own `GET /path` first, and its tests run the contract's conformance check on a synthetic GitHub. The plugin adds one
+- GitHub's own MCP tools are the tool surface. The plugin adds `github_events_list` (`src/source-events.ts`), its
+  source `github.activity` under the source contract (`@we-the-rebel-alliance/source-contract`, pinned to a tag in
+  `package-lock.json` and bundled into `dist/index.js`; `package.json`'s `sources` declares it), and the contract's
+  `probe` tools RPC method; they make only GETs through `github_api`'s spec, as a script call, so each asserts its own
+  action (`github_events_list`, `github_probe`) on its own `GET /path` first. The account and owner are the sign-in's
+  recorded login; no content read asks GitHub who is signed in. `npm test` runs the contract's events checks on a
+  synthetic GitHub, and `test/conformance/` the contract's conformance kit over the declared source. The plugin adds one
   more tool, `github_api` (`src/api/`), for what they
   cannot do. It classifies each call itself (GET and HEAD, `POST /markdown` and `/markdown/raw`, or one GraphQL query,
   read; everything else writes), asserts `github_api` on `METHOD /path` for every request before it is sent, reads
@@ -55,7 +58,7 @@ When you add a rule here, add it to the scan and its self-test too.
   default `"all"` every tool is allowed and so is the `github_*` pattern; `"ask-changes"` asks for every change and
   `"read-only"` denies it. No permission hook decides them. User rules and saved approvals keep winning, and a stricter
   agent is never weakened. `readOnly` is deprecated and maps onto `access`.
-- **Tools RPC.** `github.platform.tools` (`src/host/tools-rpc.ts`) lets scripts call, with no model, `describe`, one
+- **Tools RPC.** `github.platform.tools` (the source contract's `tools-rpc` with GitHub's value, `src/tools-rpc.ts`) lets scripts call, with no model, `describe`, one
   method per known tool (`allReadTools()` and `allWriteTools()`, each with its class, through OpenCode's own executors
   from `ctx.tool.list()`, never an MCP client of the plugin's), and `api` (`src/api/script.ts`): `github_api`'s own
   spec, which asserts `github_api` on the exact resource for a change, a `download` and an `upload`, and refuses every
@@ -64,8 +67,8 @@ When you add a rule here, add it to the scan and its self-test too.
   GETs cannot POST and a saved approval is not a grant. `ui_get` and unknown tools are never methods. `describe` gives a
   tool GitHub does not list a `detail` naming its toolset and the `toolsets` option (`unavailableDetail` in
   `src/tools.ts`). A script runs as a session and its agent; its one permission hook only turns its own script calls'
-  asks into denies. `src/host/tools-rpc.ts` is a copy of a module shared by several plugins: change only its block
-  between the `PLUGIN-SPECIFIC` markers here, and the rest in the shared copy first.
+  asks into denies. The transport is the source contract's, shared by the family: GitHub's part is `src/tools-rpc.ts`
+  (the plugin value, the method table and the next steps); a change to the transport goes to the package first.
 - Agents defined only in the user's config get no rules. Status names them and gives the fix: the block **first** in
   **that agent's own** `permissions` list, followed by the user's top-level rules for `github_` tools. Never recommend the
   top-level `permissions` for the block.

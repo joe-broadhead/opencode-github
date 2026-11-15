@@ -122,6 +122,8 @@ const API_TOOL = `${TOOL_PREFIX}${API_TOOL_NAME}`
 export const PINNED = [] as const
 /** The plugin's own github_events_list, Memory's source of GitHub events: a read, in the same namespace. */
 export const EVENTS_TOOL_NAME = "events_list"
+/** The source contract's probe: a tools RPC method (no tool), whose permission action is `github_probe`. */
+export const PROBE_METHOD_NAME = "probe"
 /** The plugin's own tools: never GitHub's server tools, so the filter neither counts nor hides them. */
 const OWN_TOOLS = new Set([API_TOOL, `${TOOL_PREFIX}${EVENTS_TOOL_NAME}`])
 

@@ -18,7 +18,7 @@ GitHub is a trademark of GitHub, Inc.; this unofficial plugin is not endorsed by
 ## Install
 
 ```sh
-opencode plugin add github:joe-broadhead/opencode-github#v0.0.2
+opencode plugin add github:joe-broadhead/opencode-github#v0.0.3
 ```
 
 Run `opencode reload`, or restart OpenCode. Then run `/github-status`: it shows `Connection: sign-in required` until
@@ -29,7 +29,7 @@ Each release has its own tag, and a Git install does not update by itself. To mo
 Or add the plugin to `opencode.json` instead, with the same spec:
 
 ```json
-{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.2" }] }
+{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.3" }] }
 ```
 
 The install takes the GitHub release tag. Its commit carries the built `dist/`, so the install runs no build.
@@ -104,7 +104,8 @@ Each skill reports findings and changes nothing on GitHub unless you ask.
 **Events list.** `github_events_list`, the plugin's own read, is for Memory's collector and other scripts, not for
 answering questions: what you were involved in since a cursor (changes to issues and pull requests, your commits, and
 other notifications where the sign-in may read them), as normalised events, oldest first. It only reads, with GET
-requests, and never asks. See [Events list](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/configuration.md#events-list).
+requests, and never asks. It is the plugin's source `github.activity` under the shared source contract, which
+`package.json` declares, with the tools RPC method `probe`, which names who is signed in. See [Events list](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/configuration.md#events-list).
 
 **Scripts.** A script or a cron job can call GitHub's tools and `github_api` with no model, through `opencode api`.
 It runs as a session and its agent, and every call resolves the rule for its action, the agent's and then the
@@ -141,7 +142,7 @@ asks first. Restrict it in any of these three ways:
    | `"read-only"` | the read tools | nothing: every write is **denied**, and GitHub's own server lists no write tools |
 
    ```json
-   { "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.2", "options": { "access": "read-only" } }] }
+   { "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.3", "options": { "access": "read-only" } }] }
    ```
 
    `readOnly: true` and `false` still work: they mean `"read-only"` and `"all"`, and `/github-status` says they are
@@ -236,6 +237,7 @@ The plugin inserts this block directly after each agent's base rule that allows 
   { "action": "github_search_repositories", "resource": "*", "effect": "allow" },
   { "action": "github_search_users", "resource": "*", "effect": "allow" },
   { "action": "github_events_list", "resource": "*", "effect": "allow" },
+  { "action": "github_probe", "resource": "*", "effect": "allow" },
   { "action": "github_api", "resource": "GET *", "effect": "allow" },
   { "action": "github_api", "resource": "HEAD *", "effect": "allow" },
   { "action": "github_api", "resource": "POST /markdown", "effect": "allow" },
@@ -332,7 +334,7 @@ Options go in the plugin's entry in `opencode.json`:
 
 ```json
 {
-  "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.2", "options": { "toolsets": ["context", "repos", "issues"] } }]
+  "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.3", "options": { "toolsets": ["context", "repos", "issues"] } }]
 }
 ```
 
@@ -363,7 +365,7 @@ overrides user and project config, so members only sign in:
 {
   "plugins": [
     {
-      "package": "github:joe-broadhead/opencode-github#v0.0.2",
+      "package": "github:joe-broadhead/opencode-github#v0.0.3",
       "options": {
         "clientId": "<your organisation's OAuth App client ID>",
         "scopes": ["repo", "read:org"],
@@ -448,10 +450,11 @@ Error codes:
 | `API_REDIRECT_INSECURE` | GitHub redirected to a non-HTTPS address. Try again later. |
 | `API_REDIRECT_OFF_HOST` | GitHub redirected a read outside its API. For job logs, call `get_job_logs` with `return_content: true`; for other files, pass `download: { path }`. |
 | `API_REDIRECTED` | GitHub redirected a change, which is never followed. The message names the new path: call `github_api` again with that path, so the change is checked for it. |
-| `EVENTS_INVALID_INPUT` | The `events_list` input breaks the shared contract, or names another account or source. | Pass only since, cursor, limit (1 to 500), account and source, as the tool's schema describes. |
-| `EVENTS_CURSOR_INVALID` | The cursor was not issued by GitHub's `events_list` for this account and its signed-in user. | Pass a cursor from a previous result of the same account, or start again with since. |
-| `EVENTS_OWNER_UNKNOWN` | GitHub's `get_me` (or `GET /user`) did not name the signed-in user. | Run /github-status, and sign in again if it shows a problem. |
-| `EVENTS_READ_FAILED` | A search or notifications read for `events_list` failed, or its answer was too large to read whole. | Call events_list again with the same cursor; if it keeps failing, run /github-status. |
+| `INPUT_INVALID` | The `events_list` or `probe` input breaks the source contract, or a listing with a cursor names no account. Pass only since, cursor, limit (1 to 500), account and source, as the tool's schema describes; pass account with a cursor. |
+| `SOURCE_UNKNOWN` | `events_list` or `probe` names a source the plugin does not have. Leave source out, or pass github. |
+| `CURSOR_INVALID` | The cursor was not issued by GitHub's `events_list` for this account and its signed-in user, or was changed. Call events_list without a cursor, with since, to start again. |
+| `ACCOUNT_MISMATCH` | `events_list` or `probe` names another account than the signed-in login, or a cursor issued for another account. Pass the account the cursor was issued for, or sign in to GitHub as that account; probe names the signed-in login. |
+| `UNAVAILABLE` | A search, notifications or `GET /user` read for `events_list` or `probe` failed, its answer was too large to read whole, or the sign-in names no login. Call it again with the same cursor; if it keeps failing, run /github-status. |
 
 Each row's own next step is in the message, and [the error codes](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/configuration.md#errors) give the same set with when each one happens.
 
@@ -478,7 +481,7 @@ still stores its token.
    account, which works only in an interactive terminal. Then, on GitHub, delete the token under **Settings →
    Developer settings → Personal access tokens**, or, after a device sign-in, revoke the app under **Settings →
    Applications → Authorized OAuth Apps** (or **Authorized GitHub Apps**).
-2. Run `opencode plugin remove github:joe-broadhead/opencode-github#v0.0.2` (the spec you installed), then `opencode reload`.
+2. Run `opencode plugin remove github:joe-broadhead/opencode-github#v0.0.3` (the spec you installed), then `opencode reload`.
 3. Data folders: none. The plugin stores nothing of its own.
 4. Remove the default rules you copied into agents' own `permissions`.
 
@@ -493,6 +496,20 @@ still stores its token.
 - **A GitHub App sign-in expires after six months.** Its 8-hour user token is renewed with its refresh token, which lasts six months; after that, or once GitHub refuses it, `/connect` asks for a new sign-in. The App reaches only the accounts it is installed on.
 - **Jelly.** The `access` and `unknownTools` settings declare their choices, which only a Jelly that includes app#1301 reads; an older Jelly refuses the plugin's declaration.
 - **GitHub's rate limits and error text are GitHub's.** Errors from OpenCode and GitHub pass through unchanged.
+- **`events_list` reads GitHub's search, which has its own limits.** GitHub allows 30 search requests a minute for a
+  signed-in user, and at most 1,000 results for one query ([REST API endpoints for search](https://docs.github.com/en/rest/search/search#rate-limit));
+  one `events_list` call makes three searches (issues, pull requests, commits) and at most 9 pages of each, 27 requests, beside GitHub's REST limit of 5,000 requests an hour for a user
+  ([rate limits for the REST API](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)).
+  A call over the limit fails with GitHub's answer as `UNAVAILABLE`: call again later with the same cursor.
+- **Notifications need a classic sign-in.** A fine-grained token or a GitHub App cannot read `/notifications`
+  ([REST API endpoints for notifications](https://docs.github.com/en/rest/activity/notifications#list-notifications-for-the-authenticated-user)),
+  so `events_list` leaves them out for those sign-ins.
+- **The source's links are `github.com`'s.** The `sources` declaration names `github.com` as its `urlHosts`; with the
+  `host` option (GitHub Enterprise Server) the events link to your server, which a consumer that checks `urlHosts`
+  does not render.
+- **A GitHub cursor never expires.** It holds a time in each stream, so the plugin never answers `CURSOR_EXPIRED`, and
+  the conformance report stays incomplete on the kit's expired-cursor check. The kit runs on GitHub answers that are
+  invented, modelled on GitHub's REST docs, and not live-verified.
 - Updates are not automatic for a Git install, and `opencode plugin update` and `opencode plugin check` do not work on one: to move to a newer release, remove the old entry and add the new tag.
 
 ## Links

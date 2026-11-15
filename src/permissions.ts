@@ -4,7 +4,7 @@
 // still win. Every tool is allowed by default; the `access` option generates the block.
 import type { Plugin } from "@opencode/plugin"
 import type { Access } from "./config.js"
-import { API_TOOL_NAME, EVENTS_TOOL_NAME, TOOL_PREFIX, allReadTools, allWriteTools } from "./tools.js"
+import { API_TOOL_NAME, EVENTS_TOOL_NAME, PROBE_METHOD_NAME, TOOL_PREFIX, allReadTools, allWriteTools } from "./tools.js"
 
 export type Rule = { readonly action: string; readonly resource: string; readonly effect: "allow" | "ask" | "deny" }
 
@@ -19,8 +19,9 @@ export const API_READS = ["GET *", "HEAD *", "POST /markdown", "POST /markdown/r
 /**
  * Broad first, narrow last, because the last matching rule wins. At `access: "all"` every tool the plugin registers
  * is allowed, and so is one GitHub adds later through the `github_*` pattern; `ask-changes` asks for anything that is
- * not a read, and `read-only` denies it. The reads are always allowed, and so is the plugin's own `events_list`, which
- * Memory's collector runs unattended; that is why the first rule alone decides an unknown tool. github_api asserts every
+ * not a read, and `read-only` denies it. The reads are always allowed, and so are the plugin's own `events_list`, which
+ * Memory's collector runs unattended, and the source contract's `probe` (`github_probe`, a tools RPC method that names
+ * who is signed in); that is why the first rule alone decides an unknown tool. github_api asserts every
  * request on its own `METHOD /path`, so its reads are allowed by resource, and its changes fall to the first rule.
  */
 export function defaultRules(access: Access = "all"): Rule[] {
@@ -29,6 +30,7 @@ export function defaultRules(access: Access = "all"): Rule[] {
     rule("*", other),
     ...allReadTools().map((name) => rule(name, "allow")),
     rule(EVENTS_TOOL_NAME, "allow"),
+    rule(PROBE_METHOD_NAME, "allow"),
     ...API_READS.map((resource) => rule(API_TOOL_NAME, "allow", resource)),
     ...allWriteTools().map((name) => rule(name, other)),
   ]

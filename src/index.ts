@@ -10,14 +10,15 @@ import { registerAuth } from "./auth.js"
 import { endpoints, loadOptions } from "./config.js"
 import { ENTERPRISE_NAME, registerEnterpriseAuth } from "./enterprise.js"
 import { checkHost } from "./host-version.js"
-import { METHODS, registerToolsRpc } from "./host/tools-rpc.js"
+import { registerToolsRpc } from "@we-the-rebel-alliance/source-contract/tools-rpc"
 import { observeMcp, registerMcp } from "./mcp.js"
 import { registerPermissionDefaults } from "./permissions.js"
 import { SERVER_NAME } from "./rpc.js"
 import { registerSignInStatus } from "./sign-in-status.js"
 import { SKILL_IDS, registerSkills, skillPath } from "./skills.js"
-import { eventsMethod, registerEventsTool } from "./source-events.js"
+import { eventsMethod, probeMethod, registerEventsTool } from "./source-events.js"
 import { type StatusDeps, registerStatus } from "./status.js"
+import { METHODS, PLUGIN } from "./tools-rpc.js"
 import { registerToolFilter, unavailableDetail } from "./tools.js"
 
 type Registration = { dispose(): Promise<void> }
@@ -80,8 +81,9 @@ export default Plugin.define({
           integrationID: source.integrationID,
         }),
       )
-      // events_list, Memory's source of GitHub events: GETs through github_api's spec, and get_me where the server is ours.
-      const events = { ctx, api: apiTool, managed: () => managed() }
+      // GitHub's source (package.json's `sources`): events_list, a Code Mode tool and a tools RPC method, and probe, a
+      // tools RPC method. Both read with GETs through github_api's spec; the account is the sign-in's recorded login.
+      const events = { ctx, api: apiTool, identity: () => apiTool.identity(), ...(options.host ? { host: options.host } : {}) }
       keep(await registerEventsTool(ctx, events))
       keep(
         await registerStatus(ctx, {
@@ -96,8 +98,9 @@ export default Plugin.define({
       // Scripts call every known tool and github_api with no model, as a session and its agent: a write, a download or
       // an upload needs a prior allow rule for its action. A method GitHub does not list gets describe's detail: its
       // toolset, and whether the toolsets option turns that on.
-      const stopTools = await registerToolsRpc(ctx, {
-        methods: [...METHODS, scriptApi(apiTool), eventsMethod(events)],
+      const stopTools = await registerToolsRpc(ctx as never, {
+        plugin: PLUGIN,
+        methods: [...METHODS, scriptApi(apiTool), eventsMethod(events), probeMethod(events)],
         mcp: {
           server: SERVER_NAME,
           managed: () => managed(),
