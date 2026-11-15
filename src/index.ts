@@ -83,7 +83,7 @@ export default Plugin.define({
       )
       // GitHub's source (package.json's `sources`): events_list, a Code Mode tool and a tools RPC method, and probe, a
       // tools RPC method. Both read with GETs through github_api's spec; the account is the sign-in's recorded login.
-      const events = { ctx, api: apiTool, identity: () => apiTool.identity() }
+      const events = { ctx, api: apiTool, identity: () => apiTool.identity(), ...(options.host ? { host: options.host } : {}) }
       keep(await registerEventsTool(ctx, events))
       keep(
         await registerStatus(ctx, {

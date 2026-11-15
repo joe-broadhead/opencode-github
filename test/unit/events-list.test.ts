@@ -101,8 +101,11 @@ function github(options: { perPage?: number; notifications?: "ok" | "forbidden";
     if (path === "/user") return ok({ login: options.login ?? LOGIN })
     if (path === "/search/issues") {
       expect(String(query.q)).toContain(`involves:${options.login ?? LOGIN}`)
+      // As GitHub answers a GitHub App user token: a search for issues and pull requests together is refused.
+      const kind = /(?:^|\s)is:(issue|pull-request)(?:\s|$)/.exec(String(query.q))?.[1]
+      if (kind === undefined) return { ok: false, status: 422, data: { message: "Validation Failed" }, truncated: false, trust: { githubContent: "untrusted" } } as ApiOutput
       const from = Date.parse(qualifier("updated")!)
-      const all = ISSUES.filter((item) => Date.parse(item.updated_at) >= from).sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at) || b.number - a.number)
+      const all = ISSUES.filter((item) => Date.parse(item.updated_at) >= from && ("pull_request" in item) === (kind === "pull-request")).sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at) || b.number - a.number)
       return ok({ total_count: all.length, incomplete_results: false, items: pageOf(all) })
     }
     if (path === "/search/commits") {
@@ -201,9 +204,32 @@ describe("events_list", () => {
   it("asks GitHub's searches oldest first, from whole seconds, and reads notifications only as participating", async () => {
     const fake = github()
     await list(fake)({ since: "2026-10-01T09:00:00.500Z" })
-    expect(fake.calls.find((call) => call.path === "/search/issues")!.query).toEqual({ q: `involves:${LOGIN} updated:>=2026-10-01T09:00:00Z`, sort: "updated", order: "asc", per_page: 50, page: 1 })
+    expect(fake.calls.filter((call) => call.path === "/search/issues").map((call) => call.query)).toEqual([
+      { q: `is:issue involves:${LOGIN} updated:>=2026-10-01T09:00:00Z`, sort: "updated", order: "asc", per_page: 50, page: 1 },
+      { q: `is:pull-request involves:${LOGIN} updated:>=2026-10-01T09:00:00Z`, sort: "updated", order: "asc", per_page: 50, page: 1 },
+    ])
     expect(fake.calls.find((call) => call.path === "/search/commits")!.query).toMatchObject({ q: `author:${LOGIN} committer-date:>=2026-10-01T09:00:00Z`, sort: "committer-date", order: "asc" })
     expect(fake.calls.find((call) => call.path === "/notifications")!.query).toMatchObject({ all: true, participating: true, since: "2026-10-01T09:00:00Z" })
+  })
+
+  it("lists issues and pull requests from two searches, one is:issue and one is:pull-request, as a GitHub App token needs", async () => {
+    const fake = github()
+    const result = (await list(fake)({ since: SINCE, limit: PAGE.max })) as EventsListResult
+    const kinds = new Set(result.events.map((event) => event.kind))
+    expect(kinds).toEqual(new Set(["issue", "pr", "commit", "event"]))
+    expect(result.events.find((event) => event.kind === "pr")!.external_id).toBe("octo/app#2@2026-10-02T10:00:00.000Z")
+    const searches = fake.calls.filter((call) => call.path === "/search/issues").map((call) => String(call.query.q))
+    expect(searches.every((q) => /^is:(issue|pull-request) /.test(q))).toBe(true)
+    // The fake refuses a search without is:, as GitHub does for a GitHub App user token, and none was sent.
+    expect(await fake.get("/search/issues", { q: `involves:${LOGIN} updated:>=2026-10-01T00:00:00Z`, per_page: 50, page: 1 })).toMatchObject({ ok: false, status: 422 })
+  })
+
+  it("qualifies the owner with the host on GitHub Enterprise Server, so it never equals a github.com owner", async () => {
+    const fake = github()
+    const enterprise = (await listEvents(fake.get, fake.identity, { since: "2999-01-01" }, NOW, "GHE.Example.test")) as EventsListResult
+    expect(enterprise.owner).toEqual({ id: `github:${LOGIN}@ghe.example.test`, label: `${LOGIN} (ghe.example.test)` })
+    expect(await probeEvents(fake.get, fake.identity, {}, "ghe.example.test")).toMatchObject({ owner: enterprise.owner })
+    expect(((await list(fake)({ since: "2999-01-01" })) as EventsListResult).owner).toEqual(OWNER)
   })
 
   it("names its source, account and owner on an empty first page, without a search", async () => {
@@ -355,6 +381,8 @@ describe("events_list's inner reads", () => {
     { action: EVENTS_ACTION, resource: "*", effect: "allow" },
   ]
   const READS = ["/search/issues", "/search/commits", "/notifications"]
+  /** What one listing sends: the issue search, the pull request search, commits, notifications. */
+  const SENT = ["/search/issues", "/search/issues", "/search/commits", "/notifications"]
 
   async function wired(session: readonly Rule[], agent: readonly Rule[] = BASE) {
     const fetched: string[] = []
@@ -403,8 +431,8 @@ describe("events_list's inner reads", () => {
   it("asserts github_events_list, then github_events_list on each GET /path before it is sent", async () => {
     const { run, fetched, asserted } = await wired([])
     expect((await run()).events).toEqual([])
-    expect(fetched).toEqual(READS)
-    expect(asserted).toEqual([`${EVENTS_ACTION} *`, ...READS.map((path) => `${EVENTS_ACTION} GET ${path}`)])
+    expect(fetched).toEqual(SENT)
+    expect(asserted).toEqual([`${EVENTS_ACTION} *`, ...SENT.map((path) => `${EVENTS_ACTION} GET ${path}`)])
     expect(EVENTS_READS).toEqual(READS.map((path) => `GET ${path}`))
   })
 
@@ -413,14 +441,14 @@ describe("events_list's inner reads", () => {
     const result = await run().catch((error: unknown) => error)
     expect(String((result as Error).message ?? "")).not.toContain("PERMISSION_DENIED")
     expect(result).toMatchObject({ source: "github", owner: OWNER, events: [] })
-    expect(fetched).toEqual(READS)
+    expect(fetched).toEqual(SENT)
     expect(asserted.every((entry) => entry.startsWith(`${EVENTS_ACTION} `))).toBe(true)
   })
 
   it("is not decided by github_api rules: a session deny on github_api does not stop it", async () => {
     const { run, fetched } = await wired([{ action: "github_api", resource: "*", effect: "deny" }], JELLY)
     expect((await run()).owner).toEqual(OWNER)
-    expect(fetched).toEqual(READS)
+    expect(fetched).toEqual(SENT)
   })
 
   it("stops with nothing sent when the session denies github_events_list", async () => {
@@ -434,7 +462,7 @@ describe("events_list's inner reads", () => {
 
   it.each([
     ["GET /search/*", []],
-    ["GET /notifications", ["/search/issues", "/search/commits"]],
+    ["GET /notifications", ["/search/issues", "/search/issues", "/search/commits"]],
   ])("refuses a read the session denies (%s) before its request, and an ask too, as nobody can answer it", async (resource, sent) => {
     for (const effect of ["deny", "ask"] as const) {
       const { run, fetched } = await wired([{ action: EVENTS_ACTION, resource, effect }], JELLY)

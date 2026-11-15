@@ -9,9 +9,10 @@
 // the login GitHub's GET /user named when the person signed in, which /github-status shows as the Account. probe makes
 // that one GET /user, under its own action `github_probe`, to confirm the sign-in still names that login.
 //
-// Three streams, each with its own position in the one cursor:
-// - issues and pull requests the person is involved in (`involves:`), from /search/issues sorted by update, oldest
-//   first: one event each time one changes;
+// Four streams, each with its own position in the one cursor:
+// - issues, and pull requests, the person is involved in (`involves:`), from /search/issues sorted by update, oldest
+//   first, as two searches (`is:issue`, `is:pull-request`), because GitHub refuses a search for both together from a
+//   GitHub App user token: one event each time one changes;
 // - commits the person authored, from /search/commits sorted by committer date, oldest first;
 // - notifications, where the sign-in may read them (/notifications; a 401, 403 or 404 leaves them out), except those
 //   about an issue or a pull request, which the first stream already lists.
@@ -75,15 +76,19 @@ const LOGIN = /^[A-Za-z0-9-]{1,39}$/
 export const SETTLE_MS = 5 * 60_000
 /** Results per search or notifications page. */
 const PER_PAGE = 50
-/** GitHub's search returns at most 1000 results: 20 pages of 50. */
-const SEARCH_PAGES = 20
+/**
+ * The most pages one search reads in one call. GitHub allows 30 search requests a minute for a signed-in user, and a
+ * call makes three searches (issues, pull requests, commits): 3 x 9 = 27 requests at most, under that budget.
+ */
+const SEARCH_PAGES = 9
 const NOTIFICATION_PAGES = 10
 /** Notifications about these are the issue and pull request stream's. */
 const COVERED = new Set(["Issue", "PullRequest"])
 
 type Data = Record<string, unknown>
-type StreamName = "i" | "c" | "n"
-const STREAMS: readonly StreamName[] = ["i", "c", "n"]
+/** Issues, pull requests, commits and notifications: GitHub searches issues and pull requests separately. */
+type StreamName = "i" | "p" | "c" | "n"
+const STREAMS: readonly StreamName[] = ["i", "p", "c", "n"]
 
 /** A GET through github_api's spec, as the caller. */
 export type Get = (path: string, query: Record<string, string | number | boolean>) => Promise<ApiOutput>
@@ -143,7 +148,7 @@ const actor = (role: string, user: unknown) => {
   return login ? [{ role, id: `github:${login}` }] : []
 }
 
-/** An issue or a pull request from /search/issues, as the event of its last change. */
+/** An issue or a pull request from /search/issues, as the event of its last change, in the issue or pull request stream. */
 export function issueItem(raw: unknown, account: string): Item | undefined {
   if (!record(raw)) return undefined
   const at = time(raw["updated_at"])
@@ -168,7 +173,7 @@ export function issueItem(raw: unknown, account: string): Item | undefined {
     url: text(raw["html_url"])!,
     labels: [merged ? "merged" : (text(raw["state"]) ?? "open"), ...labels],
   })
-  return { s: "i", t: at, i: id, event }
+  return { s: pr ? "p" : "i", t: at, i: id, event }
 }
 
 /** A commit from /search/commits, at its committer date. */
@@ -287,7 +292,8 @@ async function notifications(get: Get, from: Key, account: string): Promise<Read
 }
 
 /** The owner a page and a probe name: `github:` and the login, labelled with the login. The same everywhere. */
-const ownerOf = (login: string): EventsOwner => ({ id: `github:${login}`, label: login })
+const ownerOf = (login: string, host?: string): EventsOwner =>
+  host === undefined ? { id: `github:${login}`, label: login } : { id: `github:${login}@${host.toLowerCase()}`, label: `${login} (${host.toLowerCase()})` }
 /** The account a page names, and a cursor and a grant are bound to: the login as GitHub compares logins, lowercase. */
 const accountOf = (login: string) => login.toLowerCase()
 /** A cursor's owner hash: a cursor of another sign-in is refused. */
@@ -326,7 +332,7 @@ function positionsOf(cursor: string, account: string, owner: EventsOwner): Recor
     return Array.isArray(pair) && pair.length === 2 && typeof pair[0] === "number" && Number.isSafeInteger(pair[0]) && typeof pair[1] === "string" ? { t: pair[0], i: pair[1] } : undefined
   })
   if (!named || state["o"] !== digest(owner) || keys.some((key) => key === undefined)) return refuseCursor()
-  return { i: keys[0]!, c: keys[1]!, n: keys[2]! }
+  return { i: keys[0]!, p: keys[1]!, c: keys[2]!, n: keys[3]! }
 }
 
 /** The signed-in login, or AUTH_REQUIRED; `method` names the caller in the message. */
@@ -342,7 +348,7 @@ async function signedIn(identity: Identity, method: string): Promise<string> {
  * fixes the clock. A listing with a cursor names its account; a cursor for another account than the one named, or an
  * account that is not the signed-in one, is ACCOUNT_MISMATCH, before any GitHub call.
  */
-export async function listEvents(get: Get, identity: Identity, input: unknown, now: number): Promise<EventsListResult> {
+export async function listEvents(get: Get, identity: Identity, input: unknown, now: number, host?: string): Promise<EventsListResult> {
   const parsed = parseEventsListInput(input)
   if (!parsed.ok) return fail("INPUT_INVALID", `The events_list input is invalid: ${parsed.problems.join("; ")}.`, "Pass only since, cursor, limit (1 to 500), account and source, as the tool's schema describes.")
   const request = parsed.value
@@ -360,14 +366,16 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   if (asked !== undefined && asked !== account) {
     fail("ACCOUNT_MISMATCH", `GitHub is signed in to another account than "${request.account}".`, `Sign in to GitHub as that account (/connect, GitHub), or read as "${account}", the signed-in login.`)
   }
-  const owner = ownerOf(login)
+  const owner = ownerOf(login, host)
   const start: Key = { t: startTime(request, now), i: "" }
-  const from = request.cursor !== undefined ? positionsOf(request.cursor, account, owner) : { i: start, c: start, n: start }
+  const from = request.cursor !== undefined ? positionsOf(request.cursor, account, owner) : { i: start, p: start, c: start, n: start }
   const end = now - SETTLE_MS
 
   const none: Read = { items: [], complete: true, last: Number.POSITIVE_INFINITY }
   const reads: Record<StreamName, Read> = {
-    i: from.i.t > end ? none : await search(get, "/search/issues", `involves:${login} updated:>=${isoSeconds(from.i.t)}`, "updated", from.i, request.limit, (raw) => issueItem(raw, account)),
+    // GitHub refuses a search for issues and pull requests together from a GitHub App user token (HTTP 422): one each.
+    i: from.i.t > end ? none : await search(get, "/search/issues", `is:issue involves:${login} updated:>=${isoSeconds(from.i.t)}`, "updated", from.i, request.limit, (raw) => issueItem(raw, account)),
+    p: from.p.t > end ? none : await search(get, "/search/issues", `is:pull-request involves:${login} updated:>=${isoSeconds(from.p.t)}`, "updated", from.p, request.limit, (raw) => issueItem(raw, account)),
     c: from.c.t > end ? none : await search(get, "/search/commits", `author:${login} committer-date:>=${isoSeconds(from.c.t)}`, "committer-date", from.c, request.limit, (raw) => commitItem(raw, account)),
     n: from.n.t > end ? none : await notifications(get, from.n, account),
   }
@@ -405,7 +413,7 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
  * the owner are the sign-in's, as on every page; one GET /user, asserted as `github_probe`, confirms the token still
  * belongs to that login. A caller that names another account is refused with ACCOUNT_MISMATCH.
  */
-export async function probeEvents(get: Get, identity: Identity, input: unknown): Promise<ProbeResult> {
+export async function probeEvents(get: Get, identity: Identity, input: unknown, host?: string): Promise<ProbeResult> {
   const parsed = parseProbeInput(input)
   if (!parsed.ok) return fail("INPUT_INVALID", `The probe input is invalid: ${parsed.problems.join("; ")}.`, 'Pass only "source" and "account", or an empty object.')
   const source = parsed.value.source ?? SOURCE
@@ -420,7 +428,7 @@ export async function probeEvents(get: Get, identity: Identity, input: unknown):
   const confirmed = loginOf(output.data)
   if (confirmed === undefined) fail("UNAVAILABLE", "GitHub's answer to /user named no login.", "Run /github-status, then call probe again.")
   if (accountOf(confirmed!) !== account) fail("UNAVAILABLE", "The GitHub token belongs to another login than the sign-in recorded.", "Run /connect and choose GitHub to sign in again, then call probe again.")
-  return probeResult({ source, account, owner: ownerOf(login) })
+  return probeResult({ source, account, owner: ownerOf(login, host) })
 }
 
 export const EVENTS_DESCRIPTION =
@@ -506,6 +514,8 @@ export interface EventsDeps {
   readonly api: { run(input: ApiInput, call: Call, scope?: ApiScope): Promise<ApiOutput> }
   /** The signed-in login, as the sign-in recorded it: `registerApiTool`'s `identity`. It calls no GitHub API. */
   readonly identity: Identity
+  /** The GitHub Enterprise Server host (the `host` option), which qualifies the owner; absent for github.com. */
+  readonly host?: string
   readonly now?: () => number
 }
 
@@ -535,13 +545,13 @@ const getter =
  */
 export async function runEvents(deps: EventsDeps, input: unknown, call: Call): Promise<EventsListResult> {
   await assertAction(deps, EVENTS_ACTION, call)
-  return listEvents(getter(deps, call, EVENTS_SCOPE), deps.identity, input, (deps.now ?? Date.now)())
+  return listEvents(getter(deps, call, EVENTS_SCOPE), deps.identity, input, (deps.now ?? Date.now)(), deps.host)
 }
 
 /** probe's one run: asserts github_probe for the caller, then its one GET /user under PROBE_SCOPE. */
 export async function runProbe(deps: EventsDeps, input: unknown, call: Call): Promise<ProbeResult> {
   await assertAction(deps, PROBE_ACTION, call)
-  return probeEvents(getter(deps, call, PROBE_SCOPE), deps.identity, input)
+  return probeEvents(getter(deps, call, PROBE_SCOPE), deps.identity, input, deps.host)
 }
 
 function summary(result: EventsListResult): string {

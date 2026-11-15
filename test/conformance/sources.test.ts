@@ -51,8 +51,15 @@ function answer(url: URL): Response {
       return json(GITHUB["user"])
     case "/search/issues": {
       if (!(query.get("q") ?? "").includes(`involves:${LOGIN}`)) return json({ total_count: 0, incomplete_results: false, items: [] })
+      // A GitHub App user token gets 422 for a search of issues and pull requests together.
+      const kind = /(?:^|\s)is:(issue|pull-request)(?:\s|$)/.exec(query.get("q") ?? "")?.[1]
+      if (kind === undefined) return new Response(JSON.stringify({ message: "Validation Failed" }), { status: 422 })
       const from = Date.parse(qualifier("updated")!)
-      return paged((GITHUB["issues"] as { updated_at: string }[]).filter((item) => Date.parse(item.updated_at) >= from).sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at)))
+      return paged(
+        (GITHUB["issues"] as { updated_at: string }[])
+          .filter((item) => Date.parse(item.updated_at) >= from && ("pull_request" in item) === (kind === "pull-request"))
+          .sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at)),
+      )
     }
     case "/search/commits": {
       const from = Date.parse(qualifier("committer-date")!)
