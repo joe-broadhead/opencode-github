@@ -4,7 +4,7 @@
 // script's ask, and a plain JSON Schema contract with a strict validator refuses a bad envelope.
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { SCRIPT_API_METHOD } from "../../src/api/script.js"
-import { METHODS, TOOLS_RPC_ID } from "../../src/host/tools-rpc.js"
+import { METHODS, TOOLS_RPC_ID } from "../../src/tools-rpc.js"
 import { FAKE_INPUT, type FakeGitHub, FIXTURE_PAT, PAT_LOGIN, startFakeGitHub, UPSTREAM_FAILURE } from "../host/fake-github.js"
 import { cleanupStock, startStock, STOCK_VERSIONS, type StockHost, until } from "./harness.js"
 
@@ -68,11 +68,12 @@ for (const version of STOCK_VERSIONS)
       await fake?.close()
     })
 
-    test("describes every known tool with its class, api and events_list; the listed reads are available with their live schemas", async () => {
+    test("describes every known tool with its class, api, events_list and probe; the listed reads are available with their live schemas", async () => {
       const { value } = await script(host, "describe", {})
       expect(value.id).toBe(TOOLS_RPC_ID)
-      expect(value.methods.map((method: { name: string }) => method.name)).toEqual([...METHODS.map((method) => method.name), SCRIPT_API_METHOD, "events_list"])
-      expect(value.methods.at(-1)).toMatchObject({ kind: "plugin", action: "github_events_list", available: true })
+      expect(value.methods.map((method: { name: string }) => method.name)).toEqual([...METHODS.map((method) => method.name), SCRIPT_API_METHOD, "events_list", "probe"])
+      expect(value.methods.at(-2)).toMatchObject({ kind: "plugin", class: "read", action: "github_events_list", available: true })
+      expect(value.methods.at(-1)).toMatchObject({ kind: "plugin", class: "read", action: "github_probe", available: true })
       const byName = new Map(value.methods.map((method: { name: string }) => [method.name, method]))
       for (const name of READS) expect(byName.get(name)).toMatchObject({ kind: "mcp", tool: `github_${name}`, action: `github_${name}`, available: true, input: FAKE_INPUT })
       // QA LIVE-9: describe says why: the toolset, and whether the toolsets option turns it on (issues is on by default).

@@ -188,11 +188,13 @@ describe("github.platform", () => {
       detail: "list_issues is in the issues toolset, which the toolsets option turns on, but GitHub does not list it now: run /github-status.",
     }))
     expect(byName.get("issue_artifact_read")?.detail).toContain("behind a feature flag that this plugin does not turn on")
-    // Every MCP read is unlisted here, so each has a detail naming its toolset; api and events_list, the plugin's own, have none.
-    for (const method of methods.filter((method) => method.name !== "api" && method.name !== "events_list")) expect(method.detail, method.name).toMatch(/ toolset/)
+    // Every MCP read is unlisted here, so each has a detail naming its toolset; api, events_list and probe, the plugin's own, have none.
+    for (const method of methods.filter((method) => !["api", "events_list", "probe"].includes(method.name))) expect(method.detail, method.name).toMatch(/ toolset/)
     expect(byName.get("api")).not.toHaveProperty("detail")
     expect(byName.get("events_list")).toEqual(expect.objectContaining({ kind: "plugin", action: "github_events_list", available: true }))
     expect(byName.get("events_list")).not.toHaveProperty("detail")
+    expect(byName.get("probe")).toEqual(expect.objectContaining({ kind: "plugin", action: "github_probe", available: true }))
+    expect(byName.get("probe")).not.toHaveProperty("detail")
     await cleanup?.()
   })
 })

@@ -193,7 +193,7 @@ async function statusShown(ctx: ApiContext, integrationID: string, connectionID:
 export async function registerApiTool(
   ctx: ApiContext,
   deps: ApiDeps,
-): Promise<{ dispose(): Promise<void>; run(input: ApiInput, call: Call, scope?: ApiScope): Promise<ApiOutput>; signedIn(): Promise<boolean> }> {
+): Promise<{ dispose(): Promise<void>; run(input: ApiInput, call: Call, scope?: ApiScope): Promise<ApiOutput>; signedIn(): Promise<boolean>; identity(): Promise<string | undefined> }> {
   const send: Fetch = deps.fetch ?? ((url, init) => fetch(url, init))
 
   const assert = (call: Call, action: string, resource: string, metadata: Record<string, unknown>) =>
@@ -371,5 +371,16 @@ export async function registerApiTool(
       },
     })
   })
-  return { dispose: registration.dispose, run, signedIn: async () => (await signIn()).credential?.type === "oauth" }
+  /**
+   * The signed-in login, as the sign-in recorded it: GitHub's GET /user named it when the person signed in, and
+   * /github-status shows it as the Account. It calls no GitHub API; undefined when nobody is signed in.
+   */
+  const identity = async () => {
+    const { connection, credential } = await signIn()
+    if (credential?.type !== "oauth") return undefined
+    const login = credential.metadata?.["login"]
+    if (typeof login === "string") return login
+    return connection && "label" in connection && typeof connection.label === "string" ? connection.label : undefined
+  }
+  return { dispose: registration.dispose, run, signedIn: async () => (await signIn()).credential?.type === "oauth", identity }
 }

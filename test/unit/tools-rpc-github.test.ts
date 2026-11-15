@@ -1,11 +1,12 @@
-// GitHub's part of the tools RPC: its plugin block (the known reads, the next steps, its own errors) and the api
+// GitHub's part of the tools RPC: its plugin value (the known reads, the next steps, its own errors) and the api
 // method, which runs github_api's own spec for reads only. The shared module's own tests are in tools-rpc.test.ts.
 import { describe, expect, it } from "vitest"
 import { SCRIPT_API_METHOD, scriptApi } from "../../src/api/script.js"
 import { API_ACTION, registerApiTool } from "../../src/api/tool.js"
 import { DEFAULT_TOOLSETS, GITHUB_COM } from "../../src/config.js"
 import { GitHubPluginError } from "../../src/errors.js"
-import { METHODS, NEXT_STEPS, PLUGIN_ID, pluginError, registerToolsRpc, TOOLS_RPC_ID, type ToolCall } from "../../src/host/tools-rpc.js"
+import { registerToolsRpc, type ToolCall } from "@we-the-rebel-alliance/source-contract/tools-rpc"
+import { METHODS, NEXT_STEPS, PLUGIN, PLUGIN_ID, pluginError, TOOLS_RPC_ID } from "../../src/tools-rpc.js"
 import { HIDDEN, KNOWN_TOOLS, allReadTools } from "../../src/tools.js"
 
 type Rule = { action: string; resource: string; effect: "allow" | "deny" | "ask" }
@@ -93,7 +94,7 @@ async function setUp(
     },
   })
   const spy = { ...api, run: (...[value, call]: Parameters<typeof api.run>) => (runs.push(call as ToolCall), api.run(value, call)) }
-  await registerToolsRpc(ctx as never, { methods: [...METHODS, scriptApi(spy)], mcp: { server: "github", managed: () => input.managed ?? true } })
+  await registerToolsRpc(ctx as never, { plugin: PLUGIN, methods: [...METHODS, scriptApi(spy)], mcp: { server: "github", managed: () => input.managed ?? true } })
   const call = (method: string, value: unknown, agent = "build") =>
     handlers[method]!({ sessionID: `ses_${agent}`, input: value }, { signal: new AbortController().signal, error: (type, message, data) => ({ type, message, data }) })
   return { contract: contract!, handlers, call, requests, asserts, runs }

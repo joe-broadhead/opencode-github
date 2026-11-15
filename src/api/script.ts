@@ -7,7 +7,7 @@
 // `readOnly: true` still refuses every write, whoever calls it.
 import * as z from "zod"
 import { GitHubPluginError } from "../errors.js"
-import type { JsonSchema, OwnedMethod } from "../host/tools-rpc.js"
+import type { JsonSchema, OwnedMethod } from "@we-the-rebel-alliance/source-contract/tools-rpc"
 import { ApiInput, ApiOutput } from "./contract.js"
 import { API_ACTION, type Call, parseInput } from "./tool.js"
 
