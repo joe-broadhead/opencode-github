@@ -2,6 +2,68 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- GitHub's source under the shared source contract, `@we-the-rebel-alliance/source-contract` v0.1.0: `package.json`'s
+  new top-level `sources` key declares `github.activity`, an `events` source read with `events_list` (input
+  `source: "github"`), reading `event` (its events are kinds `issue`, `pr`, `commit` and `event`), one account, its
+  grants stated verbatim as `permission.rules` (`github_events_list` on `GET /search/issues`, `GET /search/commits` and
+  `GET /notifications`, exactly the reads it makes), `private`, `cost.class: "free"`, `maxBytes` 900,000, `urlHosts`
+  `github.com`, the tools RPC `github.platform.tools` and the probe action `github_probe`. **For Memory, jelly and
+  Artifacts:** read the declaration from the installed package with the contract's `descriptor`; every read runs under
+  the grant it derives.
+- **For Memory, jelly and every consumer:** the tools RPC method `probe` (action `github_probe`, allowed by the default
+  rules at every `access`) answers who is signed in, `{ source: "github", account, owner, trust }`, with no content. It
+  makes one `GET /user`, asserted as `github_probe` on `GET /user`, to confirm the token still belongs to the recorded
+  login, and refuses another account with `ACCOUNT_MISMATCH`.
+- Every `events_list` page carries `plugin` (`@joe-broadhead/opencode-github`) and `asOf`, and lists an event whose
+  title or text holds a secret, such as a password in a URL, in `refused[]` with `reason: "secret"`, never its text; the
+  cursor moves past it.
+- `npm run check` runs the contract's conformance kit over the source (the new `test:conformance` stage, in CI too), on
+  recorded invented GitHub answers through `github_api`'s real spec in a session holding exactly the fenced rules, with
+  no GitHub call, and writes `reports/conformance-report.json` (git-ignored) for a release to attach. Every check that
+  applies passes; the report stays incomplete on the kit's expired-cursor check, because a GitHub cursor never expires
+  (source-contract#30, item 5).
+
+### Changed
+
+- **For Memory: the account is the signed-in login, not `default`.** `events_list` and `probe` take the account and
+  the owner from the sign-in: the login GitHub's `GET /user` named when you signed in (the Account `/github-status`
+  shows), lowercase as the account, and `github:<Login>` labelled with the login as the owner, the same in every page
+  and in `probe`. `events_list` no longer calls `get_me` or `GET /user`, so its reads are exactly its three GETs. Every
+  event's `account` changes accordingly, and so does its `hash`.
+- **For Memory: pass `account` with every cursor.** A listing with a cursor and no `account` is `INPUT_INVALID`; a
+  cursor issued for another account, or an `account` that is not the signed-in login, is `ACCOUNT_MISMATCH`, before any
+  GitHub call. The cursor is the contract's bound cursor (version 2), tied to the plugin, the source and the account,
+  with the owner's digest inside: a changed one, or one from before a sign-in to another user, is `CURSOR_INVALID`;
+  start again with `since`. A cursor issued by 0.0.2 or earlier is read once, for the same signed-in user, and the
+  page's cursor is the new one, so a collector that holds one resumes without a gap.
+- **For scripts: `events_list`'s errors are the contract's codes.** `EVENTS_INVALID_INPUT` is `INPUT_INVALID` (or
+  `SOURCE_UNKNOWN` for another source), `EVENTS_CURSOR_INVALID` is `CURSOR_INVALID` (or `ACCOUNT_MISMATCH`),
+  `EVENTS_OWNER_UNKNOWN` is `AUTH_REQUIRED` (no sign-in) or `UNAVAILABLE` (a sign-in with no login), and
+  `EVENTS_READ_FAILED` is `UNAVAILABLE`.
+- The tools RPC transport, the events contract and the cursor codec are the source contract's modules (`tools-rpc`,
+  `events`, `cursor`), pinned as `github:we-the-rebel-alliance/source-contract#v0.1.0` (commit `8ace21d`) and bundled
+  into `dist/index.js`; there is still no runtime dependency, and `NOTICE` lists the package. `src/host/tools-rpc.ts`
+  and `src/host/events-list.ts` are deleted, with their `check-copies` pins; GitHub's part of the RPC is
+  `src/tools-rpc.ts`. The RPC id `github.platform.tools`, its other methods and their answers are unchanged.
+- The default rules gain `github_probe` allowed, at every `access`. **For jelly:** nothing to declare: `probe` is a
+  tools RPC method, not a tool, and `github_events_list` stays the one declared source read.
+
+### Known limits
+
+- `events_list` fails with `UNAVAILABLE` for a GitHub App sign-in: GitHub refuses a search for issues and pull
+  requests together with a GitHub App user token (HTTP 422), and the search names neither. This is not new in this
+  release. A fine-grained token or a GitHub App cannot read notifications, which are left out.
+- GitHub's search allows 30 requests a minute and at most 1,000 results a query; one call makes up to 20 pages of each
+  search. The README's Known limits cite GitHub's docs.
+- The conformance kit's page-size check reads a fixed 64 KB rather than the declared 900,000 bytes
+  (source-contract#30, item 2), and the probe's `GET /user` cannot be declared as a `permission.identity` operation for
+  a source whose grants are `rules` (the schema takes identity only from `operations`): the probe asserts only
+  `github_probe`. The recorded GitHub answers are invented, modelled on GitHub's REST docs, not live-verified.
+
 ## [0.0.2] - 2026-11-14
 
 ### Added

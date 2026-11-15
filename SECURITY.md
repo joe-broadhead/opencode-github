@@ -110,8 +110,9 @@ with no model. Every known tool is a method, with its class, but a method is not
   rules themselves use no hook.
 - `ui_get` is hidden from every agent's tools, and it and any tool GitHub adds later are not methods.
 - `events_list` (`github_events_list`) asserts `github_events_list`, then makes only GET requests through `api`'s
-  own handling, plus `get_me`: it returns the titles, bodies (cut to 4,096 characters), commit messages, logins and
-  links of what the signed-in user was involved in, with that login as the owner. Memory's collector calls it to copy
+  own handling: it returns the titles, bodies (cut to 4,096 characters), commit messages, logins and links of what the
+  signed-in user was involved in, with the sign-in's recorded login as the account and owner. An event whose title or
+  text holds a secret is never returned. `probe` (`github_probe`) makes one `GET /user` and returns only that login. Memory's collector calls it to copy
   these events to your private memory space, after you turn GitHub on as a source; the plugin itself sends them
   nowhere and stores nothing.
 - MCP calls go through OpenCode's own connection and sign-in, and `api` uses the same sign-in, hosts and redirect

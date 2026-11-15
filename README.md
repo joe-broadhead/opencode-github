@@ -496,6 +496,24 @@ still stores its token.
 - **A GitHub App sign-in expires after six months.** Its 8-hour user token is renewed with its refresh token, which lasts six months; after that, or once GitHub refuses it, `/connect` asks for a new sign-in. The App reaches only the accounts it is installed on.
 - **Jelly.** The `access` and `unknownTools` settings declare their choices, which only a Jelly that includes app#1301 reads; an older Jelly refuses the plugin's declaration.
 - **GitHub's rate limits and error text are GitHub's.** Errors from OpenCode and GitHub pass through unchanged.
+- **`events_list` reads GitHub's search, which has its own limits.** GitHub allows 30 search requests a minute for a
+  signed-in user, and at most 1,000 results for one query ([REST API endpoints for search](https://docs.github.com/en/rest/search/search#rate-limit));
+  one `events_list` call makes at least two searches and up to 20 pages of each, beside GitHub's REST limit of 5,000 requests an hour for a user
+  ([rate limits for the REST API](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)).
+  A call over the limit fails with GitHub's answer as `UNAVAILABLE`: call again later with the same cursor.
+- **With a GitHub App sign-in, `events_list` fails.** GitHub refuses a search for issues and pull requests together
+  with a GitHub App user token (HTTP 422, [Search issues and pull requests](https://docs.github.com/en/rest/search/search#search-issues-and-pull-requests)),
+  and `events_list` searches `involves:` without `is:issue` or `is:pull-request`, so it answers `UNAVAILABLE`. Sign in
+  with an OAuth App or a token for `events_list`.
+- **Notifications need a classic sign-in.** A fine-grained token or a GitHub App cannot read `/notifications`
+  ([REST API endpoints for notifications](https://docs.github.com/en/rest/activity/notifications#list-notifications-for-the-authenticated-user)),
+  so `events_list` leaves them out for those sign-ins.
+- **The source's links are `github.com`'s.** The `sources` declaration names `github.com` as its `urlHosts`; with the
+  `host` option (GitHub Enterprise Server) the events link to your server, which a consumer that checks `urlHosts`
+  does not render.
+- **A GitHub cursor never expires.** It holds a time in each stream, so the plugin never answers `CURSOR_EXPIRED`, and
+  the conformance report stays incomplete on the kit's expired-cursor check. The kit runs on GitHub answers that are
+  invented, modelled on GitHub's REST docs, and not live-verified.
 - Updates are not automatic for a Git install, and `opencode plugin update` and `opencode plugin check` do not work on one: to move to a newer release, remove the old entry and add the new tag.
 
 ## Links
