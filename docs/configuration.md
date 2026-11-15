@@ -651,9 +651,8 @@ login GitHub's `GET /user` named when you signed in (the Account `/github-status
 `github:` and that login. A listing names the account it reads; one that names another login than the signed-in one is
 refused with `ACCOUNT_MISMATCH`, and so is a cursor issued for another account, before any GitHub call. The cursor is
 the source contract's bound cursor, tied to this plugin, the source and the account, with a digest of the owner
-inside, so a cursor that was changed, or issued before a sign-in to another account, is `CURSOR_INVALID`: start again
-with `since`. A cursor issued by 0.0.2 or earlier (account `default`) is read once, for the same signed-in user, so a
-collector that holds one resumes; the next cursor names the login.
+inside, so a cursor that was changed, issued before a sign-in to another account, or issued by 0.0.2 or earlier
+(account `default`) is `CURSOR_INVALID`: start again with `since`.
 
 It asserts `github_events_list`, then makes only GET requests, through `github_api`'s own spec with the plugin's
 sign-in. Each GET asserts the tool's own permission, `github_events_list`, on its own `GET /path` first, not

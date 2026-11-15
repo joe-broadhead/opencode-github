@@ -22,7 +22,7 @@
 import { createHash } from "node:crypto"
 import type { Plugin } from "@opencode/plugin"
 import { Error as ToolError } from "@opencode/plugin/promise/tool"
-import { decodeBoundCursor, encodeBoundCursor, type CursorBinding } from "@we-the-rebel-alliance/source-contract/cursor"
+import { CURSOR_V2, decodeBoundCursor, encodeBoundCursor, type CursorBinding } from "@we-the-rebel-alliance/source-contract/cursor"
 import {
   EVENT_LIMITS,
   PAGE,
@@ -68,8 +68,6 @@ export const PROBE_READS = ["GET /user"] as const
 const PROBE_SCOPE: ApiScope = { action: PROBE_ACTION, resources: PROBE_READS }
 /** The most bytes of JSON one page holds: the source's declared `maxBytes`. */
 export const PAGE_BYTES = 900_000
-/** The account a cursor before this release named: GitHub's one account was `default` then. */
-const LEGACY_ACCOUNT = "default"
 /** A GitHub login: letters, digits and hyphens, at most 39. */
 const LOGIN = /^[A-Za-z0-9-]{1,39}$/
 
@@ -299,27 +297,29 @@ const bindingOf = (account: string): CursorBinding => ({ plugin: NAMESPACE, sour
 const START_AGAIN = "Call events_list without a cursor, with since, to start again."
 const refuseCursor = (): never => fail("CURSOR_INVALID", "The cursor was not issued by GitHub's events_list for this account and its signed-in user.", START_AGAIN)
 
-/** The account a cursor names inside, read before its binding is checked, to tell another account's cursor from a broken one. */
+/**
+ * The account a bound cursor of this source names inside, read before its binding is checked, to tell another
+ * account's cursor from a broken one; undefined for anything else, which the binding check then refuses.
+ */
 function cursorAccount(cursor: string): string | undefined {
   try {
     const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as unknown
-    const account = record(value) ? value["a"] : undefined
-    return typeof account === "string" && account !== LEGACY_ACCOUNT && LOGIN.test(account) ? account.toLowerCase() : undefined
+    const account = record(value) && value["v"] === CURSOR_V2 && value["s"] === SOURCE ? value["a"] : undefined
+    return typeof account === "string" && LOGIN.test(account) ? account.toLowerCase() : undefined
   } catch {
     return undefined
   }
 }
 
 /**
- * The cursor's position in each stream. A cursor bound to another plugin, source or account, or holding another
- * sign-in's owner, is CURSOR_INVALID. A cursor issued before this release (contract 1, account `default`) is read once
- * when its owner is the signed-in one, so a collector holding one resumes; the next cursor is bound to the account.
+ * The cursor's position in each stream. A cursor bound to another plugin, source or account, holding another sign-in's
+ * owner, or of another version (one issued before the source contract) is CURSOR_INVALID: start again with since.
  */
 function positionsOf(cursor: string, account: string, owner: EventsOwner): Record<StreamName, Key> {
-  const decoded = decodeBoundCursor(bindingOf(account), cursor, { acceptV1: true })
+  const decoded = decodeBoundCursor(bindingOf(account), cursor)
   if (!decoded.ok) return refuseCursor()
   const state = decoded.state
-  const named = decoded.legacy ? state["a"] === LEGACY_ACCOUNT : state["a"] === account
+  const named = state["a"] === account
   const positions = record(state["p"]) ? state["p"] : undefined
   const keys = STREAMS.map((stream) => {
     const pair = positions?.[stream]

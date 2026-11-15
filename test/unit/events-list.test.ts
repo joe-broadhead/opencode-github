@@ -237,16 +237,16 @@ describe("events_list", () => {
     expect(fake.calls).toEqual([])
   })
 
-  it("reads a cursor an earlier release issued once, for the same sign-in, and answers a bound one; another sign-in's is CURSOR_INVALID", async () => {
-    const whole = (await list()({ since: SINCE, limit: PAGE.max })) as EventsListResult
-    expect(whole.events.map((event) => event.external_id)).toEqual(EXPECTED)
+  it("refuses a cursor an earlier release issued, for the same sign-in too, with CURSOR_INVALID and a next step to start again", async () => {
     const owner = createHash("sha256").update(OWNER.id).digest("hex").slice(0, 16)
-    // Contract 1's cursor, as 0.0.2 wrote it: account default, the owner's hash, each stream after the first three events.
-    const legacy = encodeCursor(SOURCE, { a: "default", o: owner, p: { i: [Date.parse("2026-10-02T10:00:00Z"), "octo/app#2"], c: [Date.parse("2026-10-01T09:00:00Z"), "octo/app@a1"], n: [Date.parse(SINCE), ""] } })
-    const resumed = (await list()({ account: LOGIN, cursor: legacy, limit: PAGE.max })) as EventsListResult
-    expect(resumed.events.map((event) => event.external_id)).toEqual(EXPECTED.slice(3))
-    expect(JSON.parse(Buffer.from(resumed.cursor, "base64url").toString("utf8"))).toMatchObject({ v: 2, s: SOURCE, a: LOGIN })
-    expect(await code(list(github({ login: "someone-else" }))({ account: "someone-else", cursor: legacy }))).toBe("CURSOR_INVALID")
+    // Contract 1's cursor, as 0.0.2 wrote it: account default and the owner's hash.
+    const legacy = encodeCursor(SOURCE, { a: "default", o: owner, p: { i: [Date.parse(SINCE), ""], c: [Date.parse(SINCE), ""], n: [Date.parse(SINCE), ""] } })
+    const fake = github()
+    const refused = await listEvents(fake.get, fake.identity, { account: LOGIN, cursor: legacy }, NOW).catch((error: unknown) => error)
+    expect(refused).toBeInstanceOf(GitHubPluginError)
+    expect((refused as GitHubPluginError).code).toBe("CURSOR_INVALID")
+    expect((refused as GitHubPluginError).nextStep).toBe("Call events_list without a cursor, with since, to start again.")
+    expect(fake.calls).toEqual([])
   })
 
   it("refuses an event whose title or text holds a secret for good, and moves the cursor past it", async () => {

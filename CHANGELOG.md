@@ -37,9 +37,9 @@ All notable changes to this project are documented here. The format follows [Kee
 - **For Memory: pass `account` with every cursor.** A listing with a cursor and no `account` is `INPUT_INVALID`; a
   cursor issued for another account, or an `account` that is not the signed-in login, is `ACCOUNT_MISMATCH`, before any
   GitHub call. The cursor is the contract's bound cursor (version 2), tied to the plugin, the source and the account,
-  with the owner's digest inside: a changed one, or one from before a sign-in to another user, is `CURSOR_INVALID`;
-  start again with `since`. A cursor issued by 0.0.2 or earlier is read once, for the same signed-in user, and the
-  page's cursor is the new one, so a collector that holds one resumes without a gap.
+  with the owner's digest inside: a changed one, or one from before a sign-in to another user, is `CURSOR_INVALID`.
+  **A cursor issued by 0.0.2 or earlier is `CURSOR_INVALID` too:** start again with `since` (the plugin keeps no
+  legacy reader).
 - **For scripts: `events_list`'s errors are the contract's codes.** `EVENTS_INVALID_INPUT` is `INPUT_INVALID` (or
   `SOURCE_UNKNOWN` for another source), `EVENTS_CURSOR_INVALID` is `CURSOR_INVALID` (or `ACCOUNT_MISMATCH`),
   `EVENTS_OWNER_UNKNOWN` is `AUTH_REQUIRED` (no sign-in) or `UNAVAILABLE` (a sign-in with no login), and
