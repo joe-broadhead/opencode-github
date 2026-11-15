@@ -133,7 +133,7 @@ describe("github.platform", () => {
   })
 
   it("refuses an untested OpenCode before registering anything", async () => {
-    const host = fakeContext({ version: "2.3.0" })
+    const host = fakeContext({ version: "2.4.0" })
     const error = await Promise.resolve(plugin.setup(host.ctx)).catch((cause: unknown) => cause)
     expect(error).toBeInstanceOf(GitHubPluginError)
     expect((error as GitHubPluginError).code).toBe("HOST_UNTESTED")

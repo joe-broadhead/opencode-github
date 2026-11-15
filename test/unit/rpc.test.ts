@@ -11,7 +11,7 @@ const status = (overrides: Partial<Status> = {}): Status => ({
   toolsets: ["context", "repos", "issues", "pull_requests"],
   tools: { visible: 26, unknown: [], mode: "ask" },
   unguardedAgents: [],
-  host: { version: "2.2.3", range: ">=2.2.3 <2.3.0", tested: true },
+  host: { version: "2.2.3", range: ">=2.2.3 <2.4.0", tested: true },
   nextStep: "Run /connect and choose GitHub.",
   ...overrides,
 })
@@ -42,7 +42,7 @@ describe("isStatus and the JSON Schema", () => {
 
   it("accepts the optional fields and rejects unknown, missing or wrong ones", () => {
     expect(
-      isStatus(status({ account: "octocat", host: { version: "2.3.0", range: ">=2.2.3 <2.3.0", tested: false }, hostWarning: "w", unguardedAgents: ["a"], permissionsBlock: defaultRules(), enterprise: "ghe.example.com" })),
+      isStatus(status({ account: "octocat", host: { version: "2.4.0", range: ">=2.2.3 <2.4.0", tested: false }, hostWarning: "w", unguardedAgents: ["a"], permissionsBlock: defaultRules(), enterprise: "ghe.example.com" })),
     ).toBe(true)
     expect(isStatus({ ...status(), profileFingerprint: "x" })).toBe(false)
     expect(isStatus(status({ state: "busy" as Status["state"] }))).toBe(false)
@@ -52,8 +52,8 @@ describe("isStatus and the JSON Schema", () => {
     expect(isStatus(status({ permissionsBlock: [{ action: "x", resource: "*", effect: "maybe" as "ask" }] }))).toBe(false)
     expect(isStatus(status({ shadowedSkills: [{ id: "github-pr-review", path: "/x/SKILL.md" }] }))).toBe(true)
     expect(isStatus(status({ shadowedSkills: [{ id: "github-pr-review" } as unknown as { id: string; path: string }] }))).toBe(false)
-    expect(isStatus(status({ host: { version: "2.2.3", range: ">=2.2.3 <2.3.0", tested: true, extra: 1 } as unknown as Status["host"] }))).toBe(false)
-    expect(isStatus(status({ host: { version: "2.2.3", range: ">=2.2.3 <2.3.0" } as unknown as Status["host"] }))).toBe(false)
+    expect(isStatus(status({ host: { version: "2.2.3", range: ">=2.2.3 <2.4.0", tested: true, extra: 1 } as unknown as Status["host"] }))).toBe(false)
+    expect(isStatus(status({ host: { version: "2.2.3", range: ">=2.2.3 <2.4.0" } as unknown as Status["host"] }))).toBe(false)
     const { version: _version, ...unversioned } = status()
     expect(isStatus(unversioned)).toBe(false)
     expect(isStatus(null)).toBe(false)
@@ -106,13 +106,13 @@ describe("formatStatus", () => {
   })
 
   it("names unknown tools, writes and an untested OpenCode when they apply", () => {
-    const range = ">=2.2.3 <2.3.0"
-    const text = formatStatus(status({ access: "all", tools: { visible: 1, unknown: ["github_a", "github_b"], mode: "hide" }, host: { version: "2.3.0", range, tested: false }, hostWarning: "Untested OpenCode." }))
+    const range = ">=2.2.3 <2.4.0"
+    const text = formatStatus(status({ access: "all", tools: { visible: 1, unknown: ["github_a", "github_b"], mode: "hide" }, host: { version: "2.4.0", range, tested: false }, hostWarning: "Untested OpenCode." }))
     expect(text).toContain("Access: every tool runs without asking, reads and new tools included")
     expect(text).toContain("Tools: 1 available, 2 unknown (hidden): github_a, github_b")
-    expect(text).toContain("OpenCode: 2.3.0 (untested: Untested OpenCode.)")
+    expect(text).toContain("OpenCode: 2.4.0 (untested: Untested OpenCode.)")
     // QA INSTALL-4: a release in the range that is not tested says so, with the range.
-    expect(formatStatus(status({ host: { version: "2.2.99", range, tested: false } }))).toContain("OpenCode: 2.2.99 (untested; supported range >=2.2.3 <2.3.0)")
+    expect(formatStatus(status({ host: { version: "2.2.99", range, tested: false } }))).toContain("OpenCode: 2.2.99 (untested; supported range >=2.2.3 <2.4.0)")
     expect(formatStatus(status({ host: { version: "2.2.5", range, tested: true } }))).toContain("OpenCode: 2.2.5 (tested)")
     expect(formatStatus(status({ access: "all", tools: { visible: 3, unknown: ["github_a"], mode: "ask" } }))).toContain("(allowed by github_*): github_a")
     expect(formatStatus(status({ access: "ask-changes", tools: { visible: 3, unknown: ["github_a"], mode: "ask" } }))).toContain("(they ask first): github_a")

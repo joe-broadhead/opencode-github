@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Only the newest release is supported, on the OpenCode releases it is tested on (`>=2.2.3 <2.3.0`).
+Only the newest release is supported, on the OpenCode releases it is tested on (`>=2.2.3 <2.4.0`).
 
 ## Reporting a vulnerability
 

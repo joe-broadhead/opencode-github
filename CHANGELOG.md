@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Admits OpenCode 2.3: the supported range is `>=2.2.3 <2.4.0` (`opencode.host` in `package.json` and `HOST_RANGE`).
+  The plugin is tested on 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7 and 2.3.0: `TESTED_HOSTS` in `src/host-version.ts` is that
+  list, and the host, pack and stock tests install every release in it, so CI now runs OpenCode 2.2.7 and 2.3.0 too.
+  The out-of-range example in the docs and tests is now 2.4.0.
+- What OpenCode 2.3 changes does not reach this plugin: it runs no subagents and does not subscribe to
+  `session.tool.failed` (it listens only for `integration.updated` and `mcp.status.changed`), and it has no use for the
+  new `session.fork` hook. Its own tools, `events_list` among them, hand the tool's signal to every GitHub request, so
+  they already stop when the person presses Stop.
+
 ## [0.0.3] - 2026-11-15
 
 ### Added

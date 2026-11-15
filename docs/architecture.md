@@ -15,7 +15,7 @@ permission prompts and the TUI. The plugin uses only public `@opencode/plugin` 2
 Setup runs these steps in order and undoes them in reverse on cleanup, or when a later step fails:
 
 1. `loadOptions` (`src/config.ts`) validates the options. Errors are `OPTIONS_INVALID`.
-2. `checkHost` (`src/host-version.ts`) compares `ctx.app.version` with `>=2.2.3 <2.3.0`. Errors are
+2. `checkHost` (`src/host-version.ts`) compares `ctx.app.version` with `>=2.2.3 <2.4.0`. Errors are
    `HOST_UNTESTED`, unless `allowUntestedHost` turns them into a status warning. `TESTED_HOSTS` in the same file is
    the one list of tested releases: the status's `host.tested`, and the host, pack and stock tests, use it.
 3. `registerPermissionDefaults` (`src/permissions.ts`) inserts the default rules into each agent.
@@ -205,7 +205,7 @@ answers a bad envelope with `rpc.invalid_input`.
 
 The executor does not run `execute.before` and `execute.after` hooks; GitHub has none, so results are unchanged.
 `ctx.tool.list()` returning callable executors is not documented as an entry point: the embedded host test and the
-stock test (`test/stock`, stock `opencode serve` 2.2.3, 2.2.4, 2.2.5 and 2.2.6) check the whole path against the loopback fake.
+stock test (`test/stock`, stock `opencode serve` 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7 and 2.3.0) check the whole path against the loopback fake.
 
 ## Drift check
 

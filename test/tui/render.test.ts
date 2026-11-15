@@ -27,7 +27,7 @@ const needsAuth: Status = {
   toolsets: ["context", "repos", "issues", "pull_requests"],
   tools: { visible: 26, unknown: [], mode: "ask" },
   unguardedAgents: [],
-  host: { version: "2.2.3", range: ">=2.2.3 <2.3.0", tested: true },
+  host: { version: "2.2.3", range: ">=2.2.3 <2.4.0", tested: true },
   nextStep: "Run /connect and choose GitHub.",
 }
 
@@ -155,8 +155,8 @@ describe("GitHub TUI status view", () => {
           { action: "github_*", resource: "*", effect: "ask" },
           { action: "github_get_me", resource: "*", effect: "allow" },
         ],
-        host: { version: "2.3.0", range: ">=2.2.3 <2.3.0", tested: false },
-        hostWarning: "OpenCode 2.3.0 is outside the tested range.",
+        host: { version: "2.4.0", range: ">=2.2.3 <2.4.0", tested: false },
+        hostWarning: "OpenCode 2.4.0 is outside the tested range.",
       } satisfies Status,
     })
     expect(frame).toContain(row("Access", "every tool runs without asking, reads and new tools included"))
@@ -165,7 +165,7 @@ describe("GitHub TUI status view", () => {
     expect(frame).not.toContain("rules below")
     expect(frame).toContain('{"action":"github_*","resource":"*","effect":"ask"},')
     expect(frame).toContain('{"action":"github_get_me","resource":"*","effect":"allow"}')
-    expect(frame).toContain(row("OpenCode", "2.3.0 (untested: OpenCode 2.3.0 is outside the tested range.)"))
+    expect(frame).toContain(row("OpenCode", "2.4.0 (untested: OpenCode 2.4.0 is outside the tested range.)"))
     const order = ["Connection", "Account", "Access", "Tools ", "Agents without default rules", "github_get_me", "OpenCode", "Next step"].map((text) => frame.indexOf(text))
     expect(order.every((index) => index >= 0)).toBe(true)
     expect([...order].sort((a, b) => a - b)).toEqual(order)

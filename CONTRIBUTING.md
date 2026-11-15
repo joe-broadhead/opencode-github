@@ -48,7 +48,7 @@ One command runs every local check, in this order. It must pass before every com
 | Host | `npm run test:host` | Loads the built plugin into an embedded OpenCode host from the public `@opencode/sdk` under Bun, once per tested release, with GitHub replaced by a loopback fake. |
 | Stock | `npm run test:stock` | Runs each tested stock `opencode serve` release with the built plugin and a test probe plugin (`test/stock/probe`) that points the `github` server at the loopback fake, and calls the tools RPC as a script: known reads, denies, refused asks, session rules, excluded tools, upstream errors and `api` refusals. |
 
-The tested releases are `TESTED_HOSTS` in `src/host-version.ts`: 2.2.3, 2.2.4, 2.2.5 and 2.2.6. The host, pack and stock
+The tested releases are `TESTED_HOSTS` in `src/host-version.ts`: 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7 and 2.3.0. The host, pack and stock
 stages, and so CI, all run on that one list. The pack check and the stock test take the stock OpenCode binaries from
 `OPENCODE_BIN_2_2_3`, `OPENCODE_BIN_2_2_4`, `OPENCODE_BIN_2_2_5` and `OPENCODE_BIN_2_2_6`. When one is unset, each installs `@opencode/cli`
 at that version into a temporary folder, once per run. The host tests (`scripts/host-tests.mjs`) run 2.2.3 on the
@@ -64,7 +64,7 @@ free port. Every request outside the loopback fake fails the test.
 ### Another OpenCode release
 
 The lockfile pins `@opencode/sdk` and `@opencode/plugin` at 2.2.3, the lowest supported release. To run the host
-tests on one other 2.2.x release only, install its SDK in a separate folder, outside the lockfile, and point
+tests on one other release only, install its SDK in a separate folder, outside the lockfile, and point
 `HOST_SDK_DIR` at it:
 
 ```sh
@@ -149,7 +149,7 @@ the first major release, a breaking change raises the minor version.
 
 Each release supports one OpenCode line. `opencode.host` in `package.json` states it, and `HOST_RANGE`
 in `src/host-version.ts` enforces it. Both must change together, and a unit test checks that they match. Write the
-range as `>=2.2.3 <2.3.0`, never `^2.2.3`, which would accept an untested 2.3.
+range as `>=2.2.3 <2.4.0`, never `^2.2.3`, which would accept an untested 2.4.
 
 ### Releasing
 
@@ -211,7 +211,7 @@ Before the approval, the workflow:
 - **verifies** on a fresh runner: the commit's identity, one parent on `master`, `package.json` exactly the parent's
   without the lifecycle scripts, only regular files in the allowed paths, no `package.json` under `dist/`, and a second,
   independent build of the parent (its own job) equal to the committed `dist/` byte for byte;
-- **installs** the release commit with `plugin add` on each stock OpenCode host (2.2.3 to 2.2.6);
+- **installs** the release commit with `plugin add` on each stock OpenCode host (2.2.3 to 2.2.7, and 2.3.0);
 - **packs** the commit before installing anything and keeps that tarball, then runs the pack stage against a copy;
 - **stages** the Release: verifies the attested native files, writes `SHA256SUMS` and the notes (the version's CHANGELOG
   section), and shows them all in the run summary with the sha256 of `SHA256SUMS`.

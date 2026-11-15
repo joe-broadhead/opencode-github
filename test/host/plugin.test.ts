@@ -109,7 +109,7 @@ describe(`defaults on OpenCode ${SDK_VERSION}`, () => {
         state: "connected",
         account: PAT_LOGIN,
         tools: { visible: 5, unknown: ["github_brand_new_tool"], mode: "ask" },
-        host: { version: SDK_VERSION, range: ">=2.2.3 <2.3.0", tested: true },
+        host: { version: SDK_VERSION, range: ">=2.2.3 <2.4.0", tested: true },
       })
     }
   })
@@ -649,14 +649,14 @@ describe("a github server the user already configured", () => {
 })
 
 describe("an untested OpenCode release", () => {
-  test("2.3.0 refuses to load the plugin and says how to override", async () => {
-    const host = await startHost({ version: "2.3.0" })
+  test("2.4.0 refuses to load the plugin and says how to override", async () => {
+    const host = await startHost({ version: "2.4.0" })
     try {
       const state = await pluginState(host)
       expect(state?.status).toBe("failed")
       const error = state?.status === "failed" ? state.error : ""
       expect(error).toStartWith(
-        "GitHubPluginError: HOST_UNTESTED: OpenCode 2.3.0 is outside the supported range >=2.2.3 <2.3.0. Next step: Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true.",
+        "GitHubPluginError: HOST_UNTESTED: OpenCode 2.4.0 is outside the supported range >=2.2.3 <2.4.0. Next step: Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true.",
       )
       expect(await githubServer(host)).toBeUndefined()
     } finally {
@@ -664,15 +664,15 @@ describe("an untested OpenCode release", () => {
     }
   })
 
-  test("2.3.0 with allowUntestedHost loads the plugin, and status warns", async () => {
-    const host = await startHost({ version: "2.3.0", options: { allowUntestedHost: true } })
+  test("2.4.0 with allowUntestedHost loads the plugin, and status warns", async () => {
+    const host = await startHost({ version: "2.4.0", options: { allowUntestedHost: true } })
     try {
       expect(await pluginState(host)).toEqual({ status: "active" })
       expect(await status(host)).toMatchObject({
-        host: { version: "2.3.0", range: ">=2.2.3 <2.3.0", tested: false },
-        hostWarning: "OpenCode 2.3.0 is outside the supported range >=2.2.3 <2.3.0. It loaded because allowUntestedHost is set.",
+        host: { version: "2.4.0", range: ">=2.2.3 <2.4.0", tested: false },
+        hostWarning: "OpenCode 2.4.0 is outside the supported range >=2.2.3 <2.4.0. It loaded because allowUntestedHost is set.",
       })
-      expect(await statusCommand(host, await session(host))).toContain("OpenCode: 2.3.0 (untested: OpenCode 2.3.0 is outside the supported range")
+      expect(await statusCommand(host, await session(host))).toContain("OpenCode: 2.4.0 (untested: OpenCode 2.4.0 is outside the supported range")
     } finally {
       await host.close()
     }

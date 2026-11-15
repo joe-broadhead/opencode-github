@@ -6,9 +6,9 @@ docs: `README.md`, `docs/configuration.md`; contributor docs: `docs/architecture
 
 ## Platform
 
-- Use only public APIs of `@opencode/plugin` 2.2.3. The supported host range is exactly `>=2.2.3 <2.3.0`, in both
+- Use only public APIs of `@opencode/plugin` 2.2.3. The supported host range is exactly `>=2.2.3 <2.4.0`, in both
   `package.json` `opencode.host` and `HOST_RANGE` in `src/host-version.ts`. Never write it as `^2.2.3`.
-- Test against stock OpenCode 2.2.3, 2.2.4, 2.2.5 and 2.2.6. `TESTED_HOSTS` in `src/host-version.ts` is the one list:
+- Test against stock OpenCode 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7 and 2.3.0. `TESTED_HOSTS` in `src/host-version.ts` is the one list:
   the status's `host.tested`, the host, pack and stock tests and CI all take it from there. Inside the range a release
   that is not in it still starts; the untested example in tests is 2.2.99.
 - Keep plugin ids `github.platform` (server and status RPC), `github.platform.tools` (tools RPC) and
