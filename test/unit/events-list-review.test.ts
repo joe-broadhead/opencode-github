@@ -18,8 +18,12 @@ const issue = (n: number, updated: string) => ({ number: n, title: `Item ${n}`, 
 const commit = (sha: string, date: string) => ({ sha, html_url: `https://github.com/octo/app/commit/${sha}`, repository: { full_name: "octo/app" }, author: { login: LOGIN }, commit: { message: `c ${sha}`, author: { name: "O", email: "o@example.test", date }, committer: { date } } })
 const note = (id: string, updated: string, type = "Release") => ({ id, reason: "subscribed", updated_at: updated, subject: { title: id, type }, repository: { full_name: "octo/app", html_url: "https://github.com/octo/app" } })
 
-/** `shuffle`: ties reshuffled on every request. `deepest`: the furthest notification GitHub pages to (422 past it). */
-function world(data: { issues?: ReturnType<typeof issue>[]; commits?: ReturnType<typeof commit>[]; inbox?: ReturnType<typeof note>[]; shuffle?: boolean; deepest?: number }) {
+/**
+ * `shuffle`: ties reshuffled on every request. `deepest`: the furthest notification GitHub pages to (422 past it).
+ * `retain`: GitHub deletes notifications older than this on its own clock (`clock.now`, the time of the page asked).
+ */
+function world(data: { issues?: ReturnType<typeof issue>[]; commits?: ReturnType<typeof commit>[]; inbox?: ReturnType<typeof note>[]; shuffle?: boolean; deepest?: number; retain?: number }) {
+  const clock = { now: NOW }
   const calls: { path: string; query: Record<string, unknown> }[] = []
   let seed = 7
   const tie = () => (data.shuffle ? ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) - 0.5 : 0)
@@ -48,15 +52,19 @@ function world(data: { issues?: ReturnType<typeof issue>[]; commits?: ReturnType
       const since = Date.parse(String(query.since))
       // before is exclusive; since inclusive.
       const before = query.before === undefined ? Number.POSITIVE_INFINITY : Date.parse(String(query.before))
-      const all = (data.inbox ?? []).filter((n) => Date.parse(n.updated_at) >= since && Date.parse(n.updated_at) < before).sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
+      const kept = data.retain === undefined ? Number.NEGATIVE_INFINITY : clock.now - data.retain
+      const all = (data.inbox ?? []).filter((n) => Date.parse(n.updated_at) >= Math.max(since, kept) && Date.parse(n.updated_at) < before).sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
       return ok(all.slice((page - 1) * per, page * per))
     }
     throw new Error(path)
   }
-  return { get, calls, identity: async () => LOGIN }
+  return { get, calls, clock, identity: async () => LOGIN }
 }
 type World = ReturnType<typeof world>
-const page = (w: World, now: number, input: Record<string, unknown>) => listEvents(w.get, w.identity, input, now) as Promise<EventsListResult>
+const page = (w: World, now: number, input: Record<string, unknown>) => {
+  w.clock.now = now
+  return listEvents(w.get, w.identity, input, now) as Promise<EventsListResult>
+}
 
 /** Every page of one read, checking each against the contract and the search budget; page k is read at `clock(k)`, after `between(k)`. */
 async function read(w: World, now: number | ((k: number) => number), input: Record<string, unknown>, most = 400, between: (k: number) => void = () => {}) {
@@ -249,6 +257,61 @@ describe("no silent loss after a read's gap (review round 3, Q1)", () => {
     expect((await page(w, NOW + HOUR, { account: LOGIN, cursor: last })).gap).toEqual(first.gap)
     expect((await page(w, NOW + 2 * HOUR, { account: LOGIN, cursor: first.cursor })).gap).toBeUndefined()
   })
+})
+
+describe("GitHub deleting notifications past 89 days on its own clock while a read pages (review round 4, Q5)", () => {
+  const DAY = 86_400_000
+  const HOUR = 3_600_000
+  const shapes: [string, () => { issues: ReturnType<typeof issue>[]; commits: ReturnType<typeof commit>[]; inbox: ReturnType<typeof note>[]; since: number }][] = [
+    [
+      "a read whose gap is a 5,000-result second, from since 88.99 days",
+      () => ({
+        issues: Array.from({ length: 60 }, (_, k) => issue(k + 1, iso(NOW - 88.99 * DAY + 1000 + k * 1000))),
+        commits: Array.from({ length: 5000 }, (_, k) => commit(`r${String(k).padStart(5, "0")}`, iso(NOW - 60 * DAY))),
+        inbox: Array.from({ length: 30 }, (_, k) => note(`${100 + k}`, iso(NOW - 88.98 * DAY + k * 10 * 60_000))),
+        since: NOW - 88.99 * DAY,
+      }),
+    ],
+    [
+      "a read from since 120 days, with notifications at the window's edge",
+      () => ({
+        issues: Array.from({ length: 40 }, (_, k) => issue(k + 1, iso(NOW - 120 * DAY + k * HOUR))),
+        commits: [],
+        inbox: Array.from({ length: 12 }, (_, k) => note(`${100 + k}`, iso(NOW - 89 * DAY + 30 * 60_000 + k * HOUR))),
+        since: NOW - 120 * DAY,
+      }),
+    ],
+    [
+      "a read with no earlier gap, from since 88.99 days",
+      () => ({
+        issues: Array.from({ length: 60 }, (_, k) => issue(k + 1, iso(NOW - 88.99 * DAY + 1000 + k * 1000))),
+        commits: [],
+        inbox: Array.from({ length: 30 }, (_, k) => note(`${100 + k}`, iso(NOW - 88.98 * DAY + k * 10 * 60_000))),
+        since: NOW - 88.99 * DAY,
+      }),
+    ],
+  ]
+  for (const [label, make] of shapes) {
+    for (const [paging, step] of [["5 minutes", 5 * 60_000], ["1 hour", HOUR]] as const) {
+      for (const retain of [undefined, 89 * DAY]) {
+        it(`${label}, paged ${paging} apart, GitHub ${retain === undefined ? "deleting nothing" : "deleting at 89 days"}: every notification listed or covered by a gap`, async () => {
+          const d = make()
+          const w = world({ issues: d.issues, commits: d.commits, inbox: d.inbox, ...(retain === undefined ? {} : { retain }) })
+          const pages = await read(w, (k) => NOW + k * step, { since: iso(d.since), limit: 5 })
+          const end = NOW + pages.length * step
+          const next = await read(w, (k) => end + HOUR + k * 1000, { account: LOGIN, cursor: pages.at(-1)!.cursor, limit: 5 })
+          const answered = [...gaps(pages), ...gaps(next)].map((gap) => Date.parse(gap.since))
+          const listed = new Set([...ids(pages), ...ids(next)])
+          const silent = d.inbox.filter((n) => !listed.has(`notification:${n.id}@${n.updated_at}`) && !answered.some((since) => since <= Date.parse(n.updated_at)))
+          expect(silent.map((n) => n.id)).toEqual([])
+          // One gap per read, and the same cursor read again answers the same gap.
+          expect(gaps(pages).length).toBeLessThanOrEqual(1)
+          expect(gaps(next).length).toBeLessThanOrEqual(1)
+          expect((await page(w, end + HOUR, { account: LOGIN, cursor: pages.at(-1)!.cursor, limit: 5 })).gap).toEqual(next[0]!.gap)
+        })
+      }
+    }
+  }
 })
 
 describe("ties GitHub orders differently from one request to the next (review round 2, L-C)", () => {

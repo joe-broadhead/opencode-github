@@ -701,10 +701,11 @@ lists a notification stamped there that it has not listed yet; the cursor rememb
 
 **History GitHub no longer keeps.** GitHub keeps inbox notifications for three months, unless they are saved
 ([notification retention](https://docs.github.com/en/subscriptions-and-notifications/get-started/configuring-notifications)).
-A read whose notifications start before that (taken as 89 days, the shortest three months, counted from the read's
-cut, so the window holds still while the read pages) may have lost some: it
+A read whose notifications start before that (taken as 89 days, the shortest three months) may have lost some: it
 answers `gap`, `{ reason: "expired", since }` from a cursor or `{ reason: "window-truncated", since }` from `since`,
-where `since` is where the notifications started, and reads them from the window's start. So does a backlog the call
+where `since` is where the notifications started, and reads them from the window's start. Where a read restarts
+counts from its cut, so it holds still while the read pages; whether GitHub may have deleted some is checked on
+GitHub's clock, on every page, as GitHub deletes them while the read pages. So does a backlog the call
 cannot walk (above), and a second with more search results than GitHub answers for one query (1,000):
 `window-truncated`, and the search moves past that second. **A read answers one gap**, on the page where it restarts:
 until the read ends, the cursor carries that it was answered and no later page answers another; reading again at the

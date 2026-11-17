@@ -24,11 +24,11 @@
 // GitHub keeps inbox notifications for three months (unless saved), so a read that starts before that, from a cursor or
 // from since, may have lost some: it answers `gap` (`expired` from a cursor, `window-truncated` from since) and reads
 // notifications from the window's start. So does a backlog GitHub will not page through (from the oldest it read on),
-// and a second with more search results than GitHub answers, which the search moves past. The window counts from the
-// read's cut. A read answers one gap: until it ends, the cursor carries that it did, and a loss found after it, which
-// the next read's first page answers. Each read looks again at the 6 hours before the
-// notifications' position for one GitHub delivered late, and the cursor remembers what it listed there, so none is
-// listed twice. A search GitHub answers as incomplete is read again on the next call, never skipped.
+// and a second with more search results than GitHub answers, which the search moves past. Where a read restarts counts
+// from its cut; whether GitHub may have deleted some is checked on GitHub's clock, on every page. A read answers one
+// gap: until it ends, the cursor carries that it did, and a loss found after it, which the next read's first page
+// answers. Each read looks again at the 6 hours before the notifications' position for one GitHub delivered late, and
+// the cursor remembers what it listed there, so none is listed twice. A search GitHub answers as incomplete is read again on the next call, never skipped.
 // The result merges them by time, and lists only what no stream can still put before it: a stream with more pages
 // than one call reads holds the others at its last time. Search lags GitHub by a little, so an event is listed once
 // it is SETTLE_MS old. An event whose title or text holds a secret is refused for good (`refused[]`), and the cursor
@@ -679,8 +679,8 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   }
 
   // GitHub keeps notifications for three months: a stream that starts before that may have lost some, so it restarts at
-  // the window's start, and the read answers the gap. The window is the read's, from its cut, so the position does not
-  // slide while the read pages.
+  // the window's start, and the read answers the gap. Where it restarts counts from the read's cut, so the position does
+  // not slide while the read pages; whether GitHub may have deleted some counts from GitHub's clock (below).
   const floor = end + SETTLE_MS - NOTIFICATION_RETENTION_MS
   const outside = state.notified.position.t < floor
   const restarted: Key = { t: floor, i: "" }
@@ -735,8 +735,11 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   // GitHub answers. A read answers one gap, on the page where it restarts; no later page of the read answers another
   // (`g` in the cursor, which the read carries until it ends). A loss after that is carried in the cursor (`q`, also past
   // the read's end) and answered by the next read's first page, as `expired`: never silent.
+  // The read's window says where it restarts; GitHub deletes on its own clock, so a position GitHub's window has passed
+  // while the read pages may have lost notifications too.
+  const passed = notified.readable && !outside && state.notified.position.t < now - NOTIFICATION_RETENTION_MS
   const lostSince = [
-    ...(notified.readable && (outside || notified.truncated) ? [state.notified.position.t] : []),
+    ...(notified.readable && (outside || notified.truncated || passed) ? [state.notified.position.t] : []),
     ...(["i", "p", "c"] as const).flatMap((stream) => searched[stream].skipped ?? []),
   ]
   const answered = state.gapAt !== undefined
