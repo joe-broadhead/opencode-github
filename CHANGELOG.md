@@ -8,14 +8,26 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - The source contract is `@we-the-rebel-alliance/source-contract` v0.2.0, pinned as
   `github:we-the-rebel-alliance/source-contract#v0.2.0` (commit `88bdc1e`) and bundled into `dist/index.js`, still with
-  no runtime dependency. `github.activity`'s declaration, its events and its probe are unchanged: the plugin declares and
-  sends none of v0.2.0's new keys (`permission.identityRules`, `removals[]`, `owner.verified`), which a consumer still
-  on v0.1.x refuses. It will declare `permission.identityRules` (`github_probe` on `GET /user`) once Memory and Jelly
+  no runtime dependency. `github.activity`'s declaration and its probe are unchanged, and its pages add only `gap`,
+  which v0.1.0 already defines: the plugin declares and sends none of v0.2.0's new keys (`permission.identityRules`,
+  `removals[]`, `owner.verified`), which a consumer still on v0.1.x refuses. It will declare `permission.identityRules` (`github_probe` on `GET /user`) once Memory and Jelly
   read v0.2.0.
-- The conformance report is complete and ok. The kit's expired-cursor check is not applicable (`noExpiry`): the cursor
-  holds a time in each stream, and GitHub reads every stream from any time, so a cursor never expires. Its
-  `failed-holds-cursor` check stays not applicable (`atomicPages`): each GitHub request answers a whole page, and a
-  request that fails fails the whole call. Each reason is in the report; every other check runs.
+- The conformance report is complete and ok. Every check that applies runs, the kit's expired-cursor and
+  gap-once-per-read checks on a cursor whose notifications GitHub no longer keeps and on a `since` before them.
+  `failed-holds-cursor` stays not applicable (`atomicPages`), with its reason in the report: each GitHub request answers
+  a whole page, and a request that fails fails the whole call.
+
+### Fixed
+
+- `events_list` no longer loses notifications without saying so. GitHub keeps inbox notifications for three months
+  (taken as 89 days): a read whose notifications start before that answers `gap` once, `expired` from a cursor or
+  `window-truncated` from `since`, with `since` where the notifications started, and reads them from a day inside the
+  window. A read with more notifications than one call reads (10 pages of 50) answers `window-truncated` and lists
+  every notification after the oldest second it read; before, it listed nothing past them until they fitted, which held
+  back every stream. A complete read moves the notifications' position up to the settle time, so an inbox read at
+  least every three months never answers a gap. A sign-in that may not read notifications answers none.
+- A search GitHub answers as incomplete (it timed out) lists nothing past that stream's position, and the next call
+  reads it again; before, the cursor could move past results it left out.
 - `npm run conformance` runs the kit (`bun test ./test/conformance`, as `test:conformance`), as the release kit
   requires of a plugin that declares sources.
 - The release kit is revision 4.1 (`1f452e5`): a plugin that declares sources releases with its conformance report

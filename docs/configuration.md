@@ -635,7 +635,7 @@ asks and calls no model, so Memory's collector can run it unattended.
 ```
 events_list({ since?, cursor?, limit?, account?, source? })
   → { source: "github", account: "<login>", owner: { id: "github:<Login>", label: "<Login>" }, events, cursor, more,
-      refused?, plugin, asOf, trust: "untrusted" }
+      refused?, gap?, plugin, asOf, trust: "untrusted" }
 ```
 
 | Input | Meaning |
@@ -677,8 +677,20 @@ The cursor holds a position in each stream. The result merges them by time, and 
 before it. An event is listed once it is 5 minutes old, because GitHub's search lags a little behind a change. GitHub's
 search returns at most 1,000 results for one query, and allows 30 search requests a minute: each search reads at most 9
 pages of 50 a call, so a call's three searches make at most 27; the cursor moves past what was listed, so the next call's query
-starts later. An event whose title or text holds a secret, such as a password in a URL, is never listed: it is in the
-page's `refused[]` with `reason: "secret"`, and the cursor moves past it.
+starts later. A search GitHub answers as incomplete (it timed out) lists nothing past that stream's position, and the
+next call reads it again, so nothing it left out is skipped. An event whose title or text holds a secret, such as a
+password in a URL, is never listed: it is in the page's `refused[]` with `reason: "secret"`, and the cursor moves past it.
+
+**History GitHub no longer keeps.** GitHub keeps inbox notifications for three months, unless they are saved
+([notification retention](https://docs.github.com/en/subscriptions-and-notifications/get-started/configuring-notifications)).
+A read whose notifications start before that (taken as 89 days, the shortest three months) may have lost some: it
+answers `gap`, `{ reason: "expired", since }` from a cursor or `{ reason: "window-truncated", since }` from `since`,
+where `since` is where the notifications started, and reads them from a day inside the window. So does a read with more
+notifications than one call reads (10 pages of 50, newest first): `window-truncated`, and it lists every notification
+after the oldest second it read. A gap is answered once, on that page; the next page of the read carries none, and
+reading again at the same cursor answers the same gap. A complete read moves the notifications' position up to the
+settle time, so an inbox read at least every three months never answers a gap. A sign-in that may not read
+notifications has none to lose, and answers no gap. The issue, pull request and commit searches read any time range.
 
 **`probe`** (the tools RPC method, action `github_probe`, allowed by the default rules at every `access`) answers who
 is signed in, `{ source: "github", account, owner, trust }`, with the same account and owner as every page, and nothing
@@ -710,10 +722,10 @@ a `permission.identity` operation: the probe asserts only `github_probe`, on `*`
 `permission.identityRules` can state that grant; the declaration adds it once the consumers (Memory, Jelly) read
 v0.2.0, because a consumer on v0.1.x refuses the key. `npm run conformance` (and `npm run check`) runs the contract's
 conformance kit over the source, on recorded answers with no GitHub call, and writes
-`reports/conformance-report.json` for a release to attach. Every check runs, except two that cannot apply, each with
-its reason in the report: `failed-holds-cursor`, because each GitHub request answers a whole page and a request that
-fails fails the whole call, so no single event can fail on its own; and `gap-and-cursor-expired`, because the cursor
-holds a time in each stream and never expires.
+`reports/conformance-report.json` for a release to attach. Every check that applies runs, the gap checks on a cursor
+whose notifications GitHub no longer keeps and on a `since` before them. `failed-holds-cursor` cannot apply, with its
+reason in the report: each GitHub request answers a whole page, and a request that fails fails the whole call, so no
+single event can fail on its own.
 
 ## Repository scope
 

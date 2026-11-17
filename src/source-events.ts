@@ -16,6 +16,11 @@
 // - commits the person authored, from /search/commits sorted by committer date, oldest first;
 // - notifications, where the sign-in may read them (/notifications; a 401, 403 or 404 leaves them out), except those
 //   about an issue or a pull request, which the first stream already lists.
+// GitHub keeps inbox notifications for three months (unless saved), so a read that starts before that, from a cursor or
+// from since, may have lost some: it answers `gap` (`expired` from a cursor, `window-truncated` from since) once, on
+// that page, and reads notifications from inside the window. So does a read with more notifications than one call
+// reads, from the oldest it read on. A search GitHub answers as incomplete is read again on the next call, never
+// skipped.
 // The result merges them by time, and lists only what no stream can still put before it: a stream with more pages
 // than one call reads holds the others at its last time. Search lags GitHub by a little, so an event is listed once
 // it is SETTLE_MS old. An event whose title or text holds a secret is refused for good (`refused[]`), and the cursor
@@ -26,8 +31,10 @@ import { Error as ToolError } from "@opencode/plugin/promise/tool"
 import { CURSOR_V2, decodeBoundCursor, encodeBoundCursor, type CursorBinding } from "@we-the-rebel-alliance/source-contract/cursor"
 import {
   EVENT_LIMITS,
+  GAP_REASONS,
   PAGE,
   PROBE,
+  type EventsGap,
   type EventsListResult,
   type EventsOwner,
   type ProbeResult,
@@ -82,6 +89,19 @@ const PER_PAGE = 50
  */
 const SEARCH_PAGES = 9
 const NOTIFICATION_PAGES = 10
+const DAY_MS = 24 * 60 * 60_000
+/**
+ * How long GitHub keeps an inbox notification that is not saved: three months, taken as the shortest (89 days), so a
+ * notification older than this may be gone.
+ */
+export const NOTIFICATION_RETENTION_MS = 89 * DAY_MS
+/**
+ * A read whose notifications start before the retention window restarts this far inside it, so the next page of the
+ * same read does not find its start outside the window again and answer a second gap.
+ */
+export const RESTART_MARGIN_MS = DAY_MS
+/** A position after every notification of its second: GitHub's notification ids are digits. */
+const AFTER_SECOND = "\uffff"
 /** Notifications about these are the issue and pull request stream's. */
 const COVERED = new Set(["Issue", "PullRequest"])
 
@@ -110,6 +130,12 @@ interface Read {
   readonly items: Item[]
   readonly complete: boolean
   readonly last: number
+}
+
+/** The notifications' read: whether the sign-in may read them, and where it restarted when there were more than one call reads. */
+interface NotificationsRead extends Read {
+  readonly readable: boolean
+  readonly restart?: Key
 }
 
 const record = (value: unknown): value is Data => typeof value === "object" && value !== null && !Array.isArray(value)
@@ -259,6 +285,9 @@ async function search(get: Get, path: string, q: string, sort: string, from: Key
   let fetched = 0
   for (let page = 1; page <= SEARCH_PAGES; page++) {
     const read = (await list(get, path, { q, sort, order: "asc", per_page: PER_PAGE, page }, (data) => (record(data) ? data["items"] : undefined)))!
+    // GitHub's search timed out and may have left results out: list nothing past the position, and read it again on the
+    // next call, rather than move past what it left out.
+    if (read.incomplete) return { items: [], complete: false, last: from.t }
     fetched += read.items.length
     for (const raw of read.items) {
       const item = make(raw)
@@ -268,27 +297,36 @@ async function search(get: Get, path: string, q: string, sort: string, from: Key
     }
     // total_count says where the results end; without it, a short page does.
     const ended = read.items.length === 0 || (read.total !== undefined ? fetched >= read.total : read.items.length < PER_PAGE)
-    if (ended && !read.incomplete) return { items: items.sort(compare), complete: true, last }
+    if (ended) return { items: items.sort(compare), complete: true, last }
     // A page boundary can split a time: read on while every item shares one, so the next call can move past it.
     if (items.length > need && items.some((item) => item.t < last)) break
   }
   return { items: items.sort(compare), complete: false, last }
 }
 
-/** Notifications since `from`, all pages, oldest first; undefined when the sign-in may not read them. */
-async function notifications(get: Get, from: Key, account: string): Promise<Read> {
+/**
+ * Notifications since `from`, all pages, oldest first; none, and not readable, when the sign-in may not read them. GitHub
+ * lists them newest first, so with more than one call reads, what was not read is older than everything read: the read
+ * restarts after the oldest second it read (`restart`), and the caller answers the notifications before it as a gap.
+ */
+async function notifications(get: Get, from: Key, account: string): Promise<NotificationsRead> {
   const items: Item[] = []
+  let oldest = Number.POSITIVE_INFINITY
   for (let page = 1; page <= NOTIFICATION_PAGES; page++) {
     const read = await list(get, "/notifications", { all: true, participating: true, since: isoSeconds(from.t), per_page: PER_PAGE, page }, (data) => data, [401, 403, 404])
-    if (!read) return { items: [], complete: true, last: from.t }
+    if (!read) return { items: [], complete: true, last: from.t, readable: false }
     for (const raw of read.items) {
+      const at = record(raw) ? time(raw["updated_at"]) : undefined
+      if (at !== undefined) oldest = Math.min(oldest, at)
       const item = notificationItem(raw, account)
       if (item && compare(item, from) > 0) items.push(item)
     }
-    if (read.items.length < PER_PAGE) return { items: items.sort(compare), complete: true, last: Number.POSITIVE_INFINITY }
+    if (read.items.length < PER_PAGE) return { items: items.sort(compare), complete: true, last: Number.POSITIVE_INFINITY, readable: true }
   }
-  // Newest first, so what was not read is older than everything read: list none of them until it fits.
-  return { items: [], complete: false, last: from.t }
+  // No time GitHub named: nothing to restart from, so list none of them until it fits.
+  if (!Number.isFinite(oldest)) return { items: [], complete: false, last: from.t, readable: true }
+  const restart: Key = { t: oldest, i: AFTER_SECOND }
+  return { items: items.filter((item) => compare(item, restart) > 0).sort(compare), complete: true, last: Number.POSITIVE_INFINITY, readable: true, restart }
 }
 
 /** The owner a page and a probe name: `github:` and the login, labelled with the login. The same everywhere. */
@@ -371,14 +409,18 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   const from = request.cursor !== undefined ? positionsOf(request.cursor, account, owner) : { i: start, p: start, c: start, n: start }
   const end = now - SETTLE_MS
 
-  const none: Read = { items: [], complete: true, last: Number.POSITIVE_INFINITY }
-  const reads: Record<StreamName, Read> = {
-    // GitHub refuses a search for issues and pull requests together from a GitHub App user token (HTTP 422): one each.
-    i: from.i.t > end ? none : await search(get, "/search/issues", `is:issue involves:${login} updated:>=${isoSeconds(from.i.t)}`, "updated", from.i, request.limit, (raw) => issueItem(raw, account)),
-    p: from.p.t > end ? none : await search(get, "/search/issues", `is:pull-request involves:${login} updated:>=${isoSeconds(from.p.t)}`, "updated", from.p, request.limit, (raw) => issueItem(raw, account)),
-    c: from.c.t > end ? none : await search(get, "/search/commits", `author:${login} committer-date:>=${isoSeconds(from.c.t)}`, "committer-date", from.c, request.limit, (raw) => commitItem(raw, account)),
-    n: from.n.t > end ? none : await notifications(get, from.n, account),
-  }
+  // GitHub keeps notifications for three months: a stream that starts before that may have lost some, so it restarts
+  // inside the window, and the page answers the gap.
+  const floor = now - NOTIFICATION_RETENTION_MS
+  const outside = from.n.t < floor
+  const notificationsFrom: Key = outside ? { t: floor + RESTART_MARGIN_MS, i: "" } : from.n
+  const none: NotificationsRead = { items: [], complete: true, last: Number.POSITIVE_INFINITY, readable: false }
+  // GitHub refuses a search for issues and pull requests together from a GitHub App user token (HTTP 422): one each.
+  const issues = from.i.t > end ? none : await search(get, "/search/issues", `is:issue involves:${login} updated:>=${isoSeconds(from.i.t)}`, "updated", from.i, request.limit, (raw) => issueItem(raw, account))
+  const pulls = from.p.t > end ? none : await search(get, "/search/issues", `is:pull-request involves:${login} updated:>=${isoSeconds(from.p.t)}`, "updated", from.p, request.limit, (raw) => issueItem(raw, account))
+  const commits = from.c.t > end ? none : await search(get, "/search/commits", `author:${login} committer-date:>=${isoSeconds(from.c.t)}`, "committer-date", from.c, request.limit, (raw) => commitItem(raw, account))
+  const notified = notificationsFrom.t > end ? none : await notifications(get, notificationsFrom, account)
+  const reads: Record<StreamName, Read> = { i: issues, p: pulls, c: commits, n: notified }
   // Nothing at or after a stream's last read time is listed while that stream has more: it could still come first.
   const horizon = Math.min(end + 1, ...STREAMS.filter((stream) => !reads[stream].complete).map((stream) => reads[stream].last))
   const merged = STREAMS.flatMap((stream) => reads[stream].items)
@@ -389,20 +431,34 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   const refusedIds = new Map(screened.refused.map((entry) => [entry.external_id, entry]))
   const fits = fitPage(screened.events.slice(0, request.limit), request.limit, PAGE_BYTES)
   const listed: Item[] = []
-  const positions = { ...from }
+  // The notifications restart where they were read from: inside the window, or after the oldest second read.
+  const restartedAt = notified.restart !== undefined && compare(notified.restart, notificationsFrom) > 0 ? notified.restart : notificationsFrom
+  const positions = { ...from, ...(notified.readable ? { n: restartedAt } : {}) }
   let consumed = 0
+  let notificationsListed = 0
   for (const item of merged) {
     const refused = refusedIds.has(item.event.external_id)
     if (!refused && listed.length === fits) break
     if (!refused) listed.push(item)
     positions[item.s] = { t: item.t, i: item.i }
+    if (item.s === "n") notificationsListed++
     consumed++
   }
+  // Every notification GitHub has up to the settle time is listed: the stream's position moves there, so a quiet inbox's
+  // position never falls outside the retention window while it is read.
+  if (notified.readable && notified.complete && notificationsListed === notified.items.length && compare(positions.n, { t: end, i: "" }) < 0) {
+    positions.n = { t: end, i: "" }
+  }
+  const lost = notified.readable && (outside || notified.restart !== undefined)
+  const gap: EventsGap | undefined = lost
+    ? { reason: outside && request.cursor !== undefined ? "expired" : "window-truncated", since: new Date(from.n.t).toISOString() }
+    : undefined
   const refused = merged.slice(0, consumed).flatMap((item) => refusedIds.get(item.event.external_id) ?? [])
   const more = merged.length > consumed || STREAMS.some((stream) => !reads[stream].complete)
   const cursor = encodeBoundCursor(bindingOf(account), { a: account, o: digest(owner), p: Object.fromEntries(STREAMS.map((stream) => [stream, [positions[stream].t, positions[stream].i]])) })
   return eventsListResult({ source: SOURCE, account, owner }, listed.map((item) => item.event), cursor, more, {
     refused,
+    ...(gap === undefined ? {} : { gap }),
     plugin: PACKAGE,
     asOf: new Date(now).toISOString(),
   })
@@ -481,6 +537,13 @@ export const EVENTS_OUTPUT = {
       type: "array",
       description: "Events it will never list, such as one holding a secret. The cursor is past them.",
       items: { type: "object", required: ["external_id", "reason"], properties: { external_id: STRING, reason: STRING, detail: STRING } },
+    },
+    gap: {
+      type: "object",
+      additionalProperties: false,
+      required: ["reason", "since"],
+      description: "Notifications from since up to this page may be gone: GitHub keeps them three months. Answered once, on the page where the read restarts.",
+      properties: { reason: { type: "string", enum: [...GAP_REASONS] }, since: STRING },
     },
     plugin: { type: "string", description: "This plugin's package name." },
     asOf: { type: "string", description: "When the page was read, UTC ISO." },

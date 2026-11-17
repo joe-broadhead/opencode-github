@@ -17,9 +17,11 @@ import {
   EVENTS_INPUT,
   EVENTS_READS,
   NAMESPACE,
+  NOTIFICATION_RETENTION_MS,
   PAGE_BYTES,
   PROBE_ACTION,
   PROBE_READS,
+  RESTART_MARGIN_MS,
   SETTLE_MS,
   SOURCE,
   commitItem,
@@ -90,8 +92,10 @@ const EXPECTED = [
 
 const ok = (data: unknown): ApiOutput => ({ ok: true, status: 200, data, truncated: false, trust: { githubContent: "untrusted" } })
 
-function github(options: { perPage?: number; notifications?: "ok" | "forbidden"; login?: string } = {}) {
+function github(options: { perPage?: number; notifications?: "ok" | "forbidden"; login?: string; inbox?: typeof NOTIFICATIONS; incomplete?: number } = {}) {
   const calls: { path: string; query: Record<string, unknown> }[] = []
+  /** How many issue searches GitHub still answers as timed out, with incomplete_results. */
+  let incomplete = options.incomplete ?? 0
   const get = async (path: string, query: Record<string, string | number | boolean>) => {
     calls.push({ path, query })
     const per = options.perPage ?? Number(query.per_page)
@@ -106,6 +110,8 @@ function github(options: { perPage?: number; notifications?: "ok" | "forbidden";
       if (kind === undefined) return { ok: false, status: 422, data: { message: "Validation Failed" }, truncated: false, trust: { githubContent: "untrusted" } } as ApiOutput
       const from = Date.parse(qualifier("updated")!)
       const all = ISSUES.filter((item) => Date.parse(item.updated_at) >= from && ("pull_request" in item) === (kind === "pull-request")).sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at) || b.number - a.number)
+      // A search that timed out answers what it found so far: here, nothing past its first result.
+      if (incomplete > 0) return incomplete--, ok({ total_count: all.length, incomplete_results: true, items: all.slice(0, 1) })
       return ok({ total_count: all.length, incomplete_results: false, items: pageOf(all) })
     }
     if (path === "/search/commits") {
@@ -116,7 +122,7 @@ function github(options: { perPage?: number; notifications?: "ok" | "forbidden";
     if (path === "/notifications") {
       if (options.notifications === "forbidden") return { ok: false, status: 403, data: { message: "Resource not accessible" }, truncated: false, trust: { githubContent: "untrusted" } } as ApiOutput
       const since = Date.parse(String(query.since))
-      const all = NOTIFICATIONS.filter((item) => Date.parse(item.updated_at) >= since).reverse()
+      const all = (options.inbox ?? NOTIFICATIONS).filter((item) => Date.parse(item.updated_at) >= since).sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
       return ok(all.slice((page - 1) * Number(query.per_page), page * Number(query.per_page)))
     }
     throw new Error(`the synthetic GitHub has no ${path}`)
@@ -296,6 +302,84 @@ describe("events_list", () => {
     expect(await code(listEvents(failing, github().identity, { since: SINCE }, NOW))).toBe("UNAVAILABLE")
     const cut = async () => ({ ok: true, status: 200, data: "{", truncated: true, trust: { githubContent: "untrusted" } }) as ApiOutput
     expect(await code(listEvents(cut, github().identity, { since: SINCE }, NOW))).toBe("UNAVAILABLE")
+  })
+})
+
+describe("history GitHub no longer keeps", () => {
+  const DAY = 24 * 60 * 60_000
+  const iso = (at: number) => new Date(at).toISOString()
+  const page = (fake: ReturnType<typeof github>, now: number, input: Record<string, unknown>) => listEvents(fake.get, fake.identity, input, now) as Promise<EventsListResult>
+  /** Every page of one read, from `input`, at `now`. */
+  async function read(fake: ReturnType<typeof github>, now: number, input: Record<string, unknown>) {
+    const pages = [await page(fake, now, input)]
+    while (pages.at(-1)!.more) pages.push(await page(fake, now, { account: LOGIN, cursor: pages.at(-1)!.cursor, limit: input["limit"] }))
+    return pages
+  }
+  const positionN = (cursor: string) => ((JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as { p: Record<string, [number, string]> }).p["n"] as [number, string])[0]
+
+  it("keeps notifications three months: 89 days, the shortest, and restarts a day inside them", () => {
+    expect(NOTIFICATION_RETENTION_MS).toBe(89 * DAY)
+    expect(RESTART_MARGIN_MS).toBe(DAY)
+  })
+
+  it("answers gap expired, once, for a cursor whose notifications start before GitHub's three months, and reads them from inside the window", async () => {
+    const caught = await read(github(), NOW, { since: SINCE, limit: PAGE.max })
+    const cursor = caught.at(-1)!.cursor
+    const later = NOW + 100 * DAY
+    const fake = github()
+    const pages = await read(fake, later, { account: LOGIN, cursor, limit: 1 })
+    expect(pages[0]!.gap).toEqual({ reason: "expired", since: iso(positionN(cursor)) })
+    expect(pages[0]!.events.map((event) => event.external_id)).toEqual(["octo/app#30@2026-11-08T11:58:00.000Z"])
+    // The page's own cursor, read a minute later, starts inside the window: no second gap.
+    expect((await page(github(), later + 60_000, { account: LOGIN, cursor: pages[0]!.cursor, limit: 1 })).gap).toBeUndefined()
+    expect(fake.calls.find((call) => call.path === "/notifications")!.query["since"]).toBe(iso(later - NOTIFICATION_RETENTION_MS + RESTART_MARGIN_MS).replace(".000", ""))
+    for (const result of pages) expect(resultProblems(result)).toEqual([])
+    // The same cursor read again is the same page, with the same gap.
+    expect((await page(github(), later, { account: LOGIN, cursor, limit: 1 })).gap).toEqual(pages[0]!.gap)
+  })
+
+  it("answers gap window-truncated on the first page of a read from a since older than three months, and on no later page", async () => {
+    const pages = await read(github(), NOW, { since: "2026-07-01", limit: 2 })
+    expect(pages[0]!.gap).toEqual({ reason: "window-truncated", since: "2026-07-01T00:00:00.000Z" })
+    expect(pages.slice(1).every((result) => result.gap === undefined)).toBe(true)
+    expect(pages.flatMap((result) => result.events.map((event) => event.external_id))).toEqual(EXPECTED)
+  })
+
+  it("answers no gap where the sign-in may not read notifications, as nothing was there to lose", async () => {
+    const pages = await read(github({ notifications: "forbidden" }), NOW, { since: "2026-07-01", limit: 2 })
+    expect(pages.every((result) => result.gap === undefined)).toBe(true)
+  })
+
+  it("moves a quiet inbox's position with every complete read, so reading it every month answers no gap", async () => {
+    let cursor = (await read(github(), NOW, { since: SINCE, limit: PAGE.max })).at(-1)!.cursor
+    for (let month = 1; month <= 5; month++) {
+      const pages = await read(github(), NOW + month * 30 * DAY, { account: LOGIN, cursor, limit: PAGE.max })
+      expect(pages.every((result) => result.gap === undefined)).toBe(true)
+      cursor = pages.at(-1)!.cursor
+      expect(positionN(cursor)).toBe(NOW + month * 30 * DAY - SETTLE_MS)
+    }
+  })
+
+  it("answers gap window-truncated when there are more notifications than one call reads, and lists every one after the oldest second it read", async () => {
+    // 520 releases, one a minute: one call reads the newest 500 (ten pages of 50), down to the 21st.
+    const inbox = Array.from({ length: 520 }, (_, index) => ({ ...NOTIFICATIONS[1]!, id: `r${index}`, updated_at: iso(Date.parse("2026-11-01T00:00:00Z") + index * 60_000) }))
+    const fake = github({ inbox })
+    const pages = await read(fake, NOW, { since: "2026-10-31", limit: PAGE.max })
+    expect(pages[0]!.gap).toEqual({ reason: "window-truncated", since: "2026-10-31T00:00:00.000Z" })
+    expect(pages.slice(1).every((result) => result.gap === undefined)).toBe(true)
+    const listed = pages.flatMap((result) => result.events.map((event) => event.external_id)).filter((id) => id.startsWith("notification:"))
+    expect(listed).toEqual(inbox.slice(21).map((item) => `notification:${item.id}@${item.updated_at}`))
+    expect(fake.calls.filter((call) => call.path === "/notifications" && call.query["since"] === "2026-10-31T00:00:00Z")).toHaveLength(10)
+  })
+
+  it("lists nothing past the position while GitHub answers a search as incomplete, and the next call reads it again", async () => {
+    const fake = github({ incomplete: 1 })
+    const first = await page(fake, NOW, { since: SINCE, limit: PAGE.max })
+    // The issue search timed out: nothing at or after its position is listed, and nothing is skipped.
+    expect(first.events).toEqual([])
+    expect(first.more).toBe(true)
+    const rest = await read(fake, NOW, { account: LOGIN, cursor: first.cursor, limit: 2 })
+    expect(rest.flatMap((result) => result.events.map((event) => event.external_id))).toEqual(EXPECTED)
   })
 })
 

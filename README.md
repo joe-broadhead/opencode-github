@@ -507,9 +507,11 @@ still stores its token.
 - **The source's links are `github.com`'s.** The `sources` declaration names `github.com` as its `urlHosts`; with the
   `host` option (GitHub Enterprise Server) the events link to your server, which a consumer that checks `urlHosts`
   does not render.
-- **A GitHub cursor never expires.** It holds a time in each stream, so the plugin never answers `CURSOR_EXPIRED`, and
-  the conformance kit's expired-cursor check is not applicable, with that reason in the report. The kit runs on GitHub answers that are
-  invented, modelled on GitHub's REST docs, and not live-verified.
+- **GitHub keeps notifications for three months.** A read whose notifications start before that, or that finds more
+  than one call reads, answers `gap` once (`expired` from a cursor, `window-truncated` from `since`) and reads on from
+  inside the window. A notification marked Done before `events_list` reads it may not be listed, and nothing tells the
+  plugin it was there. The conformance kit runs on GitHub answers that are invented, modelled on GitHub's REST docs,
+  and not live-verified.
 - Updates are not automatic for a Git install, and `opencode plugin update` and `opencode plugin check` do not work on one: to move to a newer release, remove the old entry and add the new tag.
 
 ## Links
