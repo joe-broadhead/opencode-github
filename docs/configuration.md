@@ -674,14 +674,26 @@ is refused before it is sent:
   repository's link.
 
 The cursor holds a position in each stream. The result merges them by time, and lists only what no stream can still put
-before it. An event is listed once it is 5 minutes old, because GitHub's search lags a little behind a change. GitHub's
-search returns at most 1,000 results for one query, and allows 30 search requests a minute: each search reads at most 6
-pages of 100 a call from its position, and the cursor moves past what was listed, so the next call's query starts later.
-When every result a search read shares one second (a rebase-merge gives hundreds of commits one committer date), that
-second is read whole by itself, up to GitHub's 1,000 results, and listed in the plugin's own order (by id), so the
-position walks through it across calls and then moves past it. A call makes at most 30 search requests. A search GitHub answers as incomplete (it timed out) lists nothing past that stream's position, and the
-next call reads it again, so nothing it left out is skipped. An event whose title or text holds a secret, such as a
-password in a URL, is never listed: it is in the page's `refused[]` with `reason: "secret"`, and the cursor moves past it.
+before it. An event is listed once it is 5 minutes old, because GitHub's search lags a little behind a change. **A read
+holds one cut** (the time of its first page, less those 5 minutes) on every page until it ends (`more: false`): nothing
+newer is listed by it, and the next read lists what came after.
+
+GitHub's search returns at most 1,000 results for one query, and allows 30 search requests a minute: each search reads
+at most 6 pages of 100 a call from its position, and the cursor moves past what was listed, so the next call's query
+starts later. When every result a search read shares one second (a rebase-merge gives hundreds of commits one committer
+date), that second is read whole by itself, up to GitHub's 1,000 results, and listed in the plugin's own order (by id),
+so the position walks through it across calls and then moves past it; with two such seconds, the earlier is read
+first. A call makes at most 30 search requests. Each result is listed once, even where GitHub orders a second's results
+differently from one page to the next; but if it does, a result can be missed while that second is read (GitHub does
+not say whether its order is stable). A search GitHub answers as incomplete (it timed out) lists nothing past that
+stream's position, and the next call reads it again, so nothing it left out is skipped. An event whose title or text
+holds a secret, such as a password in a URL, is never listed: it is in the page's `refused[]` with `reason: "secret"`,
+and the cursor moves past it.
+
+**Notifications** are read under the read's cut (`before`). Up to 500 are read whole. With more (a backlog), the call
+counts them, asking GitHub for one notification alone at a time (it lists them newest first), and reads the oldest 500:
+the backlog is walked oldest first, call after call, and nothing GitHub delivers meanwhile can push one out of it.
+Where GitHub will not page that far, or past 64,000, the call reads the newest 500 instead and answers a gap.
 
 **A notification GitHub delivers late.** Each read looks again at the 6 hours before the notifications' position, and
 lists a notification stamped there that it has not listed yet; the cursor remembers the last 16 it listed in that time
@@ -691,15 +703,15 @@ lists a notification stamped there that it has not listed yet; the cursor rememb
 ([notification retention](https://docs.github.com/en/subscriptions-and-notifications/get-started/configuring-notifications)).
 A read whose notifications start before that (taken as 89 days, the shortest three months) may have lost some: it
 answers `gap`, `{ reason: "expired", since }` from a cursor or `{ reason: "window-truncated", since }` from `since`,
-where `since` is where the notifications started, and reads them from a day inside the window. So does a read with more
-notifications than one call reads (10 pages of 50, newest first, then the 501st alone to tell whether there are more):
-`window-truncated`, and it lists every notification after the oldest second it read. So does a second with more search
-results than GitHub answers for one query (1,000): `window-truncated` from that second, and the search moves past it. A
-read answers its gap once, on the page where it restarts: while the read goes on (`more: true`), the cursor carries that
-it was answered and no later page answers another; reading again at the same cursor answers the same gap. A complete read moves the notifications' position up to the
-settle time, so an inbox read at least every three months never answers a gap. A sign-in that may not read
-notifications has none to lose, and answers no gap. The issue, pull request and commit searches read any time range.
-An item deleted on GitHub before a read finds it is never listed; that is not a gap.
+where `since` is where the notifications started, and reads them from the window's start. So does a backlog the call
+cannot walk (above), and a second with more search results than GitHub answers for one query (1,000):
+`window-truncated`, and the search moves past that second. **A read answers one gap**, on the page where it restarts:
+until the read ends, the cursor carries that it was answered and no later page answers another; reading again at the
+same cursor answers the same gap. A read paged slowly can still lose notifications that pass three months while it
+pages, after its gap. A complete read moves the notifications' position up to the cut, so an inbox read at least every
+three months never answers a gap. A sign-in that may not read notifications has none to lose, and answers no gap. The
+issue, pull request and commit searches read any time range. An item deleted on GitHub before a read finds it is never
+listed; that is not a gap.
 
 **`probe`** (the tools RPC method, action `github_probe`, allowed by the default rules at every `access`) answers who
 is signed in, `{ source: "github", account, owner, trust }`, with the same account and owner as every page, and nothing

@@ -19,11 +19,13 @@
 // A search reads pages of 100 from its position; when every result it read shares one second, that second is read
 // whole by itself (GitHub answers up to 1,000), in the plugin's order by id, so the position walks it across calls and
 // then moves past it. A call makes at most 30 search requests, GitHub's limit a minute.
+// A read holds one cut, on every page until it ends: nothing newer is listed by it. Notifications are read under it; a
+// backlog over 500 is counted and walked oldest first across calls.
 // GitHub keeps inbox notifications for three months (unless saved), so a read that starts before that, from a cursor or
 // from since, may have lost some: it answers `gap` (`expired` from a cursor, `window-truncated` from since) and reads
-// notifications from inside the window. So does a read with more notifications than one call reads, from the oldest it
-// read on, and a second with more search results than GitHub answers, which the search moves past. A read answers its
-// gap once: while it goes on, the cursor carries that it did. Each read looks again at the 6 hours before the
+// notifications from the window's start. So does a backlog GitHub will not page through (from the oldest it read on),
+// and a second with more search results than GitHub answers, which the search moves past. A read answers one gap: until
+// it ends, the cursor carries that it did. Each read looks again at the 6 hours before the
 // notifications' position for one GitHub delivered late, and the cursor remembers what it listed there, so none is
 // listed twice. A search GitHub answers as incomplete is read again on the next call, never skipped.
 // The result merges them by time, and lists only what no stream can still put before it: a stream with more pages
@@ -100,19 +102,16 @@ export const SEARCH_CAP = 1000
  * whole (SEARCH_CAP / SEARCH_PER_PAGE = 10 requests).
  */
 export const SEARCH_BUDGET = 30
-/** The pages of notifications one call reads, newest first; past them, one request for the next one says whether there are more. */
-const NOTIFICATION_PAGES = 10
+/** The most notifications one call reads (10 pages of 50); a backlog over it is walked oldest first across calls. */
+export const NOTIFICATION_CAP = 500
+/** The largest backlog it counts; past it, or where GitHub will not page that far, the read answers a gap. */
+export const NOTIFICATION_COUNT_MAX = 64_000
 const DAY_MS = 24 * 60 * 60_000
 /**
  * How long GitHub keeps an inbox notification that is not saved: three months, taken as the shortest (89 days), so a
  * notification older than this may be gone.
  */
 export const NOTIFICATION_RETENTION_MS = 89 * DAY_MS
-/**
- * A read whose notifications start before the retention window restarts this far inside it, so the next page of the
- * same read does not find its start outside the window again.
- */
-export const RESTART_MARGIN_MS = DAY_MS
 /**
  * How far behind its position each read looks again for notifications GitHub delivered late: one stamped up to this
  * long before the position, and not listed yet, is listed when it appears.
@@ -317,6 +316,9 @@ interface Budget {
   left: number
 }
 
+/** An item as the stream that read it. */
+const streamOf = (item: Item | undefined, s: StreamName): Item | undefined => (item === undefined ? undefined : { ...item, s })
+
 /** Where a search position's results begin: after its second when it is past all of it. */
 const startOf = (from: Key) => (from.i === AFTER_SECOND ? from.t + 1000 : from.t)
 const searchItems = (data: unknown) => (record(data) ? data["items"] : undefined)
@@ -329,6 +331,7 @@ const searchItems = (data: unknown) => (record(data) ? data["items"] : undefined
 async function search(get: Get, spec: Search, from: Key, need: number, budget: Budget): Promise<SearchRead> {
   const hold: SearchRead = { items: [], complete: false, last: from.t, start: from }
   const items: Item[] = []
+  const ids = new Set<string>()
   let last = from.t
   let fetched = 0
   let read = false
@@ -344,7 +347,11 @@ async function search(get: Get, spec: Search, from: Key, need: number, budget: B
       const item = spec.make(raw)
       if (!item) continue
       last = Math.max(last, item.t)
-      if (compare(item, from) > 0) items.push(item)
+      // GitHub may order a second's results differently from one page to the next: each item is listed once.
+      if (compare(item, from) > 0 && !ids.has(item.i)) {
+        ids.add(item.i)
+        items.push(item)
+      }
     }
     // total_count says where the results end; without it, a short page does.
     const ended = answer.items.length === 0 || (answer.total !== undefined ? fetched >= Math.min(answer.total, SEARCH_CAP) : answer.items.length < SEARCH_PER_PAGE)
@@ -365,10 +372,13 @@ async function search(get: Get, spec: Search, from: Key, need: number, budget: B
  * budget to read it whole, the stream holds, and the next call reads it.
  */
 async function searchSecond(get: Get, spec: Search, from: Key, second: number, budget: Budget): Promise<SearchRead> {
-  const hold: SearchRead = { items: [], complete: false, last: from.t, start: from }
+  // Held, the stream has nothing between its position and the second (its read found only that second), so it holds
+  // back only what comes after the second: the other streams list on up to it.
+  const hold: SearchRead = { items: [], complete: false, last: second + 1000, start: from }
   const past: Key = { t: second, i: AFTER_SECOND }
   const at = isoSeconds(second)
   const items: Item[] = []
+  const ids = new Set<string>()
   let fetched = 0
   for (let page = 1; page <= SEARCH_CAP / SEARCH_PER_PAGE; page++) {
     if (budget.left <= 0) return hold
@@ -379,7 +389,10 @@ async function searchSecond(get: Get, spec: Search, from: Key, second: number, b
     fetched += answer.items.length
     for (const raw of answer.items) {
       const item = spec.make(raw)
-      if (item && item.t === second && compare(item, from) > 0) items.push(item)
+      if (item && item.t === second && compare(item, from) > 0 && !ids.has(item.i)) {
+        ids.add(item.i)
+        items.push(item)
+      }
     }
     const ended = answer.items.length < SEARCH_PER_PAGE || (answer.total !== undefined && fetched >= answer.total)
     if (!ended) continue
@@ -413,59 +426,113 @@ interface NotificationsRead extends Read {
 }
 
 /**
- * Notifications from the lookback's start, all pages, oldest first: those after the position, and those inside the
- * lookback not listed yet; none, and not readable, when the sign-in may not read them. GitHub lists them newest first,
- * so with more than one call reads, what was not read is older than everything read. When that can hold notifications
- * after the position, the stream restarts after the oldest second it read (`truncated`), and the caller answers the
- * notifications before it as a gap; when it holds only the lookback's, the lookback starts later.
+ * Notifications under the read's cut, oldest first: those after the position, and those inside the lookback not listed
+ * yet; none, and not readable, when the sign-in may not read them. The cut holds for the whole read, so what GitHub
+ * delivers after it is the next read's, and the set this read walks never grows at its top. At most NOTIFICATION_CAP
+ * are read whole. With more (a backlog), it counts them, asking for one notification alone at a time (GitHub lists them
+ * newest first), and reads the oldest NOTIFICATION_CAP: the stream lists what is before the newest second it read, and
+ * the next call walks on, under the same cut. Where GitHub will not page that far, or one second holds the whole
+ * backlog, the read falls back to the newest NOTIFICATION_CAP and a gap (`truncatedRead`).
  */
-async function notifications(get: Get, state: Notified, account: string): Promise<NotificationsRead> {
+async function notifications(get: Get, state: Notified, account: string, cut: number): Promise<NotificationsRead> {
   const { position } = state
   const base = startOf(position)
-  const since = Math.min(state.floor, base)
+  const before = isoSeconds(Math.floor(cut / 1000) * 1000 + 1000)
+  const ask: Ask = (since, page, perPage) =>
+    list(get, "/notifications", { all: true, participating: true, since: isoSeconds(since), before, per_page: perPage, page }, (data) => data, [401, 403, 404, 422])
+  /** Whether the window from `since` holds an n-th notification; undefined when GitHub will not say. */
+  const has = async (since: number, n: number) => {
+    const read = await ask(since, n, 1)
+    return read === undefined ? undefined : read.items.length > 0
+  }
+  const unreadable: NotificationsRead = { items: [], complete: true, last: position.t, readable: false, state, truncated: false }
+  let since = Math.min(state.floor, base)
+  let floor = state.floor
+  let backlog = await has(since, NOTIFICATION_CAP + 1)
+  if (backlog === undefined) return unreadable
+  if (backlog && since < base) {
+    // A backlog with the lookback: walk from the position without it.
+    since = base
+    floor = Math.max(floor, base + 1000)
+    backlog = await has(since, NOTIFICATION_CAP + 1)
+    if (backlog === undefined) return unreadable
+  }
+  const next: Notified = { ...state, floor }
+  if (!backlog) {
+    const raws: unknown[] = []
+    for (let page = 1; page <= NOTIFICATION_CAP / PER_PAGE; page++) {
+      const read = await ask(since, page, PER_PAGE)
+      if (read === undefined) return unreadable
+      raws.push(...read.items)
+      if (read.items.length < PER_PAGE) break
+    }
+    return { items: pick(raws, next, account), complete: true, last: Number.POSITIVE_INFINITY, readable: true, state: next, truncated: false }
+  }
+  // Count the backlog: double until a notification is missing, then halve the difference.
+  let present = NOTIFICATION_CAP + 1
+  let absent = 0
+  for (let n = 2 * NOTIFICATION_CAP; absent === 0; n *= 2) {
+    const found = n > NOTIFICATION_COUNT_MAX ? undefined : await has(since, n)
+    if (found === undefined) return truncatedRead(ask, state, since, account)
+    if (found) present = n
+    else absent = n
+  }
+  while (absent - present > 1) {
+    const middle = Math.floor((present + absent) / 2)
+    const found = await has(since, middle)
+    if (found === undefined) return truncatedRead(ask, state, since, account)
+    if (found) present = middle
+    else absent = middle
+  }
   const raws: unknown[] = []
-  let full = true
-  for (let page = 1; page <= NOTIFICATION_PAGES; page++) {
-    const read = await list(get, "/notifications", { all: true, participating: true, since: isoSeconds(since), per_page: PER_PAGE, page }, (data) => data, [401, 403, 404])
-    if (!read) return { items: [], complete: true, last: position.t, readable: false, state, truncated: false }
+  for (let page = Math.ceil((present - NOTIFICATION_CAP + 1) / PER_PAGE); page <= Math.ceil(present / PER_PAGE); page++) {
+    const read = await ask(since, page, PER_PAGE)
+    if (read === undefined) return truncatedRead(ask, state, since, account)
     raws.push(...read.items)
-    if (read.items.length < PER_PAGE) {
-      full = false
-      break
-    }
   }
-  // Ten full pages: one more request for the next notification says whether there are more than they hold.
-  if (full) {
-    const next = await list(get, "/notifications", { all: true, participating: true, since: isoSeconds(since), per_page: 1, page: NOTIFICATION_PAGES * PER_PAGE + 1 }, (data) => data, [401, 403, 404])
-    full = next !== undefined && next.items.length > 0
-  }
+  // Everything not read is at least as new as the newest read.
   const times = raws.flatMap((raw) => (record(raw) ? (time(raw["updated_at"]) ?? []) : []))
-  const oldest = times.length > 0 ? Math.min(...times) : Number.POSITIVE_INFINITY
-  let next: Notified = state
-  let truncated = false
-  if (full && Number.isFinite(oldest)) {
-    if (oldest >= base) {
-      // Notifications after the position may not have been read: restart after the oldest second read.
-      truncated = true
-      const restart: Key = { t: oldest, i: AFTER_SECOND }
-      next = { position: restart, floor: oldest + 1000, seen: new Map() }
-    } else {
-      // Only the lookback was cut short: it starts after the oldest second read.
-      next = { ...state, floor: Math.max(state.floor, oldest + 1000) }
-    }
-  } else if (full) {
-    // No time GitHub named: nothing to restart from, so list none of them until it fits.
-    return { items: [], complete: false, last: position.t, readable: true, state, truncated: false }
-  }
-  const items: Item[] = []
+  const last = times.length > 0 ? Math.max(...times) : Number.NaN
+  const items = pick(raws, next, account)
+  // Progress needs a notification before the newest second read: a backlog of one second cannot be walked.
+  if (!Number.isFinite(last) || !items.some((item) => item.t < last)) return truncatedRead(ask, state, since, account)
+  return { items, complete: false, last, readable: true, state: next, truncated: false }
+}
+
+/** A notifications request: from `since`, under the read's cut, one page. */
+type Ask = (since: number, page: number, perPage: number) => ReturnType<typeof list>
+
+/** The notifications to list from GitHub's answers: after the position, or inside the lookback and not listed yet; oldest first, each once. */
+function pick(raws: readonly unknown[], state: Notified, account: string): Item[] {
+  const items = new Map<string, Item>()
   for (const raw of raws) {
     const item = notificationItem(raw, account)
     if (!item) continue
-    const after = compare(item, next.position) > 0
-    const late = !after && item.t >= next.floor && !next.seen.has(seenKey(item))
-    if (after || late) items.push(item)
+    const after = compare(item, state.position) > 0
+    const late = !after && item.t >= state.floor && !state.seen.has(seenKey(item))
+    if (after || late) items.set(`${item.i}@${item.t}`, item)
   }
-  return { items: items.sort(compare), complete: true, last: Number.POSITIVE_INFINITY, readable: true, state: next, truncated }
+  return [...items.values()].sort(compare)
+}
+
+/**
+ * The newest NOTIFICATION_CAP notifications, when the backlog cannot be walked: the stream restarts after the oldest
+ * second read (`truncated`), and the caller answers the notifications before it as a gap.
+ */
+async function truncatedRead(ask: Ask, state: Notified, since: number, account: string): Promise<NotificationsRead> {
+  const raws: unknown[] = []
+  for (let page = 1; page <= NOTIFICATION_CAP / PER_PAGE; page++) {
+    const read = await ask(since, page, PER_PAGE)
+    if (read === undefined) break
+    raws.push(...read.items)
+    if (read.items.length < PER_PAGE) break
+  }
+  const times = raws.flatMap((raw) => (record(raw) ? (time(raw["updated_at"]) ?? []) : []))
+  // No time GitHub named: nothing to restart from, so list none of them until it fits.
+  if (times.length === 0) return { items: [], complete: false, last: state.position.t, readable: true, state, truncated: false }
+  const oldest = Math.min(...times)
+  const next: Notified = { position: { t: oldest, i: AFTER_SECOND }, floor: oldest + 1000, seen: new Map() }
+  return { items: pick(raws, next, account), complete: true, last: Number.POSITIVE_INFINITY, readable: true, state: next, truncated: true }
 }
 
 /** The owner a page and a probe name: `github:` and the login, labelled with the login. The same everywhere. */
@@ -500,6 +567,8 @@ interface CursorState {
   readonly notified: Notified
   /** When this read answered its gap: no later page of the read answers another (a consumer counts one resync per gap). */
   readonly gapAt?: number
+  /** The read's cut: it lists nothing newer, on every page, and what comes after it is the next read's. */
+  readonly cut?: number
 }
 
 const SEEN = /^([0-9a-f]{8})([0-9a-z]{1,11})$/
@@ -522,9 +591,11 @@ function stateOf(cursor: string, account: string, owner: EventsOwner): CursorSta
   if (!named || state["o"] !== digest(owner) || keys.some((key) => key === undefined)) return refuseCursor()
   const from = { i: keys[0]!, p: keys[1]!, c: keys[2]!, n: keys[3]! }
   const gapAt = state["g"]
-  if (gapAt !== undefined && !(typeof gapAt === "number" && Number.isSafeInteger(gapAt))) return refuseCursor()
+  const cut = state["u"]
+  for (const value of [gapAt, cut]) if (value !== undefined && !(typeof value === "number" && Number.isSafeInteger(value))) return refuseCursor()
+  const read = { ...(gapAt === undefined ? {} : { gapAt: gapAt as number }), ...(cut === undefined ? {} : { cut: cut as number }) }
   const lookback = state["l"]
-  if (lookback === undefined) return { from, notified: { position: from.n, floor: from.n.t + 1000, seen: new Map() }, ...(gapAt === undefined ? {} : { gapAt }) }
+  if (lookback === undefined) return { from, notified: { position: from.n, floor: from.n.t + 1000, seen: new Map() }, ...read }
   const behind = record(lookback) ? lookback["f"] : undefined
   const hashes = record(lookback) ? lookback["h"] : undefined
   if (typeof behind !== "number" || !Number.isSafeInteger(behind) || !Array.isArray(hashes) || hashes.length > LOOKBACK_REMEMBERED) return refuseCursor()
@@ -534,7 +605,7 @@ function stateOf(cursor: string, account: string, owner: EventsOwner): CursorSta
     if (!match) return refuseCursor()
     seen.set(match[1]!, from.n.t - Number.parseInt(match[2]!, 36))
   }
-  return { from, notified: { position: from.n, floor: from.n.t - behind, seen }, ...(gapAt === undefined ? {} : { gapAt }) }
+  return { from, notified: { position: from.n, floor: from.n.t - behind, seen }, ...read }
 }
 
 /** The signed-in login, or AUTH_REQUIRED; `method` names the caller in the message. */
@@ -573,12 +644,15 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   const state: CursorState =
     request.cursor !== undefined ? stateOf(request.cursor, account, owner) : { from: { i: start, p: start, c: start, n: start }, notified: { position: start, floor: start.t + 1000, seen: new Map() } }
   const from = state.from
-  const end = now - SETTLE_MS
+  // The read's cut, pinned on its first page: an event is listed once it is SETTLE_MS old, and nothing newer than the cut
+  // is listed on any page of the read; the next read lists it.
+  const end = state.cut ?? Math.floor(now - SETTLE_MS)
 
   // GitHub refuses a search for issues and pull requests together from a GitHub App user token (HTTP 422): one each.
   const searches: Record<"i" | "p" | "c", Search> = {
-    i: { path: "/search/issues", sort: "updated", query: (range) => `is:issue involves:${login} updated:${range}`, make: (raw) => issueItem(raw, account) },
-    p: { path: "/search/issues", sort: "updated", query: (range) => `is:pull-request involves:${login} updated:${range}`, make: (raw) => issueItem(raw, account) },
+    // An item belongs to the stream that read it, so that stream's position moves past it.
+    i: { path: "/search/issues", sort: "updated", query: (range) => `is:issue involves:${login} updated:${range}`, make: (raw) => streamOf(issueItem(raw, account), "i") },
+    p: { path: "/search/issues", sort: "updated", query: (range) => `is:pull-request involves:${login} updated:${range}`, make: (raw) => streamOf(issueItem(raw, account), "p") },
     c: { path: "/search/commits", sort: "committer-date", query: (range) => `author:${login} committer-date:${range}`, make: (raw) => commitItem(raw, account) },
   }
   const budget: Budget = { left: SEARCH_BUDGET }
@@ -586,22 +660,23 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   for (const stream of ["i", "p", "c"] as const) {
     if (startOf(from[stream]) <= end) searched[stream] = await search(get, searches[stream], from[stream], request.limit, budget)
   }
-  // A stream whose read found only one second reads that second whole, with what is left of the budget.
-  for (const stream of ["i", "p", "c"] as const) {
-    const stuck = searched[stream].stuck
-    if (stuck !== undefined) searched[stream] = await searchSecond(get, searches[stream], from[stream], stuck, budget)
+  // A stream whose read found only one second reads that second whole, with what is left of the budget: the earliest
+  // second first, as the merge lists it first, so the stream that holds every other back always gets the budget.
+  const stuck = (["i", "p", "c"] as const).flatMap((stream) => (searched[stream].stuck === undefined ? [] : [{ stream, second: searched[stream].stuck! }]))
+  for (const { stream, second } of stuck.sort((a, b) => a.second - b.second || (a.stream < b.stream ? -1 : 1))) {
+    searched[stream] = await searchSecond(get, searches[stream], from[stream], second, budget)
   }
 
-  // GitHub keeps notifications for three months: a stream that starts before that may have lost some, so it restarts
-  // inside the window, and the page answers the gap.
+  // GitHub keeps notifications for three months: a stream that starts before that may have lost some, so it restarts at
+  // the window's start, and the read answers the gap.
   const floor = now - NOTIFICATION_RETENTION_MS
   const outside = state.notified.position.t < floor
-  const restarted: Key = { t: floor + RESTART_MARGIN_MS, i: "" }
+  const restarted: Key = { t: floor, i: "" }
   const notifiedFrom: Notified = outside ? { position: restarted, floor: restarted.t + 1000, seen: new Map() } : state.notified
   const notified: NotificationsRead =
     startOf(notifiedFrom.position) > end
       ? { items: [], complete: true, last: Number.POSITIVE_INFINITY, readable: false, state: state.notified, truncated: false }
-      : await notifications(get, notifiedFrom, account)
+      : await notifications(get, notifiedFrom, account, end)
   const reads: Record<StreamName, Read> = { ...searched, n: notified }
   // Nothing at or after a stream's last read time is listed while that stream has more: it could still come first.
   const horizon = Math.min(end + 1, ...STREAMS.filter((stream) => !reads[stream].complete).map((stream) => reads[stream].last))
@@ -645,13 +720,13 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   lookback = remembered.floor
 
   // History lost: notifications GitHub no longer keeps or more than one call reads, or a second with more search results
-  // than GitHub answers. A read answers its gap once, on the page where it restarts; no later page of the read answers
-  // another while it goes on (`g` in the cursor).
+  // than GitHub answers. A read answers one gap, on the page where it restarts; no later page of the read answers another
+  // (`g` in the cursor, which the read carries until it ends).
   const lostSince = [
     ...(notified.readable && (outside || notified.truncated) ? [state.notified.position.t] : []),
     ...(["i", "p", "c"] as const).flatMap((stream) => searched[stream].skipped ?? []),
   ]
-  const answered = state.gapAt !== undefined && now - state.gapAt < RESTART_MARGIN_MS
+  const answered = state.gapAt !== undefined
   const gap: EventsGap | undefined =
     lostSince.length > 0 && !answered
       ? { reason: outside && request.cursor !== undefined ? "expired" : "window-truncated", since: new Date(Math.min(...lostSince)).toISOString() }
@@ -659,7 +734,7 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   const refused = merged.slice(0, consumed).flatMap((item) => refusedIds.get(item.event.external_id) ?? [])
   const more = merged.length > consumed || STREAMS.some((stream) => !reads[stream].complete)
   const gapAt = more ? (gap !== undefined ? now : answered ? state.gapAt : undefined) : undefined
-  const cursor = encodeState(account, owner, positions, lookback, remembered.seen, gapAt)
+  const cursor = encodeState(account, owner, positions, lookback, remembered.seen, { gapAt, cut: more ? end : undefined })
   return eventsListResult({ source: SOURCE, account, owner }, listed.map((item) => item.event), cursor, more, {
     refused,
     ...(gap === undefined ? {} : { gap }),
@@ -680,15 +755,15 @@ function remember(position: Key, floor: number, seen: ReadonlyMap<string, number
   return { floor: start, seen: new Map(newest.filter(([, at]) => at >= start)) }
 }
 
-/** The cursor: each stream's position, the lookback, and when the read answered its gap; the lookback shrinks until it fits. */
-function encodeState(account: string, owner: EventsOwner, positions: Record<StreamName, Key>, floor: number, seen: Map<string, number>, gapAt: number | undefined): string {
+/** The cursor: each stream's position, the lookback, and while a read goes on its cut and its gap; the lookback shrinks until it fits. */
+function encodeState(account: string, owner: EventsOwner, positions: Record<StreamName, Key>, floor: number, seen: Map<string, number>, read: { gapAt: number | undefined; cut: number | undefined }): string {
   const p = Object.fromEntries(STREAMS.map((stream) => [stream, [positions[stream].t, positions[stream].i]]))
   let entries = [...seen].sort((a, b) => b[1] - a[1])
   let start = floor
   for (;;) {
     const l = { f: positions.n.t - start, h: entries.map(([hash, at]) => `${hash}${(positions.n.t - at).toString(36)}`) }
     try {
-      return encodeBoundCursor(bindingOf(account), { a: account, o: digest(owner), p, l, ...(gapAt === undefined ? {} : { g: gapAt }) })
+      return encodeBoundCursor(bindingOf(account), { a: account, o: digest(owner), p, l, ...(read.gapAt === undefined ? {} : { g: read.gapAt }), ...(read.cut === undefined ? {} : { u: read.cut }) })
     } catch (error) {
       // The package refuses a cursor over EVENT_LIMITS.cursor characters.
       if (entries.length === 0) throw error
@@ -778,7 +853,7 @@ export const EVENTS_OUTPUT = {
       additionalProperties: false,
       required: ["reason", "since"],
       description:
-        "History from since up to this page may be gone: notifications GitHub no longer keeps (three months) or more than one call reads, or a second with more search results than GitHub answers. Answered once per read, on the page where it restarts.",
+        "History from since up to this page may be gone: notifications GitHub no longer keeps (three months) or will not page to, or a second with more search results than GitHub answers. Answered once per read, on the page where it restarts.",
       properties: { reason: { type: "string", enum: [...GAP_REASONS] }, since: STRING },
     },
     plugin: { type: "string", description: "This plugin's package name." },

@@ -21,7 +21,6 @@ import {
   PAGE_BYTES,
   PROBE_ACTION,
   PROBE_READS,
-  RESTART_MARGIN_MS,
   SETTLE_MS,
   SOURCE,
   commitItem,
@@ -125,7 +124,9 @@ function github(options: { perPage?: number; notifications?: "ok" | "forbidden";
     if (path === "/notifications") {
       if (options.notifications === "forbidden") return { ok: false, status: 403, data: { message: "Resource not accessible" }, truncated: false, trust: { githubContent: "untrusted" } } as ApiOutput
       const since = Date.parse(String(query.since))
-      const all = (options.inbox ?? NOTIFICATIONS).filter((item) => Date.parse(item.updated_at) >= since).sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
+      // before is exclusive; since inclusive.
+      const before = query.before === undefined ? Number.POSITIVE_INFINITY : Date.parse(String(query.before))
+      const all = (options.inbox ?? NOTIFICATIONS).filter((item) => Date.parse(item.updated_at) >= since && Date.parse(item.updated_at) < before).sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
       return ok(all.slice((page - 1) * Number(query.per_page), page * Number(query.per_page)))
     }
     throw new Error(`the synthetic GitHub has no ${path}`)
@@ -320,9 +321,8 @@ describe("history GitHub no longer keeps", () => {
   }
   const positionN = (cursor: string) => ((JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as { p: Record<string, [number, string]> }).p["n"] as [number, string])[0]
 
-  it("keeps notifications three months: 89 days, the shortest, and restarts a day inside them", () => {
+  it("keeps notifications three months: 89 days, the shortest", () => {
     expect(NOTIFICATION_RETENTION_MS).toBe(89 * DAY)
-    expect(RESTART_MARGIN_MS).toBe(DAY)
   })
 
   it("answers gap expired, once, for a cursor whose notifications start before GitHub's three months, and reads them from inside the window", async () => {
@@ -333,9 +333,8 @@ describe("history GitHub no longer keeps", () => {
     const pages = await read(fake, later, { account: LOGIN, cursor, limit: 1 })
     expect(pages[0]!.gap).toEqual({ reason: "expired", since: iso(positionN(cursor)) })
     expect(pages[0]!.events.map((event) => event.external_id)).toEqual(["octo/app#30@2026-11-08T11:58:00.000Z"])
-    // The page's own cursor, read a minute later, starts inside the window: no second gap.
-    expect((await page(github(), later + 60_000, { account: LOGIN, cursor: pages[0]!.cursor, limit: 1 })).gap).toBeUndefined()
-    expect(fake.calls.find((call) => call.path === "/notifications")!.query["since"]).toBe(iso(later - NOTIFICATION_RETENTION_MS + RESTART_MARGIN_MS).replace(".000", ""))
+    // It reads notifications from the window's start.
+    expect(fake.calls.find((call) => call.path === "/notifications")!.query["since"]).toBe(iso(Math.floor((later - NOTIFICATION_RETENTION_MS) / 1000) * 1000).replace(".000", ""))
     for (const result of pages) expect(resultProblems(result)).toEqual([])
     // The same cursor read again is the same page, with the same gap.
     expect((await page(github(), later, { account: LOGIN, cursor, limit: 1 })).gap).toEqual(pages[0]!.gap)
@@ -363,20 +362,18 @@ describe("history GitHub no longer keeps", () => {
     }
   })
 
-  it("answers gap window-truncated when there are more notifications than one call reads, and lists every one after the oldest second it read", async () => {
-    // 520 releases, one a minute: one call reads the newest 500 (ten pages of 50), down to the 21st.
+  it("walks more notifications than one call reads oldest first, with no gap, counting them one alone at a time", async () => {
+    // 520 releases, one a minute.
     const inbox = Array.from({ length: 520 }, (_, index) => ({ ...NOTIFICATIONS[1]!, id: `r${index}`, updated_at: iso(Date.parse("2026-11-01T00:00:00Z") + index * 60_000) }))
     const fake = github({ inbox })
     const pages = await read(fake, NOW, { since: "2026-10-31", limit: PAGE.max })
-    expect(pages[0]!.gap).toEqual({ reason: "window-truncated", since: "2026-10-31T00:00:00.000Z" })
-    expect(pages.slice(1).every((result) => result.gap === undefined)).toBe(true)
+    expect(pages.every((result) => result.gap === undefined)).toBe(true)
     const listed = pages.flatMap((result) => result.events.map((event) => event.external_id)).filter((id) => id.startsWith("notification:"))
-    expect(listed).toEqual(inbox.slice(21).map((item) => `notification:${item.id}@${item.updated_at}`))
-    // Ten pages of 50, then the 501st alone, which says there are more.
-    expect(fake.calls.filter((call) => call.path === "/notifications" && call.query["since"] === "2026-10-31T00:00:00Z").map((call) => [call.query["page"], call.query["per_page"]])).toEqual([
-      ...Array.from({ length: 10 }, (_, index) => [index + 1, 50]),
-      [501, 1],
-    ])
+    expect(listed).toEqual(inbox.map((item) => `notification:${item.id}@${item.updated_at}`))
+    // The first call: the 501st alone, then doubling and halving to count 520, then the pages holding the oldest 500.
+    const first = fake.calls.filter((call) => call.path === "/notifications" && call.query["since"] === "2026-10-31T00:00:00Z")
+    expect(first[0]!.query).toMatchObject({ page: 501, per_page: 1, before: "2026-11-08T11:55:01Z" })
+    expect(first.filter((call) => call.query["per_page"] === 50).map((call) => call.query["page"])).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
   })
 
   it("lists nothing past the position while GitHub answers a search as incomplete, and the next call reads it again", async () => {
@@ -472,8 +469,8 @@ describe("events_list's inner reads", () => {
     { action: EVENTS_ACTION, resource: "*", effect: "allow" },
   ]
   const READS = ["/search/issues", "/search/commits", "/notifications"]
-  /** What one listing sends: the issue search, the pull request search, commits, notifications. */
-  const SENT = ["/search/issues", "/search/issues", "/search/commits", "/notifications"]
+  /** What one listing sends: the issue search, the pull request search, commits, then notifications: the 501st alone, then the first page. */
+  const SENT = ["/search/issues", "/search/issues", "/search/commits", "/notifications", "/notifications"]
 
   async function wired(session: readonly Rule[], agent: readonly Rule[] = BASE) {
     const fetched: string[] = []

@@ -18,8 +18,11 @@ const issue = (n: number, updated: string) => ({ number: n, title: `Item ${n}`, 
 const commit = (sha: string, date: string) => ({ sha, html_url: `https://github.com/octo/app/commit/${sha}`, repository: { full_name: "octo/app" }, author: { login: LOGIN }, commit: { message: `c ${sha}`, author: { name: "O", email: "o@example.test", date }, committer: { date } } })
 const note = (id: string, updated: string, type = "Release") => ({ id, reason: "subscribed", updated_at: updated, subject: { title: id, type }, repository: { full_name: "octo/app", html_url: "https://github.com/octo/app" } })
 
-function world(data: { issues?: ReturnType<typeof issue>[]; commits?: ReturnType<typeof commit>[]; inbox?: ReturnType<typeof note>[] }) {
+/** `shuffle`: ties reshuffled on every request. `deepest`: the furthest notification GitHub pages to (422 past it). */
+function world(data: { issues?: ReturnType<typeof issue>[]; commits?: ReturnType<typeof commit>[]; inbox?: ReturnType<typeof note>[]; shuffle?: boolean; deepest?: number }) {
   const calls: { path: string; query: Record<string, unknown> }[] = []
+  let seed = 7
+  const tie = () => (data.shuffle ? ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) - 0.5 : 0)
   const get = async (path: string, query: Record<string, string | number | boolean>) => {
     calls.push({ path, query })
     const per = Number(query.per_page)
@@ -32,16 +35,20 @@ function world(data: { issues?: ReturnType<typeof issue>[]; commits?: ReturnType
     }
     const answer = <T>(all: T[]) => ok({ total_count: all.length, incomplete_results: false, items: all.slice(0, SEARCH_CAP).slice((page - 1) * per, page * per) })
     if (path === "/search/issues") {
-      const all = q.includes("is:pull-request") ? [] : (data.issues ?? []).filter((i) => within(i.updated_at, "updated")).sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at) || b.number - a.number)
+      const pulls = q.includes("is:pull-request")
+      const all = (data.issues ?? []).filter((i) => within(i.updated_at, "updated") && i.html_url.includes("/pull/") === pulls).sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at) || tie() || b.number - a.number)
       return answer(all)
     }
     if (path === "/search/commits") {
-      const all = (data.commits ?? []).filter((c) => within(c.commit.committer.date, "committer-date")).sort((a, b) => Date.parse(a.commit.committer.date) - Date.parse(b.commit.committer.date) || (a.sha < b.sha ? 1 : -1))
+      const all = (data.commits ?? []).filter((c) => within(c.commit.committer.date, "committer-date")).sort((a, b) => Date.parse(a.commit.committer.date) - Date.parse(b.commit.committer.date) || tie() || (a.sha < b.sha ? 1 : -1))
       return answer(all)
     }
     if (path === "/notifications") {
+      if (page * per > (data.deepest ?? Number.POSITIVE_INFINITY)) return { ok: false, status: 422, data: { message: "Pagination is limited" }, truncated: false, trust: { githubContent: "untrusted" } } as ApiOutput
       const since = Date.parse(String(query.since))
-      const all = (data.inbox ?? []).filter((n) => Date.parse(n.updated_at) >= since).sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
+      // before is exclusive; since inclusive.
+      const before = query.before === undefined ? Number.POSITIVE_INFINITY : Date.parse(String(query.before))
+      const all = (data.inbox ?? []).filter((n) => Date.parse(n.updated_at) >= since && Date.parse(n.updated_at) < before).sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
       return ok(all.slice((page - 1) * per, page * per))
     }
     throw new Error(path)
@@ -51,13 +58,14 @@ function world(data: { issues?: ReturnType<typeof issue>[]; commits?: ReturnType
 type World = ReturnType<typeof world>
 const page = (w: World, now: number, input: Record<string, unknown>) => listEvents(w.get, w.identity, input, now) as Promise<EventsListResult>
 
-/** Every page of one read, checking each against the contract and the search budget. */
-async function read(w: World, now: number, input: Record<string, unknown>, most = 400) {
+/** Every page of one read, checking each against the contract and the search budget; page k is read at `clock(k)`, after `between(k)`. */
+async function read(w: World, now: number | ((k: number) => number), input: Record<string, unknown>, most = 400, between: (k: number) => void = () => {}) {
   const pages: EventsListResult[] = []
   let next = input
   for (let k = 0; k < most; k++) {
+    between(k)
     const before = w.calls.filter((call) => call.path.startsWith("/search/")).length
-    const result = await page(w, now, next)
+    const result = await page(w, typeof now === "number" ? now : now(k), next)
     expect(w.calls.filter((call) => call.path.startsWith("/search/")).length - before).toBeLessThanOrEqual(SEARCH_BUDGET)
     // Within the declared maxBytes, as the kit checks it.
     expect(resultProblems(result, Number(next["limit"] ?? 100), PAGE_BYTES)).toEqual([])
@@ -76,14 +84,44 @@ describe("a notification burst (review MEDIUM 1)", () => {
   const issues = Array.from({ length: 30 }, (_, k) => issue(k + 1, iso(Date.parse("2026-10-31T01:00:00Z") + k * 60_000)))
   const releases = (count: number) => Array.from({ length: count }, (_, k) => note(`${1000 + k}`, iso(Date.parse("2026-11-01T00:00:00Z") + k * 60_000)))
 
-  it("read at a small limit, answers its gap once, on the first page, and lists every notification after the oldest second it read", async () => {
+  it("read at a small limit, is walked oldest first, with no gap, listing every notification once", async () => {
     const inbox = releases(520)
     const pages = await read(world({ issues, inbox }), NOW, { since: "2026-10-31T00:00:00Z", limit: 5 })
-    expect(gaps(pages)).toEqual([{ reason: "window-truncated", since: "2026-10-31T00:00:00.000Z" }])
-    expect(pages[0]!.gap).toBeDefined()
-    // One call reads the newest 500, down to the 21st: the 20 before it and the 21st's own second are the gap.
-    expect(ids(pages).filter((id) => id.startsWith("notification:"))).toEqual(inbox.slice(21).map((n) => `notification:${n.id}@${n.updated_at}`))
+    expect(gaps(pages)).toEqual([])
+    expect(ids(pages).filter((id) => id.startsWith("notification:"))).toEqual(inbox.map((n) => `notification:${n.id}@${n.updated_at}`))
     expect(ids(pages).filter((id) => !id.startsWith("notification:"))).toHaveLength(30)
+  })
+
+  for (const backlog of [600, 2000]) {
+    it(`of ${backlog}, with new notifications arriving between pages, loses none: the read walks its backlog under its cut, and the next read lists the arrivals`, async () => {
+      const inbox = releases(backlog)
+      const w = world({ issues, inbox })
+      const clock = (k: number) => NOW + k * 60_000
+      const arrived: ReturnType<typeof note>[] = []
+      const arrive = (k: number) => {
+        if (k === 0) return
+        const fresh = note(`${90_000 + k}`, iso(clock(k) - 1000))
+        arrived.push(fresh)
+        inbox.push(fresh)
+      }
+      const pages = await read(w, clock, { since: "2026-10-31T00:00:00Z", limit: 40 }, 400, arrive)
+      expect(gaps(pages)).toEqual([])
+      expect(ids(pages).filter((id) => id.startsWith("notification:") && !id.startsWith("notification:9"))).toEqual(inbox.slice(0, backlog).map((n) => `notification:${n.id}@${n.updated_at}`))
+      // None that arrived during the read is listed by it: its cut holds.
+      expect(ids(pages).filter((id) => id.startsWith("notification:9"))).toEqual([])
+      expect(arrived.length).toBeGreaterThan(5)
+      const next = await read(w, clock(pages.length) + SETTLE_MS, { account: LOGIN, cursor: pages.at(-1)!.cursor, limit: 500 })
+      expect(gaps(next)).toEqual([])
+      expect(ids(next).filter((id) => id.startsWith("notification:9"))).toEqual(arrived.map((n) => `notification:${n.id}@${n.updated_at}`))
+    })
+  }
+
+  it("answers one honest gap where GitHub will not page as far as the backlog, and lists the newest it can read", async () => {
+    const inbox = releases(2000)
+    const pages = await read(world({ issues, inbox, deepest: 1000 }), NOW, { since: "2026-10-31T00:00:00Z", limit: 100 })
+    expect(gaps(pages)).toEqual([{ reason: "window-truncated", since: "2026-10-31T00:00:00.000Z" }])
+    const listed = ids(pages).filter((id) => id.startsWith("notification:"))
+    expect(listed).toEqual(inbox.slice(1501).map((n) => `notification:${n.id}@${n.updated_at}`))
   })
 
   it("of exactly 500 answers no gap, and lists them all", async () => {
@@ -130,7 +168,76 @@ describe("search results in one second (review MEDIUM 2)", () => {
   })
 })
 
+describe("two crowded seconds at once (review round 2, L-A)", () => {
+  const T = Date.parse("2026-11-02T00:00:00Z")
+  const pr = (n: number, at: string) => ({ ...issue(n, at), html_url: `https://github.com/octo/app/pull/${n}`, pull_request: { merged_at: null } })
+  for (const [inIssues, inCommits, apart] of [
+    [1000, 1000, 0],
+    [1000, 800, 0],
+    [900, 900, 0],
+    [1000, 1000, 3_600_000],
+    [1000, 1000, -3_600_000],
+  ] as const) {
+    it(`lists ${inIssues} issue changes and ${inCommits} commits in crowded seconds ${apart / 3_600_000} h apart, with no stall and no gap`, async () => {
+      const issues = [issue(1, iso(T - 86_400_000)), ...Array.from({ length: inIssues }, (_, k) => issue(1000 + k, iso(T))), issue(2, iso(T + 86_400_000))]
+      const commits = [commit("c0", iso(T - 86_400_000)), ...Array.from({ length: inCommits }, (_, k) => commit(`r${String(k).padStart(5, "0")}`, iso(T + apart))), commit("z1", iso(T + 86_400_000))]
+      const pages = await read(world({ issues, commits }), NOW, { since: "2026-10-31T00:00:00Z", limit: 100 })
+      expect(gaps(pages)).toEqual([])
+      expect(new Set(ids(pages)).size).toBe(inIssues + inCommits + 4)
+    })
+  }
+
+  it("lists 700 pull requests and 700 commits in one second alongside, each once", async () => {
+    const pulls = Array.from({ length: 700 }, (_, k) => pr(5000 + k, iso(T)))
+    const commits = Array.from({ length: 700 }, (_, k) => commit(`s${String(k).padStart(5, "0")}`, iso(T)))
+    const pages = await read(world({ issues: pulls, commits }), NOW, { since: "2026-10-31T00:00:00Z", limit: 100 })
+    expect(new Set(ids(pages)).size).toBe(1400)
+  })
+})
+
+describe("ties GitHub orders differently from one request to the next (review round 2, L-C)", () => {
+  it("never lists an event twice on a page, and the read ends", async () => {
+    const T = "2026-11-02T00:00:00Z"
+    const commits = Array.from({ length: 900 }, (_, k) => commit(`r${String(k).padStart(5, "0")}`, T))
+    const pages = await read(world({ commits, shuffle: true }), NOW, { since: "2026-10-31T00:00:00Z", limit: 100 })
+    expect(pages.every((result) => new Set(result.events.map((e) => e.external_id)).size === result.events.length)).toBe(true)
+  })
+
+  it("lists each of a second's results once where the second spans pages with later results after it", async () => {
+    const T = Date.parse("2026-11-02T00:00:00Z")
+    const commits = [
+      ...Array.from({ length: 150 }, (_, k) => commit(`t${String(k).padStart(5, "0")}`, iso(T))),
+      ...Array.from({ length: 100 }, (_, k) => commit(`u${String(k).padStart(5, "0")}`, iso(T + (k + 1) * 1000))),
+    ]
+    const pages = await read(world({ commits, shuffle: true }), NOW, { since: "2026-10-31T00:00:00Z", limit: 500 })
+    expect(pages.every((result) => new Set(result.events.map((e) => e.external_id)).size === result.events.length)).toBe(true)
+  })
+})
+
+describe("an item belongs to the stream that read it", () => {
+  it("moves the pull request stream past what its search answered, whatever the item says", async () => {
+    // Pull requests as the search answers them, without their pull_request field.
+    const issues = Array.from({ length: 30 }, (_, k) => ({ ...issue(7000 + k, iso(Date.parse("2026-11-02T00:00:00Z") + k * 1000)), html_url: `https://github.com/octo/app/pull/${7000 + k}` }))
+    const pages = await read(world({ issues }), NOW, { since: "2026-10-31T00:00:00Z", limit: 10 })
+    expect(ids(pages)).toHaveLength(30)
+  })
+})
+
 describe("one gap per read", () => {
+  for (const [label, step] of [["5 minutes", 5 * 60_000], ["20 hours", 20 * 3_600_000], ["2 days", 2 * 86_400_000]] as const) {
+    it(`answers one gap for a read from before GitHub's three months paged ${label} apart, and lists every notification GitHub keeps`, async () => {
+      const DAY = 86_400_000
+      const issues = Array.from({ length: 40 }, (_, k) => issue(k + 1, iso(NOW - 120 * DAY + k * 2 * DAY)))
+      // One 88.5 days old: GitHub still keeps it at the first page, and drops it half a day later.
+      const inbox = [note("0", iso(NOW - 88.5 * DAY)), note("1", iso(NOW - 60 * DAY)), note("2", iso(NOW - 10 * DAY))]
+      const pages = await read(world({ issues, inbox }), (k) => NOW + k * step, { since: iso(NOW - 120 * DAY), limit: 5 })
+      expect(gaps(pages)).toEqual([{ reason: "window-truncated", since: iso(NOW - 120 * DAY) }])
+      const kept = step < 86_400_000 / 4 ? inbox : inbox.slice(1)
+      expect(ids(pages).filter((id) => id.startsWith("notification:"))).toEqual(kept.map((n) => `notification:${n.id}@${n.updated_at}`))
+      expect(ids(pages).filter((id) => !id.startsWith("notification:"))).toHaveLength(40)
+    })
+  }
+
   it("answers one gap when a read finds two holes, notifications GitHub no longer keeps and then a 5,000-result second, and the next read answers its own", async () => {
     const T = "2026-11-02T00:00:00Z"
     const burst = Array.from({ length: 5000 }, (_, k) => commit(`r${String(k).padStart(5, "0")}`, T))
