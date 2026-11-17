@@ -2,6 +2,30 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- The source contract is `@we-the-rebel-alliance/source-contract` v0.2.0, pinned as
+  `github:we-the-rebel-alliance/source-contract#v0.2.0` (commit `88bdc1e`) and bundled into `dist/index.js`, still with
+  no runtime dependency. `github.activity`'s declaration, its events and its probe are unchanged: the plugin declares and
+  sends none of v0.2.0's new keys (`permission.identityRules`, `removals[]`, `owner.verified`), which a consumer still
+  on v0.1.x refuses. It will declare `permission.identityRules` (`github_probe` on `GET /user`) once Memory and Jelly
+  read v0.2.0.
+- The conformance report is complete and ok. The kit's expired-cursor check is not applicable (`noExpiry`): the cursor
+  holds a time in each stream, and GitHub reads every stream from any time, so a cursor never expires. Its
+  `failed-holds-cursor` check stays not applicable (`atomicPages`): each GitHub request answers a whole page, and a
+  request that fails fails the whole call. Each reason is in the report; every other check runs.
+- `npm run conformance` runs the kit (`bun test ./test/conformance`, as `test:conformance`), as the release kit
+  requires of a plugin that declares sources.
+- The release kit is revision 4.1 (`1f452e5`): a plugin that declares sources releases with its conformance report
+  (`conformance-report.json`, a Release asset listed in `SHA256SUMS`), and the release checks that the staged tarball
+  is the one it packed. `docs/jelly.md` carries Jelly's shared block, and its sentences on declared `allow` are
+  reworded: a declared `allow` changes nothing; each tool follows the access choice and its `readOnly`.
+- CI can be run by hand on any branch (`workflow_dispatch`), with the full matrix, macOS included.
+- The host range is unchanged: `>=2.2.3 <2.4.0`, tested on OpenCode 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7 and 2.3.0
+  (`TESTED_HOSTS`).
+
 ## [0.0.5] - 2026-11-15
 
 ### Changed

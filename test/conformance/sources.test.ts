@@ -33,8 +33,12 @@ const NOW = Date.parse("2026-11-08T12:00:00Z")
 const SINCE = "2026-11-01T00:00:00Z"
 const LOGIN: string = GITHUB["user"].login
 const ACCOUNT = LOGIN.toLowerCase()
-/** Each read is one GitHub page in one call, so no single event can fail on its own. */
-const ATOMIC = "GitHub answers each search and notifications read as one page in one call, so no single event can fail on its own"
+/** Each GitHub request answers a whole page, and one that fails fails the whole listing: no single event can fail on its own. */
+const ATOMIC = "GitHub answers each search and notifications request as a whole page in one call, and a request that fails fails the whole events_list call, so no single event can fail on its own"
+/** The cursor holds a time in each stream, and GitHub reads every stream from any time: a cursor never expires. */
+const NO_EXPIRY = "the cursor holds a time in each stream, and GitHub's searches and notifications are read from any time, so a cursor never names a position GitHub can lose and events_list never answers CURSOR_EXPIRED"
+/** The source contract the kit comes from, as installed: the report names it. */
+const CONTRACT = JSON.parse(readFileSync(join(root, "node_modules/@we-the-rebel-alliance/source-contract/package.json"), "utf8")) as { name: string; version: string }
 const TOKEN = "gho_" + "t".repeat(36)
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } })
@@ -164,24 +168,27 @@ describe("the source contract's conformance kit", () => {
       sources,
       describe: { id: TOOLS_RPC_ID },
       atomicPages: { reason: ATOMIC },
+      noExpiry: { reason: NO_EXPIRY },
     })
     reports.push(report)
     expect(report.problems).toEqual([])
-    // GitHub's cursor holds a time in each stream, and GitHub keeps what it searches, so a cursor never loses history:
-    // the plugin never answers CURSOR_EXPIRED, and the kit's gap check cannot run (source-contract#30, item 5). The
-    // report stays incomplete on that one check.
-    expect(report.checks.filter((check) => !check.ran && !check.notApplicable).map((check) => check.name)).toEqual(["gap-and-cursor-expired"])
+    // Every check ran or is not applicable: the report is complete.
+    expect(report.checks.filter((check) => !check.ran && !check.notApplicable).map((check) => check.name)).toEqual([])
+    // Not applicable for the reasons this source gives, and only those two.
+    expect(report.checks.find((check) => check.name === "failed-holds-cursor")).toMatchObject({ notApplicable: true, reason: ATOMIC })
+    expect(report.checks.find((check) => check.name === "gap-and-cursor-expired")).toMatchObject({ notApplicable: true, reason: NO_EXPIRY })
+    expect(report.ok).toBe(true)
   })
 
   test("writes the report a release attaches", () => {
     expect(reports.map((report) => report.source)).toEqual(["github.activity"])
     const installed = readInstalledDescriptor(root, { version: pkg.version })
     const report = {
-      contract: "@we-the-rebel-alliance/source-contract@0.1.0",
+      contract: `${CONTRACT.name}@${CONTRACT.version}`,
       plugin: PACKAGE,
       version: pkg.version,
       descriptorHash: installed.ok ? installed.value.hash : null,
-      ok: reports.every((entry) => entry.ok),
+      ok: reports.length > 0 && reports.every((entry) => entry.ok),
       sources: reports,
     }
     mkdirSync(join(root, "reports"), { recursive: true })

@@ -508,7 +508,7 @@ still stores its token.
   `host` option (GitHub Enterprise Server) the events link to your server, which a consumer that checks `urlHosts`
   does not render.
 - **A GitHub cursor never expires.** It holds a time in each stream, so the plugin never answers `CURSOR_EXPIRED`, and
-  the conformance report stays incomplete on the kit's expired-cursor check. The kit runs on GitHub answers that are
+  the conformance kit's expired-cursor check is not applicable, with that reason in the report. The kit runs on GitHub answers that are
   invented, modelled on GitHub's REST docs, and not live-verified.
 - Updates are not automatic for a Git install, and `opencode plugin update` and `opencode plugin check` do not work on one: to move to a newer release, remove the old entry and add the new tag.
 

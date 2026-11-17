@@ -628,7 +628,7 @@ see [Scripting](scripting.md#api).
 ## Events list
 
 `github_events_list` (`tools.github.events_list` in Code Mode, and the tools RPC method `events_list`) is GitHub's
-source under the shared source contract, `@we-the-rebel-alliance/source-contract` v0.1.0 (see [Sources](#sources)). It
+source under the shared source contract, `@we-the-rebel-alliance/source-contract` v0.2.0 (see [Sources](#sources)). It
 lists what the signed-in user was involved in since a cursor, as normalised events, oldest first. It only reads, never
 asks and calls no model, so Memory's collector can run it unattended.
 
@@ -706,9 +706,14 @@ consumer (Memory, jelly, Artifacts) reads it from the installed package:
 
 The grants are stated verbatim (`rules`) rather than as `operations`, because each read is the tool's own action on a
 `GET /path`, which an operation name cannot express. For the same reason the probe's `GET /user` cannot be declared as
-a `permission.identity` operation: the probe asserts only `github_probe`, on `*` and on `GET /user`. `npm run check`
-runs the contract's conformance kit over the source, on recorded answers with no GitHub call, and writes
-`reports/conformance-report.json` for a release to attach.
+a `permission.identity` operation: the probe asserts only `github_probe`, on `*` and on `GET /user`. Contract v0.2.0's
+`permission.identityRules` can state that grant; the declaration adds it once the consumers (Memory, Jelly) read
+v0.2.0, because a consumer on v0.1.x refuses the key. `npm run conformance` (and `npm run check`) runs the contract's
+conformance kit over the source, on recorded answers with no GitHub call, and writes
+`reports/conformance-report.json` for a release to attach. Every check runs, except two that cannot apply, each with
+its reason in the report: `failed-holds-cursor`, because each GitHub request answers a whole page and a request that
+fails fails the whole call, so no single event can fail on its own; and `gap-and-cursor-expired`, because the cursor
+holds a time in each stream and never expires.
 
 ## Repository scope
 
