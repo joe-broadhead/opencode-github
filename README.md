@@ -498,7 +498,7 @@ still stores its token.
 - **GitHub's rate limits and error text are GitHub's.** Errors from OpenCode and GitHub pass through unchanged.
 - **`events_list` reads GitHub's search, which has its own limits.** GitHub allows 30 search requests a minute for a
   signed-in user, and at most 1,000 results for one query ([REST API endpoints for search](https://docs.github.com/en/rest/search/search#rate-limit));
-  one `events_list` call makes three searches (issues, pull requests, commits) and at most 9 pages of each, 27 requests, beside GitHub's REST limit of 5,000 requests an hour for a user
+  one `events_list` call makes three searches (issues, pull requests, commits) and at most 30 search requests (6 pages of 100 each, and one second read whole when it holds every result read), beside GitHub's REST limit of 5,000 requests an hour for a user
   ([rate limits for the REST API](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)).
   A call over the limit fails with GitHub's answer as `UNAVAILABLE`: call again later with the same cursor.
 - **Notifications need a classic sign-in.** A fine-grained token or a GitHub App cannot read `/notifications`
@@ -509,7 +509,8 @@ still stores its token.
   does not render.
 - **GitHub keeps notifications for three months.** A read whose notifications start before that, or that finds more
   than one call reads, answers `gap` once (`expired` from a cursor, `window-truncated` from `since`) and reads on from
-  inside the window. A notification marked Done before `events_list` reads it may not be listed, and nothing tells the
+  inside the window; so does a second with more than 1,000 search results, which the search moves past. A notification
+  GitHub delivers more than 6 hours late is not listed. A notification marked Done before `events_list` reads it may not be listed, and nothing tells the
   plugin it was there. The conformance kit runs on GitHub answers that are invented, modelled on GitHub's REST docs,
   and not live-verified.
 - Updates are not automatic for a Git install, and `opencode plugin update` and `opencode plugin check` do not work on one: to move to a newer release, remove the old entry and add the new tag.

@@ -100,7 +100,12 @@ function github(options: { perPage?: number; notifications?: "ok" | "forbidden";
     calls.push({ path, query })
     const per = options.perPage ?? Number(query.per_page)
     const page = Number(query.page ?? 1)
-    const qualifier = (name: string) => new RegExp(`${name}:>=(\\S+)`).exec(String(query.q))?.[1]
+    /** A qualifier's range, `>=from` or `from..to`, as times; to is the end of its second. */
+    const range = (name: string) => {
+      const match = new RegExp(`${name}:(?:>=(\\S+)|(\\S+)\\.\\.(\\S+))`).exec(String(query.q))!
+      return match[1] !== undefined ? { from: Date.parse(match[1]), to: Number.POSITIVE_INFINITY } : { from: Date.parse(match[2]!), to: Date.parse(match[3]!) }
+    }
+    const within = (at: string, name: string) => Date.parse(at) >= range(name).from && Date.parse(at) <= range(name).to
     const pageOf = <T>(all: T[]) => all.slice((page - 1) * per, page * per)
     if (path === "/user") return ok({ login: options.login ?? LOGIN })
     if (path === "/search/issues") {
@@ -108,15 +113,13 @@ function github(options: { perPage?: number; notifications?: "ok" | "forbidden";
       // As GitHub answers a GitHub App user token: a search for issues and pull requests together is refused.
       const kind = /(?:^|\s)is:(issue|pull-request)(?:\s|$)/.exec(String(query.q))?.[1]
       if (kind === undefined) return { ok: false, status: 422, data: { message: "Validation Failed" }, truncated: false, trust: { githubContent: "untrusted" } } as ApiOutput
-      const from = Date.parse(qualifier("updated")!)
-      const all = ISSUES.filter((item) => Date.parse(item.updated_at) >= from && ("pull_request" in item) === (kind === "pull-request")).sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at) || b.number - a.number)
+      const all = ISSUES.filter((item) => within(item.updated_at, "updated") && ("pull_request" in item) === (kind === "pull-request")).sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at) || b.number - a.number)
       // A search that timed out answers what it found so far: here, nothing past its first result.
       if (incomplete > 0) return incomplete--, ok({ total_count: all.length, incomplete_results: true, items: all.slice(0, 1) })
       return ok({ total_count: all.length, incomplete_results: false, items: pageOf(all) })
     }
     if (path === "/search/commits") {
-      const from = Date.parse(qualifier("committer-date")!)
-      const all = COMMITS.filter((item) => Date.parse(item.commit.committer.date) >= from)
+      const all = COMMITS.filter((item) => within(item.commit.committer.date, "committer-date"))
       return ok({ total_count: all.length, incomplete_results: false, items: pageOf(all) })
     }
     if (path === "/notifications") {
@@ -211,8 +214,8 @@ describe("events_list", () => {
     const fake = github()
     await list(fake)({ since: "2026-10-01T09:00:00.500Z" })
     expect(fake.calls.filter((call) => call.path === "/search/issues").map((call) => call.query)).toEqual([
-      { q: `is:issue involves:${LOGIN} updated:>=2026-10-01T09:00:00Z`, sort: "updated", order: "asc", per_page: 50, page: 1 },
-      { q: `is:pull-request involves:${LOGIN} updated:>=2026-10-01T09:00:00Z`, sort: "updated", order: "asc", per_page: 50, page: 1 },
+      { q: `is:issue involves:${LOGIN} updated:>=2026-10-01T09:00:00Z`, sort: "updated", order: "asc", per_page: 100, page: 1 },
+      { q: `is:pull-request involves:${LOGIN} updated:>=2026-10-01T09:00:00Z`, sort: "updated", order: "asc", per_page: 100, page: 1 },
     ])
     expect(fake.calls.find((call) => call.path === "/search/commits")!.query).toMatchObject({ q: `author:${LOGIN} committer-date:>=2026-10-01T09:00:00Z`, sort: "committer-date", order: "asc" })
     expect(fake.calls.find((call) => call.path === "/notifications")!.query).toMatchObject({ all: true, participating: true, since: "2026-10-01T09:00:00Z" })
@@ -369,7 +372,11 @@ describe("history GitHub no longer keeps", () => {
     expect(pages.slice(1).every((result) => result.gap === undefined)).toBe(true)
     const listed = pages.flatMap((result) => result.events.map((event) => event.external_id)).filter((id) => id.startsWith("notification:"))
     expect(listed).toEqual(inbox.slice(21).map((item) => `notification:${item.id}@${item.updated_at}`))
-    expect(fake.calls.filter((call) => call.path === "/notifications" && call.query["since"] === "2026-10-31T00:00:00Z")).toHaveLength(10)
+    // Ten pages of 50, then the 501st alone, which says there are more.
+    expect(fake.calls.filter((call) => call.path === "/notifications" && call.query["since"] === "2026-10-31T00:00:00Z").map((call) => [call.query["page"], call.query["per_page"]])).toEqual([
+      ...Array.from({ length: 10 }, (_, index) => [index + 1, 50]),
+      [501, 1],
+    ])
   })
 
   it("lists nothing past the position while GitHub answers a search as incomplete, and the next call reads it again", async () => {

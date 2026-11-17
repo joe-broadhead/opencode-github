@@ -28,6 +28,18 @@ All notable changes to this project are documented here. The format follows [Kee
   least every three months never answers a gap. A sign-in that may not read notifications answers none.
 - A search GitHub answers as incomplete (it timed out) lists nothing past that stream's position, and the next call
   reads it again; before, the cursor could move past results it left out.
+- A read answers its gap once: while the read goes on, the cursor carries that it did, and no later page answers
+  another. A notifications position after the oldest second a capped read reached reads from the next second, so a
+  burst read at a small `limit` no longer finds the same notifications again; exactly 500 notifications answer no gap
+  (the 501st, asked alone, says whether there are more).
+- More search results in one second than one read holds (a rebase-merge gives hundreds of commits one committer date)
+  no longer stall every stream with no gap or error. That second is read whole by itself, up to the 1,000 results GitHub
+  answers, in the plugin's own order by id, so the position walks it across calls and then moves past it; a second with
+  more than 1,000 answers `gap` (`window-truncated`) and the search moves past it. Searches read pages of 100 (6 a call
+  from their position), and a call makes at most 30 search requests, GitHub's limit a minute.
+- A notification GitHub delivers late is listed: each read looks again at the 6 hours before the notifications'
+  position, and the cursor remembers the last 16 notifications it listed there, so none is listed twice. Before, one
+  delivered more than 5 minutes late, behind the position, was never listed.
 - `npm run conformance` runs the kit (`bun test ./test/conformance`, as `test:conformance`), as the release kit
   requires of a plugin that declares sources.
 - The release kit is revision 4.1 (`1f452e5`): a plugin that declares sources releases with its conformance report

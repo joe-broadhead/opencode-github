@@ -675,22 +675,31 @@ is refused before it is sent:
 
 The cursor holds a position in each stream. The result merges them by time, and lists only what no stream can still put
 before it. An event is listed once it is 5 minutes old, because GitHub's search lags a little behind a change. GitHub's
-search returns at most 1,000 results for one query, and allows 30 search requests a minute: each search reads at most 9
-pages of 50 a call, so a call's three searches make at most 27; the cursor moves past what was listed, so the next call's query
-starts later. A search GitHub answers as incomplete (it timed out) lists nothing past that stream's position, and the
+search returns at most 1,000 results for one query, and allows 30 search requests a minute: each search reads at most 6
+pages of 100 a call from its position, and the cursor moves past what was listed, so the next call's query starts later.
+When every result a search read shares one second (a rebase-merge gives hundreds of commits one committer date), that
+second is read whole by itself, up to GitHub's 1,000 results, and listed in the plugin's own order (by id), so the
+position walks through it across calls and then moves past it. A call makes at most 30 search requests. A search GitHub answers as incomplete (it timed out) lists nothing past that stream's position, and the
 next call reads it again, so nothing it left out is skipped. An event whose title or text holds a secret, such as a
 password in a URL, is never listed: it is in the page's `refused[]` with `reason: "secret"`, and the cursor moves past it.
+
+**A notification GitHub delivers late.** Each read looks again at the 6 hours before the notifications' position, and
+lists a notification stamped there that it has not listed yet; the cursor remembers the last 16 it listed in that time
+(the lookback starts after older ones), so none is listed twice. One delivered more than 6 hours late is not listed.
 
 **History GitHub no longer keeps.** GitHub keeps inbox notifications for three months, unless they are saved
 ([notification retention](https://docs.github.com/en/subscriptions-and-notifications/get-started/configuring-notifications)).
 A read whose notifications start before that (taken as 89 days, the shortest three months) may have lost some: it
 answers `gap`, `{ reason: "expired", since }` from a cursor or `{ reason: "window-truncated", since }` from `since`,
 where `since` is where the notifications started, and reads them from a day inside the window. So does a read with more
-notifications than one call reads (10 pages of 50, newest first): `window-truncated`, and it lists every notification
-after the oldest second it read. A gap is answered once, on that page; the next page of the read carries none, and
-reading again at the same cursor answers the same gap. A complete read moves the notifications' position up to the
+notifications than one call reads (10 pages of 50, newest first, then the 501st alone to tell whether there are more):
+`window-truncated`, and it lists every notification after the oldest second it read. So does a second with more search
+results than GitHub answers for one query (1,000): `window-truncated` from that second, and the search moves past it. A
+read answers its gap once, on the page where it restarts: while the read goes on (`more: true`), the cursor carries that
+it was answered and no later page answers another; reading again at the same cursor answers the same gap. A complete read moves the notifications' position up to the
 settle time, so an inbox read at least every three months never answers a gap. A sign-in that may not read
 notifications has none to lose, and answers no gap. The issue, pull request and commit searches read any time range.
+An item deleted on GitHub before a read finds it is never listed; that is not a gap.
 
 **`probe`** (the tools RPC method, action `github_probe`, allowed by the default rules at every `access`) answers who
 is signed in, `{ source: "github", account, owner, trust }`, with the same account and owner as every page, and nothing
