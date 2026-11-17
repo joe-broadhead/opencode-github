@@ -4,12 +4,15 @@ on:
   push:
     branches: [master]
   pull_request:
+  # A run by hand on any branch: the full matrix, macOS included.
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # The event is part of the group, so a run by hand on master never cancels the push run a release stands on.
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
