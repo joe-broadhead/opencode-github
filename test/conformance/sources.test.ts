@@ -33,8 +33,12 @@ const NOW = Date.parse("2026-11-08T12:00:00Z")
 const SINCE = "2026-11-01T00:00:00Z"
 const LOGIN: string = GITHUB["user"].login
 const ACCOUNT = LOGIN.toLowerCase()
-/** Each read is one GitHub page in one call, so no single event can fail on its own. */
-const ATOMIC = "GitHub answers each search and notifications read as one page in one call, so no single event can fail on its own"
+/** Each GitHub request answers a whole page, and one that fails fails the whole listing: no single event can fail on its own. */
+const ATOMIC = "GitHub answers each search and notifications request as a whole page in one call, and a request that fails fails the whole events_list call, so no single event can fail on its own"
+/** Before GitHub's three months of notifications: a cursor whose notifications start here has lost some. */
+const OUTSIDE = Date.parse("2026-07-01T00:00:00Z")
+/** The source contract the kit comes from, as installed: the report names it. */
+const CONTRACT = JSON.parse(readFileSync(join(root, "node_modules/@we-the-rebel-alliance/source-contract/package.json"), "utf8")) as { name: string; version: string }
 const TOKEN = "gho_" + "t".repeat(36)
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } })
@@ -121,11 +125,16 @@ async function cases(): Promise<PageCase[]> {
   const done = (await list({ source: SOURCE, account: ACCOUNT, cursor: first, limit: 500 }))["cursor"] as string
   const state = JSON.parse(Buffer.from(first, "base64url").toString("utf8")) as Record<string, unknown>
   const { v: _v, s: _s, b: _b, ...positions } = state
+  const streams = positions["p"] as Record<string, [number, string]>
+  const expired = encodeBoundCursor({ plugin: NAMESPACE, source: SOURCE, account: ACCOUNT }, { ...positions, p: { ...streams, n: [OUTSIDE, ""] } })
   return [
     { name: "a first listing, one commit refused for a secret", input: { source: SOURCE, account: ACCOUNT, since: SINCE }, expect: "page" },
     { name: "two at a time", input: { source: SOURCE, account: ACCOUNT, since: SINCE, limit: 2 }, expect: "page" },
     { name: "what came after the first two", input: { source: SOURCE, account: ACCOUNT, cursor: first }, expect: "page" },
     { name: "nothing new since the last listing", input: { source: SOURCE, account: ACCOUNT, cursor: done }, expect: "empty" },
+    // GitHub keeps notifications three months: a cursor whose notifications start before that answers gap expired, once.
+    { name: "a cursor whose notifications GitHub no longer keeps", input: { source: SOURCE, account: ACCOUNT, cursor: expired, limit: 1 }, expect: "expired" },
+    { name: "a since before GitHub's three months of notifications", input: { source: SOURCE, account: ACCOUNT, since: new Date(OUTSIDE).toISOString(), limit: 1 }, expect: "page" },
     { name: "a cursor without the account it reads", input: { source: SOURCE, cursor: first }, expect: { refuses: "INPUT_INVALID" } },
     { name: "a cursor passed for another account", input: { source: SOURCE, account: "someone-else", cursor: first }, expect: { refuses: "ACCOUNT_MISMATCH" } },
     { name: "another account than the signed-in one", input: { source: SOURCE, account: "someone-else", since: SINCE }, expect: { refuses: "ACCOUNT_MISMATCH" } },
@@ -167,21 +176,26 @@ describe("the source contract's conformance kit", () => {
     })
     reports.push(report)
     expect(report.problems).toEqual([])
-    // GitHub's cursor holds a time in each stream, and GitHub keeps what it searches, so a cursor never loses history:
-    // the plugin never answers CURSOR_EXPIRED, and the kit's gap check cannot run (source-contract#30, item 5). The
-    // report stays incomplete on that one check.
-    expect(report.checks.filter((check) => !check.ran && !check.notApplicable).map((check) => check.name)).toEqual(["gap-and-cursor-expired"])
+    // Every check ran or is not applicable: the report is complete.
+    expect(report.checks.filter((check) => !check.ran && !check.notApplicable).map((check) => check.name)).toEqual([])
+    // failed[] cannot happen, for the reason this source gives; the gap checks run on the expired cursor and the old since.
+    expect(report.checks.find((check) => check.name === "failed-holds-cursor")).toMatchObject({ notApplicable: true, reason: ATOMIC })
+    expect(report.checks.filter((check) => check.name === "gap-and-cursor-expired" || check.name === "gap-once-per-read").map((check) => [check.name, check.ran])).toEqual([
+      ["gap-and-cursor-expired", true],
+      ["gap-once-per-read", true],
+    ])
+    expect(report.ok).toBe(true)
   })
 
   test("writes the report a release attaches", () => {
     expect(reports.map((report) => report.source)).toEqual(["github.activity"])
     const installed = readInstalledDescriptor(root, { version: pkg.version })
     const report = {
-      contract: "@we-the-rebel-alliance/source-contract@0.1.0",
+      contract: `${CONTRACT.name}@${CONTRACT.version}`,
       plugin: PACKAGE,
       version: pkg.version,
       descriptorHash: installed.ok ? installed.value.hash : null,
-      ok: reports.every((entry) => entry.ok),
+      ok: reports.length > 0 && reports.every((entry) => entry.ok),
       sources: reports,
     }
     mkdirSync(join(root, "reports"), { recursive: true })

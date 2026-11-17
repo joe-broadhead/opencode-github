@@ -17,6 +17,7 @@ import {
   EVENTS_INPUT,
   EVENTS_READS,
   NAMESPACE,
+  NOTIFICATION_RETENTION_MS,
   PAGE_BYTES,
   PROBE_ACTION,
   PROBE_READS,
@@ -90,13 +91,20 @@ const EXPECTED = [
 
 const ok = (data: unknown): ApiOutput => ({ ok: true, status: 200, data, truncated: false, trust: { githubContent: "untrusted" } })
 
-function github(options: { perPage?: number; notifications?: "ok" | "forbidden"; login?: string } = {}) {
+function github(options: { perPage?: number; notifications?: "ok" | "forbidden"; login?: string; inbox?: typeof NOTIFICATIONS; incomplete?: number } = {}) {
   const calls: { path: string; query: Record<string, unknown> }[] = []
+  /** How many issue searches GitHub still answers as timed out, with incomplete_results. */
+  let incomplete = options.incomplete ?? 0
   const get = async (path: string, query: Record<string, string | number | boolean>) => {
     calls.push({ path, query })
     const per = options.perPage ?? Number(query.per_page)
     const page = Number(query.page ?? 1)
-    const qualifier = (name: string) => new RegExp(`${name}:>=(\\S+)`).exec(String(query.q))?.[1]
+    /** A qualifier's range, `>=from` or `from..to`, as times; to is the end of its second. */
+    const range = (name: string) => {
+      const match = new RegExp(`${name}:(?:>=(\\S+)|(\\S+)\\.\\.(\\S+))`).exec(String(query.q))!
+      return match[1] !== undefined ? { from: Date.parse(match[1]), to: Number.POSITIVE_INFINITY } : { from: Date.parse(match[2]!), to: Date.parse(match[3]!) }
+    }
+    const within = (at: string, name: string) => Date.parse(at) >= range(name).from && Date.parse(at) <= range(name).to
     const pageOf = <T>(all: T[]) => all.slice((page - 1) * per, page * per)
     if (path === "/user") return ok({ login: options.login ?? LOGIN })
     if (path === "/search/issues") {
@@ -104,19 +112,21 @@ function github(options: { perPage?: number; notifications?: "ok" | "forbidden";
       // As GitHub answers a GitHub App user token: a search for issues and pull requests together is refused.
       const kind = /(?:^|\s)is:(issue|pull-request)(?:\s|$)/.exec(String(query.q))?.[1]
       if (kind === undefined) return { ok: false, status: 422, data: { message: "Validation Failed" }, truncated: false, trust: { githubContent: "untrusted" } } as ApiOutput
-      const from = Date.parse(qualifier("updated")!)
-      const all = ISSUES.filter((item) => Date.parse(item.updated_at) >= from && ("pull_request" in item) === (kind === "pull-request")).sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at) || b.number - a.number)
+      const all = ISSUES.filter((item) => within(item.updated_at, "updated") && ("pull_request" in item) === (kind === "pull-request")).sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at) || b.number - a.number)
+      // A search that timed out answers what it found so far: here, nothing past its first result.
+      if (incomplete > 0) return incomplete--, ok({ total_count: all.length, incomplete_results: true, items: all.slice(0, 1) })
       return ok({ total_count: all.length, incomplete_results: false, items: pageOf(all) })
     }
     if (path === "/search/commits") {
-      const from = Date.parse(qualifier("committer-date")!)
-      const all = COMMITS.filter((item) => Date.parse(item.commit.committer.date) >= from)
+      const all = COMMITS.filter((item) => within(item.commit.committer.date, "committer-date"))
       return ok({ total_count: all.length, incomplete_results: false, items: pageOf(all) })
     }
     if (path === "/notifications") {
       if (options.notifications === "forbidden") return { ok: false, status: 403, data: { message: "Resource not accessible" }, truncated: false, trust: { githubContent: "untrusted" } } as ApiOutput
       const since = Date.parse(String(query.since))
-      const all = NOTIFICATIONS.filter((item) => Date.parse(item.updated_at) >= since).reverse()
+      // before is exclusive; since inclusive.
+      const before = query.before === undefined ? Number.POSITIVE_INFINITY : Date.parse(String(query.before))
+      const all = (options.inbox ?? NOTIFICATIONS).filter((item) => Date.parse(item.updated_at) >= since && Date.parse(item.updated_at) < before).sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
       return ok(all.slice((page - 1) * Number(query.per_page), page * Number(query.per_page)))
     }
     throw new Error(`the synthetic GitHub has no ${path}`)
@@ -205,8 +215,8 @@ describe("events_list", () => {
     const fake = github()
     await list(fake)({ since: "2026-10-01T09:00:00.500Z" })
     expect(fake.calls.filter((call) => call.path === "/search/issues").map((call) => call.query)).toEqual([
-      { q: `is:issue involves:${LOGIN} updated:>=2026-10-01T09:00:00Z`, sort: "updated", order: "asc", per_page: 50, page: 1 },
-      { q: `is:pull-request involves:${LOGIN} updated:>=2026-10-01T09:00:00Z`, sort: "updated", order: "asc", per_page: 50, page: 1 },
+      { q: `is:issue involves:${LOGIN} updated:>=2026-10-01T09:00:00Z`, sort: "updated", order: "asc", per_page: 100, page: 1 },
+      { q: `is:pull-request involves:${LOGIN} updated:>=2026-10-01T09:00:00Z`, sort: "updated", order: "asc", per_page: 100, page: 1 },
     ])
     expect(fake.calls.find((call) => call.path === "/search/commits")!.query).toMatchObject({ q: `author:${LOGIN} committer-date:>=2026-10-01T09:00:00Z`, sort: "committer-date", order: "asc" })
     expect(fake.calls.find((call) => call.path === "/notifications")!.query).toMatchObject({ all: true, participating: true, since: "2026-10-01T09:00:00Z" })
@@ -299,6 +309,84 @@ describe("events_list", () => {
   })
 })
 
+describe("history GitHub no longer keeps", () => {
+  const DAY = 24 * 60 * 60_000
+  const iso = (at: number) => new Date(at).toISOString()
+  const page = (fake: ReturnType<typeof github>, now: number, input: Record<string, unknown>) => listEvents(fake.get, fake.identity, input, now) as Promise<EventsListResult>
+  /** Every page of one read, from `input`, at `now`. */
+  async function read(fake: ReturnType<typeof github>, now: number, input: Record<string, unknown>) {
+    const pages = [await page(fake, now, input)]
+    while (pages.at(-1)!.more) pages.push(await page(fake, now, { account: LOGIN, cursor: pages.at(-1)!.cursor, limit: input["limit"] }))
+    return pages
+  }
+  const positionN = (cursor: string) => ((JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as { p: Record<string, [number, string]> }).p["n"] as [number, string])[0]
+
+  it("keeps notifications three months: 89 days, the shortest", () => {
+    expect(NOTIFICATION_RETENTION_MS).toBe(89 * DAY)
+  })
+
+  it("answers gap expired, once, for a cursor whose notifications start before GitHub's three months, and reads them from inside the window", async () => {
+    const caught = await read(github(), NOW, { since: SINCE, limit: PAGE.max })
+    const cursor = caught.at(-1)!.cursor
+    const later = NOW + 100 * DAY
+    const fake = github()
+    const pages = await read(fake, later, { account: LOGIN, cursor, limit: 1 })
+    expect(pages[0]!.gap).toEqual({ reason: "expired", since: iso(positionN(cursor)) })
+    expect(pages[0]!.events.map((event) => event.external_id)).toEqual(["octo/app#30@2026-11-08T11:58:00.000Z"])
+    // It reads notifications from the window's start.
+    expect(fake.calls.find((call) => call.path === "/notifications")!.query["since"]).toBe(iso(Math.floor((later - NOTIFICATION_RETENTION_MS) / 1000) * 1000).replace(".000", ""))
+    for (const result of pages) expect(resultProblems(result)).toEqual([])
+    // The same cursor read again is the same page, with the same gap.
+    expect((await page(github(), later, { account: LOGIN, cursor, limit: 1 })).gap).toEqual(pages[0]!.gap)
+  })
+
+  it("answers gap window-truncated on the first page of a read from a since older than three months, and on no later page", async () => {
+    const pages = await read(github(), NOW, { since: "2026-07-01", limit: 2 })
+    expect(pages[0]!.gap).toEqual({ reason: "window-truncated", since: "2026-07-01T00:00:00.000Z" })
+    expect(pages.slice(1).every((result) => result.gap === undefined)).toBe(true)
+    expect(pages.flatMap((result) => result.events.map((event) => event.external_id))).toEqual(EXPECTED)
+  })
+
+  it("answers no gap where the sign-in may not read notifications, as nothing was there to lose", async () => {
+    const pages = await read(github({ notifications: "forbidden" }), NOW, { since: "2026-07-01", limit: 2 })
+    expect(pages.every((result) => result.gap === undefined)).toBe(true)
+  })
+
+  it("moves a quiet inbox's position with every complete read, so reading it every month answers no gap", async () => {
+    let cursor = (await read(github(), NOW, { since: SINCE, limit: PAGE.max })).at(-1)!.cursor
+    for (let month = 1; month <= 5; month++) {
+      const pages = await read(github(), NOW + month * 30 * DAY, { account: LOGIN, cursor, limit: PAGE.max })
+      expect(pages.every((result) => result.gap === undefined)).toBe(true)
+      cursor = pages.at(-1)!.cursor
+      expect(positionN(cursor)).toBe(NOW + month * 30 * DAY - SETTLE_MS)
+    }
+  })
+
+  it("walks more notifications than one call reads oldest first, with no gap, counting them one alone at a time", async () => {
+    // 520 releases, one a minute.
+    const inbox = Array.from({ length: 520 }, (_, index) => ({ ...NOTIFICATIONS[1]!, id: `r${index}`, updated_at: iso(Date.parse("2026-11-01T00:00:00Z") + index * 60_000) }))
+    const fake = github({ inbox })
+    const pages = await read(fake, NOW, { since: "2026-10-31", limit: PAGE.max })
+    expect(pages.every((result) => result.gap === undefined)).toBe(true)
+    const listed = pages.flatMap((result) => result.events.map((event) => event.external_id)).filter((id) => id.startsWith("notification:"))
+    expect(listed).toEqual(inbox.map((item) => `notification:${item.id}@${item.updated_at}`))
+    // The first call: the 501st alone, then doubling and halving to count 520, then the pages holding the oldest 500.
+    const first = fake.calls.filter((call) => call.path === "/notifications" && call.query["since"] === "2026-10-31T00:00:00Z")
+    expect(first[0]!.query).toMatchObject({ page: 501, per_page: 1, before: "2026-11-08T11:55:01Z" })
+    expect(first.filter((call) => call.query["per_page"] === 50).map((call) => call.query["page"])).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+  })
+
+  it("lists nothing past the position while GitHub answers a search as incomplete, and the next call reads it again", async () => {
+    const fake = github({ incomplete: 1 })
+    const first = await page(fake, NOW, { since: SINCE, limit: PAGE.max })
+    // The issue search timed out: nothing at or after its position is listed, and nothing is skipped.
+    expect(first.events).toEqual([])
+    expect(first.more).toBe(true)
+    const rest = await read(fake, NOW, { account: LOGIN, cursor: first.cursor, limit: 2 })
+    expect(rest.flatMap((result) => result.events.map((event) => event.external_id))).toEqual(EXPECTED)
+  })
+})
+
 describe("probe", () => {
   it("names the signed-in account and owner, the same as every page, after one GET /user", async () => {
     const fake = github()
@@ -381,8 +469,8 @@ describe("events_list's inner reads", () => {
     { action: EVENTS_ACTION, resource: "*", effect: "allow" },
   ]
   const READS = ["/search/issues", "/search/commits", "/notifications"]
-  /** What one listing sends: the issue search, the pull request search, commits, notifications. */
-  const SENT = ["/search/issues", "/search/issues", "/search/commits", "/notifications"]
+  /** What one listing sends: the issue search, the pull request search, commits, then notifications: the 501st alone, then the first page. */
+  const SENT = ["/search/issues", "/search/issues", "/search/commits", "/notifications", "/notifications"]
 
   async function wired(session: readonly Rule[], agent: readonly Rule[] = BASE) {
     const fetched: string[] = []

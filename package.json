@@ -1,6 +1,6 @@
 {
   "name": "@joe-broadhead/opencode-github",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "private": true,
   "description": "Unofficial OpenCode plugin for GitHub",
   "keywords": [
@@ -45,6 +45,7 @@
     "build": "node scripts/build.mjs",
     "test": "vitest run",
     "test:conformance": "bun test ./test/conformance",
+    "conformance": "bun test ./test/conformance",
     "test:kit": "node --test scripts/release-kit.test.mjs",
     "test:tui": "npm run build && bun test test/tui",
     "test:host": "npm run build && node scripts/host-tests.mjs",
@@ -69,7 +70,7 @@
     "@opentui/solid": "0.8.0",
     "@types/bun": "1.4.4",
     "@types/node": "24.19.2",
-    "@we-the-rebel-alliance/source-contract": "github:we-the-rebel-alliance/source-contract#v0.1.0",
+    "@we-the-rebel-alliance/source-contract": "github:we-the-rebel-alliance/source-contract#v0.2.0",
     "babel-preset-solid": "1.9.16",
     "esbuild": "0.28.2",
     "solid-js": "1.9.18",

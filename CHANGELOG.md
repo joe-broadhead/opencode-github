@@ -2,6 +2,63 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.6] - 2026-11-17
+
+### Changed
+
+- The source contract is `@we-the-rebel-alliance/source-contract` v0.2.0, pinned as
+  `github:we-the-rebel-alliance/source-contract#v0.2.0` (commit `88bdc1e`) and bundled into `dist/index.js`, still with
+  no runtime dependency. `github.activity`'s declaration and its probe are unchanged, and its pages add only `gap`,
+  which v0.1.0 already defines: the plugin declares and sends none of v0.2.0's new keys (`permission.identityRules`,
+  `removals[]`, `owner.verified`), which a consumer still on v0.1.x refuses. It will declare
+  `permission.identityRules` (`github_probe` on `GET /user`) once Memory and Jelly read v0.2.0.
+- The conformance report is complete and ok. Every check that applies runs, the kit's expired-cursor and
+  gap-once-per-read checks on a cursor whose notifications GitHub no longer keeps and on a `since` before them.
+  `failed-holds-cursor` stays not applicable (`atomicPages`), with its reason in the report: each GitHub request answers
+  a whole page, and a request that fails fails the whole call.
+- `npm run conformance` runs the kit (`bun test ./test/conformance`, as `test:conformance`), as the release kit
+  requires of a plugin that declares sources.
+- The release kit is revision 4.1 (`1f452e5`): a plugin that declares sources releases with its conformance report
+  (`conformance-report.json`, a Release asset listed in `SHA256SUMS`), and the release checks that the staged tarball
+  is the one it packed. `docs/jelly.md` carries Jelly's shared block, and its sentences on declared `allow` are
+  reworded: a declared `allow` changes nothing; each tool follows the access choice and its `readOnly`.
+- CI can be run by hand on any branch (`workflow_dispatch`), with the full matrix, macOS included.
+- The host range is unchanged: `>=2.2.3 <2.4.0`, tested on OpenCode 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7 and 2.3.0
+  (`TESTED_HOSTS`).
+
+### Fixed
+
+- **A read holds one cut.** `events_list` lists nothing newer than the time of a read's first page (less the 5 minutes
+  an event settles) on any page until the read ends (`more: false`); the next read lists what came after.
+- **`events_list` no longer loses notifications without saying so.** GitHub keeps inbox notifications for three
+  months (taken as 89 days): a read whose notifications start before that answers `gap`, `expired` from a cursor or
+  `window-truncated` from `since`, with `since` where the notifications started, and reads them from the window's
+  start. A complete read moves the notifications' position up to the cut, so an inbox read at least every three months
+  never answers a gap. A sign-in that may not read notifications answers none.
+- **A notifications backlog is walked, not dropped.** Notifications are read under the read's cut. Up to 500 are read
+  whole; with more, the call counts them (asking for one notification alone at a time) and reads the oldest 500, so the
+  backlog is walked oldest first across calls and nothing GitHub delivers meanwhile pushes one out. Where GitHub will
+  not page that far, or past 64,000, it reads the newest 500 and answers `gap` (`window-truncated`). Before, more than
+  500 held every stream back, with no gap.
+- **A read answers one gap, and no loss is silent.** Until the read ends, the cursor carries that it answered its gap,
+  and no later page answers another, however slowly it is paged. A loss the read finds after its gap is carried in the
+  cursor, past the read's end, and the next read's first page answers it as `gap` (`expired`, from the earliest such
+  loss). Where a read restarts in GitHub's three-month window counts from the read's cut, so it holds still while the
+  read pages; whether GitHub may have deleted notifications is checked on GitHub's clock, on every page.
+- **A crowded second no longer stalls the feed.** More search results in one second than one read holds (a
+  rebase-merge gives hundreds of commits one committer date) held every stream back for good, with no gap or error.
+  That second is now read whole by itself, up to the 1,000 results GitHub answers, in the plugin's own order by id, so
+  the position walks it across calls and then moves past it; with two such seconds, the earlier is read first, and the
+  other holds back only what comes after its own. A second with more than 1,000 answers `gap` (`window-truncated`) and
+  the search moves past it. Searches read pages of 100 (6 a call from their position), and a call makes at most 30
+  search requests, GitHub's limit a minute. Each result is listed once, even where GitHub orders a second's results
+  differently from one page to the next, and each belongs to the stream that read it.
+- **A notification GitHub delivers late is listed.** Each read looks again at the 6 hours before the notifications'
+  position, and the cursor remembers the last 16 notifications it listed there, so none is listed twice. Before, one
+  delivered more than 5 minutes late, behind the position, was never listed.
+- A search GitHub answers as incomplete (it timed out) lists nothing past that stream's position, and the next call
+  reads it again; before, the cursor could move past results it left out.
+
 ## [0.0.5] - 2026-11-15
 
 ### Changed

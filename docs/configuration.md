@@ -6,7 +6,7 @@ Set options in the plugin's entry in `opencode.json`:
 {
   "plugins": [
     {
-      "package": "github:joe-broadhead/opencode-github#v0.0.5",
+      "package": "github:joe-broadhead/opencode-github#v0.0.6",
       "options": {
         "toolsets": ["context", "repos", "issues", "pull_requests"],
         "access": "ask-changes",
@@ -22,7 +22,7 @@ Every option is optional. An unknown option or a wrong value
 stops the plugin from loading with an error that names the option, for example:
 
 ```text
-OPTIONS_INVALID: Invalid plugin option "toolset": this option does not exist. Next step: Fix the options for github:joe-broadhead/opencode-github#v0.0.5 in opencode.json.
+OPTIONS_INVALID: Invalid plugin option "toolset": this option does not exist. Next step: Fix the options for github:joe-broadhead/opencode-github#v0.0.6 in opencode.json.
 ```
 
 ## Options
@@ -628,14 +628,14 @@ see [Scripting](scripting.md#api).
 ## Events list
 
 `github_events_list` (`tools.github.events_list` in Code Mode, and the tools RPC method `events_list`) is GitHub's
-source under the shared source contract, `@we-the-rebel-alliance/source-contract` v0.1.0 (see [Sources](#sources)). It
+source under the shared source contract, `@we-the-rebel-alliance/source-contract` v0.2.0 (see [Sources](#sources)). It
 lists what the signed-in user was involved in since a cursor, as normalised events, oldest first. It only reads, never
 asks and calls no model, so Memory's collector can run it unattended.
 
 ```
 events_list({ since?, cursor?, limit?, account?, source? })
   → { source: "github", account: "<login>", owner: { id: "github:<Login>", label: "<Login>" }, events, cursor, more,
-      refused?, plugin, asOf, trust: "untrusted" }
+      refused?, gap?, plugin, asOf, trust: "untrusted" }
 ```
 
 | Input | Meaning |
@@ -674,11 +674,46 @@ is refused before it is sent:
   repository's link.
 
 The cursor holds a position in each stream. The result merges them by time, and lists only what no stream can still put
-before it. An event is listed once it is 5 minutes old, because GitHub's search lags a little behind a change. GitHub's
-search returns at most 1,000 results for one query, and allows 30 search requests a minute: each search reads at most 9
-pages of 50 a call, so a call's three searches make at most 27; the cursor moves past what was listed, so the next call's query
-starts later. An event whose title or text holds a secret, such as a password in a URL, is never listed: it is in the
-page's `refused[]` with `reason: "secret"`, and the cursor moves past it.
+before it. An event is listed once it is 5 minutes old, because GitHub's search lags a little behind a change. **A read
+holds one cut** (the time of its first page, less those 5 minutes) on every page until it ends (`more: false`): nothing
+newer is listed by it, and the next read lists what came after.
+
+GitHub's search returns at most 1,000 results for one query, and allows 30 search requests a minute: each search reads
+at most 6 pages of 100 a call from its position, and the cursor moves past what was listed, so the next call's query
+starts later. When every result a search read shares one second (a rebase-merge gives hundreds of commits one committer
+date), that second is read whole by itself, up to GitHub's 1,000 results, and listed in the plugin's own order (by id),
+so the position walks through it across calls and then moves past it; with two such seconds, the earlier is read
+first. A call makes at most 30 search requests. Each result is listed once, even where GitHub orders a second's results
+differently from one page to the next; but if it does, a result can be missed while that second is read (GitHub does
+not say whether its order is stable). A search GitHub answers as incomplete (it timed out) lists nothing past that
+stream's position, and the next call reads it again, so nothing it left out is skipped. An event whose title or text
+holds a secret, such as a password in a URL, is never listed: it is in the page's `refused[]` with `reason: "secret"`,
+and the cursor moves past it.
+
+**Notifications** are read under the read's cut (`before`). Up to 500 are read whole. With more (a backlog), the call
+counts them, asking GitHub for one notification alone at a time (it lists them newest first), and reads the oldest 500:
+the backlog is walked oldest first, call after call, and nothing GitHub delivers meanwhile can push one out of it.
+Where GitHub will not page that far, or past 64,000, the call reads the newest 500 instead and answers a gap.
+
+**A notification GitHub delivers late.** Each read looks again at the 6 hours before the notifications' position, and
+lists a notification stamped there that it has not listed yet; the cursor remembers the last 16 it listed in that time
+(the lookback starts after older ones), so none is listed twice. One delivered more than 6 hours late is not listed.
+
+**History GitHub no longer keeps.** GitHub keeps inbox notifications for three months, unless they are saved
+([notification retention](https://docs.github.com/en/subscriptions-and-notifications/get-started/configuring-notifications)).
+A read whose notifications start before that (taken as 89 days, the shortest three months) may have lost some: it
+answers `gap`, `{ reason: "expired", since }` from a cursor or `{ reason: "window-truncated", since }` from `since`,
+where `since` is where the notifications started, and reads them from the window's start. Where a read restarts
+counts from its cut, so it holds still while the read pages; whether GitHub may have deleted some is checked on
+GitHub's clock, on every page, as GitHub deletes them while the read pages. So does a backlog the call
+cannot walk (above), and a second with more search results than GitHub answers for one query (1,000):
+`window-truncated`, and the search moves past that second. **A read answers one gap**, on the page where it restarts:
+until the read ends, the cursor carries that it was answered and no later page answers another; reading again at the
+same cursor answers the same gap. A loss a read finds after its gap is carried in the cursor, past the read's end, and
+the next read's first page answers it (`{ reason: "expired", since }`), so no loss is silent. A complete read moves the notifications' position up to the cut, so an inbox read at least every
+three months never answers a gap. A sign-in that may not read notifications has none to lose, and answers no gap. The
+issue, pull request and commit searches read any time range. An item deleted on GitHub before a read finds it is never
+listed; that is not a gap.
 
 **`probe`** (the tools RPC method, action `github_probe`, allowed by the default rules at every `access`) answers who
 is signed in, `{ source: "github", account, owner, trust }`, with the same account and owner as every page, and nothing
@@ -706,9 +741,14 @@ consumer (Memory, jelly, Artifacts) reads it from the installed package:
 
 The grants are stated verbatim (`rules`) rather than as `operations`, because each read is the tool's own action on a
 `GET /path`, which an operation name cannot express. For the same reason the probe's `GET /user` cannot be declared as
-a `permission.identity` operation: the probe asserts only `github_probe`, on `*` and on `GET /user`. `npm run check`
-runs the contract's conformance kit over the source, on recorded answers with no GitHub call, and writes
-`reports/conformance-report.json` for a release to attach.
+a `permission.identity` operation: the probe asserts only `github_probe`, on `*` and on `GET /user`. Contract v0.2.0's
+`permission.identityRules` can state that grant; the declaration adds it once the consumers (Memory, Jelly) read
+v0.2.0, because a consumer on v0.1.x refuses the key. `npm run conformance` (and `npm run check`) runs the contract's
+conformance kit over the source, on recorded answers with no GitHub call, and writes
+`reports/conformance-report.json` for a release to attach. Every check that applies runs, the gap checks on a cursor
+whose notifications GitHub no longer keeps and on a `since` before them. `failed-holds-cursor` cannot apply, with its
+reason in the report: each GitHub request answers a whole page, and a request that fails fails the whole call, so no
+single event can fail on its own.
 
 ## Repository scope
 
@@ -766,7 +806,7 @@ To use your own OAuth App, register it under **GitHub Settings → Developer set
 tick **Enable Device Flow**, do not generate a client secret, and set its client ID:
 
 ```json
-{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.5", "options": { "clientId": "<your OAuth App client ID>" } }] }
+{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.6", "options": { "clientId": "<your OAuth App client ID>" } }] }
 ```
 
 `scopes` changes what device sign-in asks for, for example `["public_repo"]` for public repositories only. Scopes
@@ -802,7 +842,7 @@ tokens** on. Then:
   account, and links the install page.
 
 ```json
-{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.5", "options": { "clientId": "<the GitHub App's client ID>", "appSlug": "<its URL name>" } }] }
+{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.6", "options": { "clientId": "<the GitHub App's client ID>", "appSlug": "<its URL name>" } }] }
 ```
 
 ## `host` (GitHub Enterprise Server)
@@ -819,7 +859,7 @@ GitHub's hosted MCP server does not support GitHub Enterprise Server. With `host
 - the status names the server and says that only `github_api` works.
 
 ```json
-{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.5", "options": { "host": "github.example.com", "clientId": "<the server's OAuth App client ID>" } }] }
+{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.6", "options": { "host": "github.example.com", "clientId": "<the server's OAuth App client ID>" } }] }
 ```
 
 For GitHub's MCP tools on the server, run GitHub's `github-mcp-server` yourself as a local MCP server with
@@ -855,7 +895,7 @@ passed through unchanged.
 
 | Code | When | Next step |
 | --- | --- | --- |
-| `OPTIONS_INVALID` | An option is unknown or has a wrong value. The message names the option. | Fix the options for github:joe-broadhead/opencode-github#v0.0.5 in opencode.json. |
+| `OPTIONS_INVALID` | An option is unknown or has a wrong value. The message names the option. | Fix the options for github:joe-broadhead/opencode-github#v0.0.6 in opencode.json. |
 | `HOST_UNTESTED` | OpenCode is outside `>=2.2.3 <2.4.0` and `allowUntestedHost` is not set. | Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true. |
 | `SKILLS_INVALID` | A skill file shipped with the plugin is missing or malformed. | Reinstall the plugin. |
 | `STATUS_UNAVAILABLE` | OpenCode did not report the `github` server's state. | Try again in a few seconds; if it persists, restart OpenCode. |
