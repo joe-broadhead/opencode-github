@@ -40,8 +40,10 @@ All notable changes to this project are documented here. The format follows [Kee
   backlog is walked oldest first across calls and nothing GitHub delivers meanwhile pushes one out. Where GitHub will
   not page that far, or past 64,000, it reads the newest 500 and answers `gap` (`window-truncated`). Before, more than
   500 held every stream back, with no gap.
-- **A read answers one gap.** Until the read ends, the cursor carries that it answered its gap, and no later page
-  answers another, however slowly it is paged.
+- **A read answers one gap, and no loss is silent.** Until the read ends, the cursor carries that it answered its gap,
+  and no later page answers another, however slowly it is paged. A loss the read finds after its gap is carried in the
+  cursor, past the read's end, and the next read's first page answers it as `gap` (`expired`, from the earliest such
+  loss). GitHub's three-month window counts from the read's cut, so it holds still while the read pages.
 - **A crowded second no longer stalls the feed.** More search results in one second than one read holds (a
   rebase-merge gives hundreds of commits one committer date) held every stream back for good, with no gap or error.
   That second is now read whole by itself, up to the 1,000 results GitHub answers, in the plugin's own order by id, so

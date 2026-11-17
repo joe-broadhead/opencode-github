@@ -195,6 +195,62 @@ describe("two crowded seconds at once (review round 2, L-A)", () => {
   })
 })
 
+describe("no silent loss after a read's gap (review round 3, Q1)", () => {
+  const DAY = 86_400_000
+  const HOUR = 3_600_000
+  /** Every notification is listed, or a gap answered after `after` (a page index across the read and the next) has a since at or before it. */
+  function accounted(inbox: ReturnType<typeof note>[], pages: EventsListResult[], after: number) {
+    const listed = new Set(ids(pages))
+    const later = pages.flatMap((p, k) => (p.gap && k > after ? [Date.parse(p.gap.since)] : []))
+    return inbox.filter((n) => !listed.has(`notification:${n.id}@${n.updated_at}`) && !later.some((since) => since <= Date.parse(n.updated_at))).map((n) => n.id)
+  }
+
+  for (const [label, step] of [["5 minutes", 5 * 60_000], ["1 hour", HOUR]] as const) {
+    it(`a read whose gap is a 5,000-result second, with notifications at the window's edge, paged ${label} apart`, async () => {
+      const issues = Array.from({ length: 60 }, (_, k) => issue(k + 1, iso(NOW - 88.99 * DAY + 1000 + k * 1000)))
+      const commits = Array.from({ length: 5000 }, (_, k) => commit(`r${String(k).padStart(5, "0")}`, iso(NOW - 60 * DAY)))
+      const inbox = Array.from({ length: 30 }, (_, k) => note(`${100 + k}`, iso(NOW - 88.98 * DAY + k * 10 * 60_000)))
+      const w = world({ issues, commits, inbox })
+      const pages = await read(w, (k) => NOW + k * step, { since: iso(NOW - 88.99 * DAY), limit: 5 })
+      const first = pages.findIndex((p) => p.gap !== undefined)
+      const next = await read(w, NOW + pages.length * step + HOUR, { account: LOGIN, cursor: pages.at(-1)!.cursor, limit: 500 })
+      expect(accounted(inbox, [...pages, ...next], first)).toEqual([])
+    })
+
+    it(`a read from since 120 days, with notifications at the window's edge, paged ${label} apart`, async () => {
+      const issues = Array.from({ length: 40 }, (_, k) => issue(k + 1, iso(NOW - 120 * DAY + k * HOUR)))
+      const inbox = Array.from({ length: 12 }, (_, k) => note(`${100 + k}`, iso(NOW - 89 * DAY + 30 * 60_000 + k * HOUR)))
+      const w = world({ issues, inbox })
+      const pages = await read(w, (k) => NOW + k * step, { since: iso(NOW - 120 * DAY), limit: 5 })
+      expect(pages[0]!.gap).toMatchObject({ reason: "window-truncated" })
+      const next = await read(w, NOW + pages.length * step + HOUR, { account: LOGIN, cursor: pages.at(-1)!.cursor, limit: 500 })
+      expect(accounted(inbox, [...pages, ...next], 0)).toEqual([])
+    })
+  }
+
+  it("carries a loss found after the read's gap, and answers it on the next read's first page, once", async () => {
+    // The read's gap: a since before GitHub's window. Later in the read, a 5,000-result commit second it cannot list.
+    const T = NOW - 30 * DAY
+    const issues = Array.from({ length: 20 }, (_, k) => issue(k + 1, iso(NOW - 100 * DAY + k * DAY)))
+    // Earlier commits first, so the commit stream reaches the crowded second only after the read's first page.
+    const commits = [
+      ...Array.from({ length: 20 }, (_, k) => commit(`a${String(k).padStart(5, "0")}`, iso(T - (20 - k) * HOUR))),
+      ...Array.from({ length: 5000 }, (_, k) => commit(`r${String(k).padStart(5, "0")}`, iso(T))),
+      commit("z1", iso(T + DAY)),
+    ]
+    const w = world({ issues, commits })
+    const pages = await read(w, NOW, { since: iso(NOW - 120 * DAY), limit: 5 })
+    expect(gaps(pages)).toEqual([{ reason: "window-truncated", since: iso(NOW - 120 * DAY) }])
+    expect(ids(pages)).toContain("octo/app@z1")
+    const last = pages.at(-1)!.cursor
+    const first = await page(w, NOW + HOUR, { account: LOGIN, cursor: last })
+    expect(first.gap).toEqual({ reason: "expired", since: iso(T) })
+    // Read again at the same cursor: the same gap. Read on: none.
+    expect((await page(w, NOW + HOUR, { account: LOGIN, cursor: last })).gap).toEqual(first.gap)
+    expect((await page(w, NOW + 2 * HOUR, { account: LOGIN, cursor: first.cursor })).gap).toBeUndefined()
+  })
+})
+
 describe("ties GitHub orders differently from one request to the next (review round 2, L-C)", () => {
   it("never lists an event twice on a page, and the read ends", async () => {
     const T = "2026-11-02T00:00:00Z"
@@ -228,12 +284,11 @@ describe("one gap per read", () => {
     it(`answers one gap for a read from before GitHub's three months paged ${label} apart, and lists every notification GitHub keeps`, async () => {
       const DAY = 86_400_000
       const issues = Array.from({ length: 40 }, (_, k) => issue(k + 1, iso(NOW - 120 * DAY + k * 2 * DAY)))
-      // One 88.5 days old: GitHub still keeps it at the first page, and drops it half a day later.
+      // One 88.5 days old: inside GitHub's window when the read starts, which holds for the whole read.
       const inbox = [note("0", iso(NOW - 88.5 * DAY)), note("1", iso(NOW - 60 * DAY)), note("2", iso(NOW - 10 * DAY))]
       const pages = await read(world({ issues, inbox }), (k) => NOW + k * step, { since: iso(NOW - 120 * DAY), limit: 5 })
       expect(gaps(pages)).toEqual([{ reason: "window-truncated", since: iso(NOW - 120 * DAY) }])
-      const kept = step < 86_400_000 / 4 ? inbox : inbox.slice(1)
-      expect(ids(pages).filter((id) => id.startsWith("notification:"))).toEqual(kept.map((n) => `notification:${n.id}@${n.updated_at}`))
+      expect(ids(pages).filter((id) => id.startsWith("notification:"))).toEqual(inbox.map((n) => `notification:${n.id}@${n.updated_at}`))
       expect(ids(pages).filter((id) => !id.startsWith("notification:"))).toHaveLength(40)
     })
   }

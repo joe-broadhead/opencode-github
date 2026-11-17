@@ -24,8 +24,9 @@
 // GitHub keeps inbox notifications for three months (unless saved), so a read that starts before that, from a cursor or
 // from since, may have lost some: it answers `gap` (`expired` from a cursor, `window-truncated` from since) and reads
 // notifications from the window's start. So does a backlog GitHub will not page through (from the oldest it read on),
-// and a second with more search results than GitHub answers, which the search moves past. A read answers one gap: until
-// it ends, the cursor carries that it did. Each read looks again at the 6 hours before the
+// and a second with more search results than GitHub answers, which the search moves past. The window counts from the
+// read's cut. A read answers one gap: until it ends, the cursor carries that it did, and a loss found after it, which
+// the next read's first page answers. Each read looks again at the 6 hours before the
 // notifications' position for one GitHub delivered late, and the cursor remembers what it listed there, so none is
 // listed twice. A search GitHub answers as incomplete is read again on the next call, never skipped.
 // The result merges them by time, and lists only what no stream can still put before it: a stream with more pages
@@ -569,6 +570,11 @@ interface CursorState {
   readonly gapAt?: number
   /** The read's cut: it lists nothing newer, on every page, and what comes after it is the next read's. */
   readonly cut?: number
+  /**
+   * History lost after the read answered its gap, from this time: the next read's first page answers it as a gap
+   * (`expired`), so a later loss in a read is never silent.
+   */
+  readonly lostAt?: number
 }
 
 const SEEN = /^([0-9a-f]{8})([0-9a-z]{1,11})$/
@@ -592,8 +598,13 @@ function stateOf(cursor: string, account: string, owner: EventsOwner): CursorSta
   const from = { i: keys[0]!, p: keys[1]!, c: keys[2]!, n: keys[3]! }
   const gapAt = state["g"]
   const cut = state["u"]
-  for (const value of [gapAt, cut]) if (value !== undefined && !(typeof value === "number" && Number.isSafeInteger(value))) return refuseCursor()
-  const read = { ...(gapAt === undefined ? {} : { gapAt: gapAt as number }), ...(cut === undefined ? {} : { cut: cut as number }) }
+  const lostAt = state["q"]
+  for (const value of [gapAt, cut, lostAt]) if (value !== undefined && !(typeof value === "number" && Number.isSafeInteger(value))) return refuseCursor()
+  const read = {
+    ...(gapAt === undefined ? {} : { gapAt: gapAt as number }),
+    ...(cut === undefined ? {} : { cut: cut as number }),
+    ...(lostAt === undefined ? {} : { lostAt: lostAt as number }),
+  }
   const lookback = state["l"]
   if (lookback === undefined) return { from, notified: { position: from.n, floor: from.n.t + 1000, seen: new Map() }, ...read }
   const behind = record(lookback) ? lookback["f"] : undefined
@@ -668,8 +679,9 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   }
 
   // GitHub keeps notifications for three months: a stream that starts before that may have lost some, so it restarts at
-  // the window's start, and the read answers the gap.
-  const floor = now - NOTIFICATION_RETENTION_MS
+  // the window's start, and the read answers the gap. The window is the read's, from its cut, so the position does not
+  // slide while the read pages.
+  const floor = end + SETTLE_MS - NOTIFICATION_RETENTION_MS
   const outside = state.notified.position.t < floor
   const restarted: Key = { t: floor, i: "" }
   const notifiedFrom: Notified = outside ? { position: restarted, floor: restarted.t + 1000, seen: new Map() } : state.notified
@@ -719,22 +731,25 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   const remembered = remember(positions.n, lookback, seen)
   lookback = remembered.floor
 
-  // History lost: notifications GitHub no longer keeps or more than one call reads, or a second with more search results
-  // than GitHub answers. A read answers one gap, on the page where it restarts; no later page of the read answers another
-  // (`g` in the cursor, which the read carries until it ends).
+  // History lost: notifications GitHub no longer keeps or will not page to, or a second with more search results than
+  // GitHub answers. A read answers one gap, on the page where it restarts; no later page of the read answers another
+  // (`g` in the cursor, which the read carries until it ends). A loss after that is carried in the cursor (`q`, also past
+  // the read's end) and answered by the next read's first page, as `expired`: never silent.
   const lostSince = [
     ...(notified.readable && (outside || notified.truncated) ? [state.notified.position.t] : []),
     ...(["i", "p", "c"] as const).flatMap((stream) => searched[stream].skipped ?? []),
   ]
   const answered = state.gapAt !== undefined
+  const owed = [...lostSince, ...(state.lostAt === undefined ? [] : [state.lostAt])]
   const gap: EventsGap | undefined =
-    lostSince.length > 0 && !answered
-      ? { reason: outside && request.cursor !== undefined ? "expired" : "window-truncated", since: new Date(Math.min(...lostSince)).toISOString() }
+    owed.length > 0 && !answered
+      ? { reason: state.lostAt !== undefined || (outside && request.cursor !== undefined) ? "expired" : "window-truncated", since: new Date(Math.min(...owed)).toISOString() }
       : undefined
+  const lostAt = answered && owed.length > 0 ? Math.min(...owed) : undefined
   const refused = merged.slice(0, consumed).flatMap((item) => refusedIds.get(item.event.external_id) ?? [])
   const more = merged.length > consumed || STREAMS.some((stream) => !reads[stream].complete)
   const gapAt = more ? (gap !== undefined ? now : answered ? state.gapAt : undefined) : undefined
-  const cursor = encodeState(account, owner, positions, lookback, remembered.seen, { gapAt, cut: more ? end : undefined })
+  const cursor = encodeState(account, owner, positions, lookback, remembered.seen, { gapAt, cut: more ? end : undefined, lostAt })
   return eventsListResult({ source: SOURCE, account, owner }, listed.map((item) => item.event), cursor, more, {
     refused,
     ...(gap === undefined ? {} : { gap }),
@@ -755,15 +770,18 @@ function remember(position: Key, floor: number, seen: ReadonlyMap<string, number
   return { floor: start, seen: new Map(newest.filter(([, at]) => at >= start)) }
 }
 
-/** The cursor: each stream's position, the lookback, and while a read goes on its cut and its gap; the lookback shrinks until it fits. */
-function encodeState(account: string, owner: EventsOwner, positions: Record<StreamName, Key>, floor: number, seen: Map<string, number>, read: { gapAt: number | undefined; cut: number | undefined }): string {
+/**
+ * The cursor: each stream's position, the lookback, while a read goes on its cut and its gap, and any loss the next read
+ * answers; the lookback shrinks until it fits.
+ */
+function encodeState(account: string, owner: EventsOwner, positions: Record<StreamName, Key>, floor: number, seen: Map<string, number>, read: { gapAt: number | undefined; cut: number | undefined; lostAt: number | undefined }): string {
   const p = Object.fromEntries(STREAMS.map((stream) => [stream, [positions[stream].t, positions[stream].i]]))
   let entries = [...seen].sort((a, b) => b[1] - a[1])
   let start = floor
   for (;;) {
     const l = { f: positions.n.t - start, h: entries.map(([hash, at]) => `${hash}${(positions.n.t - at).toString(36)}`) }
     try {
-      return encodeBoundCursor(bindingOf(account), { a: account, o: digest(owner), p, l, ...(read.gapAt === undefined ? {} : { g: read.gapAt }), ...(read.cut === undefined ? {} : { u: read.cut }) })
+      return encodeBoundCursor(bindingOf(account), { a: account, o: digest(owner), p, l, ...(read.gapAt === undefined ? {} : { g: read.gapAt }), ...(read.cut === undefined ? {} : { u: read.cut }), ...(read.lostAt === undefined ? {} : { q: read.lostAt }) })
     } catch (error) {
       // The package refuses a cursor over EVENT_LIMITS.cursor characters.
       if (entries.length === 0) throw error

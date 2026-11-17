@@ -510,7 +510,7 @@ still stores its token.
 - **GitHub keeps notifications for three months.** A read whose notifications start before that, or that finds more
   than one call reads, answers `gap` once (`expired` from a cursor, `window-truncated` from `since`) and reads on from
   inside the window; so does a second with more than 1,000 search results, which the search moves past. A read answers
-  one gap, and one paged slowly can still lose notifications that pass three months while it pages. A notification
+  one gap; a loss it finds after that is answered by the next read. A notification
   GitHub delivers more than 6 hours late is not listed. If GitHub orders a second's search results differently from one
   page to the next, a result can be missed while that second is read. A notification marked Done before `events_list` reads it may not be listed, and nothing tells the
   plugin it was there. The conformance kit runs on GitHub answers that are invented, modelled on GitHub's REST docs,
