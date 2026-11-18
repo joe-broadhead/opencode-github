@@ -91,7 +91,7 @@ const EXPECTED = [
 
 const ok = (data: unknown): ApiOutput => ({ ok: true, status: 200, data, truncated: false, trust: { githubContent: "untrusted" } })
 
-function github(options: { perPage?: number; notifications?: "ok" | "forbidden"; login?: string; inbox?: typeof NOTIFICATIONS; incomplete?: number; cut?: (perPage: number) => boolean } = {}) {
+function github(options: { perPage?: number; notifications?: "ok" | "forbidden"; login?: string; inbox?: typeof NOTIFICATIONS; incomplete?: number } = {}) {
   const calls: { path: string; query: Record<string, unknown> }[] = []
   /** How many issue searches GitHub still answers as timed out, with incomplete_results. */
   let incomplete = options.incomplete ?? 0
@@ -106,12 +106,6 @@ function github(options: { perPage?: number; notifications?: "ok" | "forbidden";
     }
     const within = (at: string, name: string) => Date.parse(at) >= range(name).from && Date.parse(at) <= range(name).to
     const pageOf = <T>(all: T[]) => all.slice((page - 1) * per, page * per)
-    /** A search page as GitHub answers it: at 100,000 bytes it keeps the whole items that fit, and nothing else. */
-    const cutPage = <T>(all: T[]) => {
-      const whole = options.cut?.(Number(query.per_page)) === true
-      const data = { total_count: all.length, incomplete_results: false, items: whole ? pageOf(all).slice(0, 1) : pageOf(all) }
-      return whole ? { ...ok(data), truncated: true } : ok(data)
-    }
     if (path === "/user") return ok({ login: options.login ?? LOGIN })
     if (path === "/search/issues") {
       expect(String(query.q)).toContain(`involves:${options.login ?? LOGIN}`)
@@ -121,11 +115,11 @@ function github(options: { perPage?: number; notifications?: "ok" | "forbidden";
       const all = ISSUES.filter((item) => within(item.updated_at, "updated") && ("pull_request" in item) === (kind === "pull-request")).sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at) || b.number - a.number)
       // A search that timed out answers what it found so far: here, nothing past its first result.
       if (incomplete > 0) return incomplete--, ok({ total_count: all.length, incomplete_results: true, items: all.slice(0, 1) })
-      return cutPage(all)
+      return ok({ total_count: all.length, incomplete_results: false, items: pageOf(all) })
     }
     if (path === "/search/commits") {
       const all = COMMITS.filter((item) => within(item.commit.committer.date, "committer-date"))
-      return cutPage(all)
+      return ok({ total_count: all.length, incomplete_results: false, items: pageOf(all) })
     }
     if (path === "/notifications") {
       if (options.notifications === "forbidden") return { ok: false, status: 403, data: { message: "Resource not accessible" }, truncated: false, trust: { githubContent: "untrusted" } } as ApiOutput
@@ -307,45 +301,11 @@ describe("events_list", () => {
     expect(next.refused ?? []).toEqual([])
   })
 
-  it("stops with UNAVAILABLE on a failed search, and with TOO_LARGE on a notifications page no size reads whole", async () => {
+  it("stops with UNAVAILABLE on a failed search or one too large to read whole", async () => {
     const failing = async () => ({ ok: false, status: 422, data: {}, truncated: false, trust: { githubContent: "untrusted" } }) as ApiOutput
     expect(await code(listEvents(failing, github().identity, { since: SINCE }, NOW))).toBe("UNAVAILABLE")
-    // A search page over the cap is read again at half the size (`pageAt`), and one result over it answers a gap; a
-    // notifications page over the cap cannot be paged down, so it is TOO_LARGE.
-    const cut = async (path: string) => (path === "/notifications" ? { ok: true, status: 200, data: "{", truncated: true, trust: { githubContent: "untrusted" } } : { ok: true, status: 200, data: { total_count: 0, incomplete_results: false, items: [] }, truncated: false, trust: { githubContent: "untrusted" } }) as ApiOutput
-    expect(await code(listEvents(cut, github().identity, { since: SINCE }, NOW))).toBe("TOO_LARGE")
-  })
-
-  it("reads a page GitHub cut at 100,000 bytes again at half the page size, and lists its events", async () => {
-    const fake = github({ cut: (perPage) => perPage >= 100 })
-    const result = (await list(fake)({ since: SINCE, limit: PAGE.max })) as EventsListResult
-    expect(result.events.map((event) => event.external_id)).toEqual(EXPECTED)
-    // The cut page is dropped whole, and the same page is asked for again at half the size; the other searches start there.
-    expect(fake.calls.filter((call) => call.path === "/search/issues").map((call) => call.query.per_page)).toEqual([100, 50, 50])
-  })
-
-  it("keeps the cursor exact across a page size change: nothing is skipped and nothing is listed twice", async () => {
-    const fake = github({ cut: (perPage) => perPage >= 100 })
-    const ids: string[] = []
-    let cursor: string | undefined
-    for (let step = 0; step < 20; step++) {
-      const page = (await list(fake)(cursor === undefined ? { since: SINCE, limit: 2 } : { account: LOGIN, cursor, limit: 2 })) as EventsListResult
-      ids.push(...page.events.map((event) => event.external_id))
-      if (!page.more) break
-      cursor = page.cursor
-    }
-    expect(ids).toEqual(EXPECTED)
-  })
-
-  it("answers a gap, never TOO_LARGE and never a failure, when one item alone is over the read cap", async () => {
-    const cut = async (path: string) =>
-      (path === "/notifications"
-        ? { ok: true, status: 200, data: [], truncated: false, trust: { githubContent: "untrusted" } }
-        : { ok: true, status: 200, data: { total_count: 1, incomplete_results: false, items: [] }, truncated: path === "/search/issues", trust: { githubContent: "untrusted" } }) as ApiOutput
-    const result = (await listEvents(cut, github().identity, { since: SINCE }, NOW)) as EventsListResult
-    // Halved from 100 to one item, and one result is still over the cap: the page answers the loss and reads on.
-    expect(result.gap).toEqual({ reason: "window-truncated", since: "2026-10-01T00:00:00.000Z" })
-    expect(result.events).toEqual([])
+    const cut = async () => ({ ok: true, status: 200, data: "{", truncated: true, trust: { githubContent: "untrusted" } }) as ApiOutput
+    expect(await code(listEvents(cut, github().identity, { since: SINCE }, NOW))).toBe("UNAVAILABLE")
   })
 })
 

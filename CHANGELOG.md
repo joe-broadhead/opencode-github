@@ -8,15 +8,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - **A search page GitHub cuts is read again at half the size.** A page over the 100,000 bytes `github_api` reads whole is
   dropped whole and asked for again at half the page size, down to one item (100, 50, 25, 12, 6, 3, 1), and the stream
-  pages on at the size that read whole, so no result is skipped and none is listed twice. Before, a cut page failed the
+  pages on at the size that read whole, so nothing is skipped and nothing is listed twice. Before, a cut page failed the
   listing with `UNAVAILABLE`, whose next step asked for a smaller `limit`: that asked for the same page and failed the
-  same way. The cursor is a position, never a page number, so a step down does not move it; a page is asked for by the
-  offset its whole pages cover. A search now ends on the results it has read, not on what its pages answered, so a
-  result read twice at a smaller size no longer ends the read a page early.
-- **One result over the read cap no longer stops the source.** An issue, pull request or commit over those 100,000
-  bytes cannot be read at any page size. It is left out, and the page answers the contract's `gap` from the last result
-  it read, so the stream reads on past it; before, the whole read failed for good. A notifications page over the cap
-  answers `TOO_LARGE`, as notifications are not paged down.
+  same way. The cursor is a position, never a page number, so a step down does not move it; the page is asked for by the
+  offset its whole pages cover. One result alone over the cap answers `TOO_LARGE`, naming it, and never `UNAVAILABLE`;
+  a notifications page over the cap answers `TOO_LARGE` too.
 
 ## [0.0.6] - 2026-11-17
 

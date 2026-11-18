@@ -454,8 +454,7 @@ Error codes:
 | `SOURCE_UNKNOWN` | `events_list` or `probe` names a source the plugin does not have. Leave source out, or pass github. |
 | `CURSOR_INVALID` | The cursor was not issued by GitHub's `events_list` for this account and its signed-in user, or was changed. Call events_list without a cursor, with since, to start again. |
 | `ACCOUNT_MISMATCH` | `events_list` or `probe` names another account than the signed-in login, or a cursor issued for another account. Pass the account the cursor was issued for, or sign in to GitHub as that account; probe names the signed-in login. |
-| `TOO_LARGE` | One page of notifications is over the 100,000 bytes `github_api` reads whole, and notifications are not read at a smaller page. Read notifications with GitHub's own tools; a later call does not list that page either. |
-| `UNAVAILABLE` | A search, notifications or `GET /user` read for `events_list` or `probe` failed, or the sign-in names no login. Call it again with the same cursor; if it keeps failing, run /github-status. |
+| `UNAVAILABLE` | A search, notifications or `GET /user` read for `events_list` or `probe` failed, its answer was too large to read whole, or the sign-in names no login. Call it again with the same cursor; if it keeps failing, run /github-status. |
 
 Each row's own next step is in the message, and [the error codes](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/configuration.md#errors) give the same set with when each one happens.
 
