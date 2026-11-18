@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.7] - 2026-11-18
+
+### Fixed
+
+- **`events_list`'s reads (its searches and its notifications) take GitHub's answers whole, up to 32 MB a page, instead
+  of the 100 KB cap meant for answers shown to an agent; an answer over 32 MB answers `TOO_LARGE`.** A page used to be
+  cut to the 100,000 bytes `github_api` shows an agent, and a cut page failed the read with `UNAVAILABLE`, whose next
+  step asked for a smaller `limit`: that asked for the same page and failed the same way. `github_api` and `probe` keep
+  the 100,000-byte cap. Events keep the contract's own size limits, so a page sent to a consumer stays bounded whatever
+  GitHub answered.
+
 ## [0.0.6] - 2026-11-17
 
 ### Changed

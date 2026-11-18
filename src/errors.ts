@@ -49,6 +49,7 @@ type PluginCode =
   | "TOKEN_FORBIDDEN"
   | "TOKEN_FORMAT"
   | "TOKEN_REJECTED"
+  | "TOO_LARGE"
   | "UNAVAILABLE"
 
 export const PLUGIN_CODES: readonly PluginCode[] = [
@@ -94,6 +95,7 @@ export const PLUGIN_CODES: readonly PluginCode[] = [
   "TOKEN_FORBIDDEN",
   "TOKEN_FORMAT",
   "TOKEN_REJECTED",
+  "TOO_LARGE",
   "UNAVAILABLE",
 ]
 
