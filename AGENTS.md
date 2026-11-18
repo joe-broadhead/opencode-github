@@ -121,7 +121,10 @@ When you add a rule here, add it to the scan and its self-test too.
 
 - Greenfield: no legacy or dead code, exports, dependencies, docs, tests or fixtures.
 - No tokens, client secrets, personal data or machine-local paths in the repository.
-- Tests use narrow `Pick<Plugin.Context, …>` fakes. Host tests use the public `@opencode/sdk`, and the stock test
+- Tests use narrow `Pick<Plugin.Context, …>` fakes. Host tests use the public `@opencode/sdk` (on 2.3.1 and later
+  built through `PromiseSdk.create`, which `OpenCode.create` calls, with the SDK's `overrides` so that its Automation
+  service also runs the scheduler, as `opencode serve` does: Code Mode with nobody present runs there as an
+  automation's code action, `unattended` in `test/host/harness.ts`), and the stock test
   (`test/stock`) stock `opencode serve` binaries; both isolate `HOME`, the XDG folders, `TMPDIR` and
   `OPENCODE_TEST_HOME` inside a temporary folder under the system's `/tmp` (`test/host/scratch.ts`), never under
   `$TMPDIR` or `$HOME`, and each stock host gets its own free port. Never touch the owner's real OpenCode.
