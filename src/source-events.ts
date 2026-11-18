@@ -16,15 +16,20 @@
 // - commits the person authored, from /search/commits sorted by committer date, oldest first;
 // - notifications, where the sign-in may read them (/notifications; a 401, 403 or 404 leaves them out), except those
 //   about an issue or a pull request, which the first stream already lists.
-// A search reads pages of 100 from its position; when every result it read shares one second, that second is read
-// whole by itself (GitHub answers up to 1,000), in the plugin's order by id, so the position walks it across calls and
-// then moves past it. A call makes at most 30 search requests, GitHub's limit a minute.
+// A search reads pages of 100 from its position up to the read's cut, paging by time: each page after the first asks
+// again from the last second the one before it read, so a result that changes while the search pages moves past the cut
+// and nothing slides into a page already read. When a page lies in one second, or every result it read shares one, that
+// second is read whole by itself (GitHub answers up to 1,000), in the plugin's order by id, so the position walks it
+// across calls and then moves past it. A page whose answer is over what events_list reads whole is read again in pages
+// of 10, then 1; a result alone over it is left out, and the read answers a gap for it. A call makes at most 30 search
+// requests, GitHub's limit a minute, and each request has READ_DEADLINE_MS.
 // A read holds one cut, on every page until it ends: nothing newer is listed by it. Notifications are read under it; a
 // backlog over 500 is counted and walked oldest first across calls.
 // GitHub keeps inbox notifications for three months (unless saved), so a read that starts before that, from a cursor or
 // from since, may have lost some: it answers `gap` (`expired` from a cursor, `window-truncated` from since) and reads
 // notifications from the window's start. So does a backlog GitHub will not page through (from the oldest it read on),
-// and a second with more search results than GitHub answers, which the search moves past. Where a read restarts counts
+// a second with more search results than GitHub answers, which the search moves past, and a search result alone over
+// what events_list reads whole, which is left out. Where a read restarts counts
 // from its cut; whether GitHub may have deleted some is checked on GitHub's clock, on every page. A read answers one
 // gap: until it ends, the cursor carries that it did, and a loss found after it, which the next read's first page
 // answers. Each read looks again at the 6 hours before the notifications' position for one GitHub delivered late, and
@@ -93,13 +98,21 @@ export const SETTLE_MS = 5 * 60_000
 const PER_PAGE = 50
 /** Results per search page: GitHub's most. */
 export const SEARCH_PER_PAGE = 100
+/** The smaller search page an answer over EVENTS_MAX_BYTES is read again in; then one result a page. */
+export const SEARCH_SMALL_PAGE = 10
 /**
  * The most bytes one answer of `events_list`'s own reads may hold, its searches and its notifications: GitHub's answer,
- * not the 100,000-byte cut `github_api` shows an agent. A page of SEARCH_PER_PAGE results arrives whole (100 issues of
- * at most about 270 KB each is about 27 MB), and so does a page of notifications. An answer over this is refused by
- * name, never cut and never skipped.
+ * not the 100,000-byte cut `github_api` shows an agent. A page of SEARCH_PER_PAGE results usually arrives whole, but
+ * nothing bounds a result's size (labels, people, a milestone, and a commit message with no limit), so a search answer
+ * over this is never cut: its range is read again in smaller pages, and a result alone over it is left out with a gap.
+ * A notifications answer over it (50 notifications of a few KB each) is refused by name, `TOO_LARGE`.
  */
 export const EVENTS_MAX_BYTES = 32 * 1024 * 1024
+/**
+ * How long one of events_list's or probe's requests may take, its answer read whole included; past it the request is
+ * stopped and the call answers UNAVAILABLE, with the cursor unchanged. The caller's own abort still stops it at once.
+ */
+export const READ_DEADLINE_MS = 60_000
 /** The most pages one search reads from its position in one call. */
 const SEARCH_PAGES = 6
 /** GitHub answers at most this many results for one search query, whatever its total_count says. */
@@ -308,16 +321,16 @@ async function list(get: Get, path: string, query: Record<string, string | numbe
   return { items: Array.isArray(items) ? items : [], ...(total === undefined ? {} : { total }), incomplete, truncated: output.truncated }
 }
 
+/** A search answer over EVENTS_MAX_BYTES: never a part of a list; its range is read again in smaller pages. */
+const OVER = "over"
+
 /**
- * One search page, read whole. GitHub's answer is read up to EVENTS_MAX_BYTES, not the 100,000-byte cut github_api shows
- * an agent; an answer over that, which GitHub's own limits make impossible, is named by its limit and never cut.
+ * One search page of `size` results, read whole. GitHub's answer is read up to EVENTS_MAX_BYTES, not the 100,000-byte
+ * cut github_api shows an agent; an answer over it is OVER, never cut, and the caller reads its range in smaller pages.
  */
-async function searchPage(get: Get, spec: Search, range: string, page: number): Promise<Answer> {
-  const answer = (await list(get, spec.path, { q: spec.query(range), sort: spec.sort, order: "asc", per_page: SEARCH_PER_PAGE, page }, searchItems, [], EVENTS_MAX_BYTES))!
-  if (answer.truncated) {
-    fail("TOO_LARGE", `GitHub's answer to ${spec.path} is over ${EVENTS_MAX_BYTES / (1024 * 1024)} MB, the most events_list reads whole.`, "Nothing in events_list changes it: the answer is over the bytes events_list reads whole.")
-  }
-  return answer
+async function searchPage(get: Get, spec: Search, range: string, page: number, size: number): Promise<Answer | typeof OVER> {
+  const answer = (await list(get, spec.path, { q: spec.query(range), sort: spec.sort, order: "asc", per_page: size, page }, searchItems, [], EVENTS_MAX_BYTES))!
+  return answer.truncated ? OVER : answer
 }
 
 /** One stream's read: its items after its position, oldest first; whether it ended; the last time it read. */
@@ -328,14 +341,17 @@ interface Read {
 }
 
 /**
- * A search's read. `start` is the position the stream continues from: its own, or past a second it finished or could
- * not read whole (`skipped`, a second with more results than GitHub answers, which the page answers as a gap). `stuck`
- * names a second that holds every result the read found: it is read whole next, by itself.
+ * A search's read. `start` is the position the stream continues from: its own, past seconds that hold no result, or
+ * past a second it finished or could not read whole (`skipped`, a second with more results than GitHub answers, which
+ * the page answers as a gap). `stuck` names a second that holds every result the read found: it is read whole next, by
+ * itself. `oversized` names a second read whole that held a result alone over EVENTS_MAX_BYTES, left out: the page that
+ * enters that second answers a gap for it.
  */
 interface SearchRead extends Read {
   readonly start: Key
   readonly stuck?: number
   readonly skipped?: number
+  readonly oversized?: number
 }
 
 /** One search stream: where it reads, how it sorts, and its query for a range of times. */
@@ -357,54 +373,159 @@ const streamOf = (item: Item | undefined, s: StreamName): Item | undefined => (i
 /** Where a search position's results begin: after its second when it is past all of it. */
 const startOf = (from: Key) => (from.i === AFTER_SECOND ? from.t + 1000 : from.t)
 const searchItems = (data: unknown) => (record(data) ? data["items"] : undefined)
+/** The start of a time's second. */
+const secondOf = (at: number) => Math.floor(at / 1000) * 1000
 
 /**
- * One search stream, oldest first, from its position: pages until it holds more than `need` items, ends, or reaches
- * SEARCH_PAGES. When every item it found shares one second, nothing in it can be listed before that second ends: the
- * read is `stuck` there, and the caller reads that second whole (`searchSecond`).
+ * One search stream, oldest first, from its position up to the read's cut (`end`): pages until it holds more than
+ * `need` items, ends, or has made SEARCH_PAGES requests. It pages by time, never by page number: each page asks again
+ * from the last second the page before it read, so a result that changes meanwhile leaves the range (its change is
+ * after the cut, the next read's) and none slides into a page already read; a result read twice is listed once. A page
+ * that lies in one second cannot be paged past by time: that second is read whole (`searchSecond`) with what is left of
+ * the stream's requests, and the search goes on after it. Without enough, or when every item it found shares one second,
+ * nothing in that second can be listed before it ends: the read is `stuck` there, and the caller reads that second
+ * whole. An answer over EVENTS_MAX_BYTES is read again from the same point in pages of SEARCH_SMALL_PAGE; where one of
+ * those is over it too, the search lists what it read before that page's second, or goes on with `pastLarge`.
  */
-async function search(get: Get, spec: Search, from: Key, need: number, budget: Budget): Promise<SearchRead> {
+async function search(get: Get, spec: Search, from: Key, need: number, budget: Budget, end: number): Promise<SearchRead> {
   const hold: SearchRead = { items: [], complete: false, last: from.t, start: from }
+  const cut = secondOf(end)
   const items: Item[] = []
-  const ids = new Set<string>()
+  const keys = new Set<string>()
   let last = from.t
-  let fetched = 0
+  let at = startOf(from)
+  let size = SEARCH_PER_PAGE
   let read = false
-  for (let page = 1; page <= SEARCH_PAGES && budget.left > 0; page++) {
+  let requests = 0
+  // The earliest second read whole here that held a result alone over the limit, left out.
+  let oversized: number | undefined
+  const lost = () => (oversized === undefined ? {} : { oversized })
+  const take = () => {
+    if (requests >= SEARCH_PAGES || budget.left <= 0) return false
+    requests++
     budget.left--
-    const answer = await searchPage(get, spec, `>=${isoSeconds(startOf(from))}`, page)
+    return true
+  }
+  while (take()) {
+    const answer = await searchPage(get, spec, `${isoSeconds(at)}..${isoSeconds(cut)}`, 1, size)
+    if (answer === OVER) {
+      if (size > SEARCH_SMALL_PAGE) {
+        size = SEARCH_SMALL_PAGE
+        continue
+      }
+      // A result among the next few is too large to read with others: list what came before this page's second, or
+      // read the first second that holds a result by itself (`pastLarge`).
+      if (items.some((item) => item.t < at)) return { items: items.sort(compare), complete: false, last: at, start: from, ...lost() }
+      if (items.length > 0) return { ...hold, stuck: at, ...lost() }
+      return pastLarge(get, spec, from, at, cut, budget)
+    }
     // GitHub's search timed out and may have left results out: list nothing past the position, and read it again on the
     // next call, rather than move past what it left out.
     if (answer.incomplete) return hold
     read = true
-    fetched += answer.items.length
+    // Where the page ends in GitHub's order: its last result up to the cut. A result GitHub shows changed since its index
+    // placed it can carry a later time anywhere on the page, so the page's latest time is not where it ends.
+    let newest = at
     for (const raw of answer.items) {
       const item = spec.make(raw)
       if (!item) continue
-      last = Math.max(last, item.t)
-      // GitHub may order a second's results differently from one page to the next: each item is listed once.
-      if (compare(item, from) > 0 && !ids.has(item.i)) {
-        ids.add(item.i)
+      if (item.t <= end) newest = Math.max(at, item.t)
+      // The next page reads this page's last second again, and GitHub may order a second's results differently from one
+      // request to the next: each change is listed once.
+      const key = `${item.i}@${item.t}`
+      if (compare(item, from) > 0 && !keys.has(key)) {
+        keys.add(key)
         items.push(item)
       }
     }
     // total_count says where the results end; without it, a short page does.
-    const ended = answer.items.length === 0 || (answer.total !== undefined ? fetched >= Math.min(answer.total, SEARCH_CAP) : answer.items.length < SEARCH_PER_PAGE)
-    if (ended) return { items: items.sort(compare), complete: true, last, start: from }
+    const ended = answer.items.length === 0 || (answer.total !== undefined ? answer.items.length >= answer.total : answer.items.length < size)
+    if (ended) return { items: items.sort(compare), complete: true, last, start: from, ...lost() }
+    last = Math.max(last, newest)
+    const next = secondOf(newest)
+    if (next > at) at = next
+    else {
+      // A page in one second cannot be paged past by time: that second is read whole, by itself, with what is left of
+      // this stream's requests, and the search goes on after it. Without enough, the caller reads it (`stuck`).
+      const allowed = Math.min(budget.left, SEARCH_PAGES - requests)
+      const allowance: Budget = { left: allowed }
+      const whole = await searchSecond(get, spec, from, at, allowance)
+      requests += allowed - allowance.left
+      budget.left -= allowed - allowance.left
+      if (whole.skipped !== undefined || (whole.items.length === 0 && whole.start === from)) break
+      const second = at
+      items.splice(0, items.length, ...items.filter((item) => secondOf(item.t) !== second), ...whole.items)
+      for (const item of whole.items) keys.add(`${item.i}@${item.t}`)
+      if (whole.oversized !== undefined) oversized ??= whole.oversized
+      // Everything before the next second is read.
+      last = Math.max(last, second + 1000)
+      at = second + 1000
+      if (at > cut) return { items: items.sort(compare), complete: true, last, start: from, ...lost() }
+    }
     if (items.length > need && items.some((item) => item.t < last)) break
   }
   if (!read) return hold
   // Every item found shares the last second read (or none is new): only that second, read whole, moves the stream on.
-  if (items.every((item) => item.t === last)) return { ...hold, stuck: last }
-  return { items: items.sort(compare), complete: false, last, start: from }
+  if (items.every((item) => item.t === last)) return { ...hold, stuck: last, ...lost() }
+  return { items: items.sort(compare), complete: false, last, start: from, ...lost() }
+}
+
+/**
+ * Where a search goes on when the next few results from `at` are too large to read together, with pages of one result
+ * (the first result of a range is its earliest). A first result GitHub answers within EVENTS_MAX_BYTES names the second
+ * to read whole by itself (`stuck`), where one alone over it can be left out. A first result alone over it is left out
+ * with a gap from `at` (`skipped`) when nothing else lies before the next result's second, and the stream moves past
+ * them; otherwise that second is read whole. The stream moves past seconds that hold no result. It may use what is left
+ * of the call's budget: without it, the stream holds.
+ */
+async function pastLarge(get: Get, spec: Search, from: Key, at: number, cut: number, budget: Budget): Promise<SearchRead> {
+  const hold: SearchRead = { items: [], complete: false, last: from.t, start: from }
+  /** Past every second from `at` before `second`, which hold no result this read lists. */
+  const past = (second: number): Key => (second > at ? { t: second - 1000, i: AFTER_SECOND } : from)
+  const stuck = (second: number): SearchRead => ({ items: [], complete: false, last: second, start: past(second), stuck: second })
+  /** The result at `offset` from `at` up to `to`: OVER, the item, null past the last, or undefined when the read holds. */
+  const result = async (to: number, offset: number): Promise<Item | typeof OVER | null | undefined> => {
+    if (budget.left <= 0) return undefined
+    budget.left--
+    const answer = await searchPage(get, spec, `${isoSeconds(at)}..${isoSeconds(to)}`, offset + 1, 1)
+    if (answer === OVER) return OVER
+    if (answer.incomplete) return undefined
+    if (answer.items.length === 0) return null
+    // A result the plugin cannot read is no more listable than one over the limit.
+    return spec.make(answer.items[0]) ?? OVER
+  }
+  const first = await result(cut, 0)
+  if (first === undefined) return hold
+  if (first === null) return { items: [], complete: true, last: cut, start: from }
+  if (first !== OVER) return stuck(secondOf(first.t))
+  // The first result is over the limit alone: the first one after it that is not bounds its range.
+  let offset = 1
+  let next = await result(cut, offset)
+  while (next === OVER) next = await result(cut, ++offset)
+  if (next === undefined) return hold
+  // Nothing else up to the cut: the stream is past it for this read.
+  if (next === null) return { items: [], complete: true, last: cut, start: { t: cut, i: AFTER_SECOND }, skipped: at }
+  const second = secondOf(next.t)
+  if (second <= at) return stuck(at)
+  // At most `offset` results lie before that second: if the first of them is over the limit, all are (unless GitHub
+  // reorders results of one second between requests), and they are left out together.
+  const before = await result(second - 1000, 0)
+  if (before === undefined) return hold
+  if (before === null) return stuck(second)
+  if (before !== OVER) return stuck(secondOf(before.t))
+  return { items: [], complete: false, last: second, start: past(second), skipped: at }
 }
 
 /**
  * One second of a search stream, read whole with a query for that second alone, in the plugin's own order (by id), so
  * the position walks its items across calls whatever order GitHub gives them in. Its items after the position are
  * listed; when none is left, the stream moves past the second. A second with more results than GitHub answers
- * (SEARCH_CAP) cannot be read whole: the stream moves past it, and the page answers the gap (`skipped`). Without the
- * budget to read it whole, the stream holds, and the next call reads it.
+ * (SEARCH_CAP) cannot be read whole: the stream moves past it, and the page answers the gap (`skipped`). A result only
+ * leaves the second while it is read (its change is after the cut), and then those after it move up a place: a page
+ * whose total differs from the first page's reads the second again from its first result. A page over EVENTS_MAX_BYTES
+ * is read again as pages of SEARCH_SMALL_PAGE at the same offsets, and one of those as pages of one result; a result
+ * alone over it is left out (`oversized`), and the page that enters the second answers a gap for it. Without the budget
+ * to read it whole, the stream holds, and the next call reads it.
  */
 async function searchSecond(get: Get, spec: Search, from: Key, second: number, budget: Budget): Promise<SearchRead> {
   // Held, the stream has nothing between its position and the second (its read found only that second), so it holds
@@ -412,30 +533,69 @@ async function searchSecond(get: Get, spec: Search, from: Key, second: number, b
   const hold: SearchRead = { items: [], complete: false, last: second + 1000, start: from }
   const past: Key = { t: second, i: AFTER_SECOND }
   const at = isoSeconds(second)
-  const items: Item[] = []
-  const ids = new Set<string>()
-  let fetched = 0
-  for (let page = 1; page <= SEARCH_CAP / SEARCH_PER_PAGE; page++) {
+  let items: Item[] = []
+  let ids = new Set<string>()
+  // GitHub's page `page` of `size` results; each smaller size reads one page of the larger as ten, at the same offsets.
+  let page = 1
+  let size = SEARCH_PER_PAGE
+  // The results read, those left out included, against total_count.
+  let read = 0
+  let total: number | undefined
+  let oversized = false
+  for (;;) {
     if (budget.left <= 0) return hold
     budget.left--
-    const answer = await searchPage(get, spec, `${at}..${at}`, page)
-    if (answer.incomplete) return hold
-    if (answer.total !== undefined && answer.total > SEARCH_CAP) return { items: [], complete: false, last: second, start: past, skipped: second }
-    fetched += answer.items.length
-    for (const raw of answer.items) {
-      const item = spec.make(raw)
-      if (item && item.t === second && compare(item, from) > 0 && !ids.has(item.i)) {
-        ids.add(item.i)
-        items.push(item)
+    const answer = await searchPage(get, spec, `${at}..${at}`, page, size)
+    if (answer === OVER) {
+      // The same results again, in smaller pages at the same offsets.
+      if (size > 1) {
+        page = (page - 1) * SEARCH_SMALL_PAGE + 1
+        size = size / SEARCH_SMALL_PAGE
+        continue
       }
+      // One result alone is over what events_list reads whole: it is left out, and the read answers a gap for it.
+      oversized = true
+      read += 1
+    } else {
+      if (answer.incomplete) return hold
+      if (answer.total !== undefined && answer.total > SEARCH_CAP) return { items: [], complete: false, last: second, start: past, skipped: second }
+      if (total !== undefined && answer.total !== undefined && answer.total !== total) {
+        // A result left the second while it was read: read it again from its first result.
+        items = []
+        ids = new Set()
+        page = 1
+        read = 0
+        size = SEARCH_PER_PAGE
+        total = undefined
+        oversized = false
+        continue
+      }
+      total ??= answer.total
+      for (const raw of answer.items) {
+        const item = spec.make(raw)
+        if (item && item.t === second && compare(item, from) > 0 && !ids.has(item.i)) {
+          ids.add(item.i)
+          items.push(item)
+        }
+      }
+      read += answer.items.length
     }
-    const ended = answer.items.length < SEARCH_PER_PAGE || (answer.total !== undefined && fetched >= answer.total)
-    if (!ended) continue
+    // total_count says where the results end; without it, a short page does.
+    const ended = (answer !== OVER && answer.items.length === 0) || (total !== undefined ? read >= total : answer !== OVER && answer.items.length < size)
+    if (!ended) {
+      page++
+      // Back to the larger page once the smaller ones have read all of one of its pages.
+      while (size < SEARCH_PER_PAGE && (page - 1) % SEARCH_SMALL_PAGE === 0) {
+        page = (page - 1) / SEARCH_SMALL_PAGE + 1
+        size = size * SEARCH_SMALL_PAGE
+      }
+      continue
+    }
     // The second is read whole: list what is after the position, or move past it.
-    if (items.length === 0) return { items: [], complete: false, last: second + 1000, start: past }
-    return { items: items.sort(compare), complete: false, last: second + 1000, start: from }
+    const lost = oversized ? { oversized: second } : {}
+    if (items.length === 0) return { items: [], complete: false, last: second + 1000, start: past, ...lost }
+    return { items: items.sort(compare), complete: false, last: second + 1000, start: from, ...lost }
   }
-  return hold
 }
 
 /**
@@ -707,13 +867,14 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   const budget: Budget = { left: SEARCH_BUDGET }
   const searched: Record<"i" | "p" | "c", SearchRead> = { i: { items: [], complete: true, last: Number.POSITIVE_INFINITY, start: from.i }, p: { items: [], complete: true, last: Number.POSITIVE_INFINITY, start: from.p }, c: { items: [], complete: true, last: Number.POSITIVE_INFINITY, start: from.c } }
   for (const stream of ["i", "p", "c"] as const) {
-    if (startOf(from[stream]) <= end) searched[stream] = await search(get, searches[stream], from[stream], request.limit, budget)
+    if (startOf(from[stream]) <= end) searched[stream] = await search(get, searches[stream], from[stream], request.limit, budget, end)
   }
   // A stream whose read found only one second reads that second whole, with what is left of the budget: the earliest
-  // second first, as the merge lists it first, so the stream that holds every other back always gets the budget.
+  // second first, as the merge lists it first, so the stream that holds every other back always gets the budget. It reads
+  // from where the search left the stream: its position, or past seconds the search found empty.
   const stuck = (["i", "p", "c"] as const).flatMap((stream) => (searched[stream].stuck === undefined ? [] : [{ stream, second: searched[stream].stuck! }]))
   for (const { stream, second } of stuck.sort((a, b) => a.second - b.second || (a.stream < b.stream ? -1 : 1))) {
-    searched[stream] = await searchSecond(get, searches[stream], from[stream], second, budget)
+    searched[stream] = await searchSecond(get, searches[stream], searched[stream].start, second, budget)
   }
 
   // GitHub keeps notifications for three months: a stream that starts before that may have lost some, so it restarts at
@@ -769,16 +930,23 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   const remembered = remember(positions.n, lookback, seen)
   lookback = remembered.floor
 
-  // History lost: notifications GitHub no longer keeps or will not page to, or a second with more search results than
-  // GitHub answers. A read answers one gap, on the page where it restarts; no later page of the read answers another
+  // History lost: notifications GitHub no longer keeps or will not page to, a second with more search results than
+  // GitHub answers, or a search result alone over what events_list reads whole. A read answers one gap, on the page where it restarts; no later page of the read answers another
   // (`g` in the cursor, which the read carries until it ends). A loss after that is carried in the cursor (`q`, also past
   // the read's end) and answered by the next read's first page, as `expired`: never silent.
   // The read's window says where it restarts; GitHub deletes on its own clock, so a position GitHub's window has passed
   // while the read pages may have lost notifications too.
   const passed = notified.readable && !outside && state.notified.position.t < now - NOTIFICATION_RETENTION_MS
+  // A result alone over what events_list reads whole is left out of its second: the page whose stream enters that second
+  // answers it, once, as the stream walks the second across calls.
+  const entered = (stream: "i" | "p" | "c", second: number) => compare(from[stream], { t: second, i: "" }) <= 0 && compare(positions[stream], { t: second, i: "" }) > 0
   const lostSince = [
     ...(notified.readable && (outside || notified.truncated || passed) ? [state.notified.position.t] : []),
     ...(["i", "p", "c"] as const).flatMap((stream) => searched[stream].skipped ?? []),
+    ...(["i", "p", "c"] as const).flatMap((stream) => {
+      const second = searched[stream].oversized
+      return second !== undefined && entered(stream, second) ? [second] : []
+    }),
   ]
   const answered = state.gapAt !== undefined
   const owed = [...lostSince, ...(state.lostAt === undefined ? [] : [state.lostAt])]
@@ -912,7 +1080,7 @@ export const EVENTS_OUTPUT = {
       additionalProperties: false,
       required: ["reason", "since"],
       description:
-        "History from since up to this page may be gone: notifications GitHub no longer keeps (three months) or will not page to, or a second with more search results than GitHub answers. Answered once per read, on the page where it restarts.",
+        "History from since up to this page may be gone: notifications GitHub no longer keeps (three months) or will not page to, a second with more search results than GitHub answers, or a search result alone over 32 MB. Answered once per read, on the page where it restarts.",
       properties: { reason: { type: "string", enum: [...GAP_REASONS] }, since: STRING },
     },
     plugin: { type: "string", description: "This plugin's package name." },
@@ -950,6 +1118,8 @@ export interface EventsDeps {
   /** The GitHub Enterprise Server host (the `host` option), which qualifies the owner; absent for github.com. */
   readonly host?: string
   readonly now?: () => number
+  /** READ_DEADLINE_MS unless a test sets a shorter one. */
+  readonly deadlineMs?: number
 }
 
 /** Asserts a method's own action for the caller, as the calling tool, before anything else. */
@@ -964,11 +1134,32 @@ const assertAction = (deps: EventsDeps, action: string, call: Call) =>
     source: { type: "tool", messageID: call.messageID as never, id: call.id as never },
   })
 
-/** A GET as an unattended call of github_api's spec under `scope`: asserted as the scope's action on its `GET /path`. */
+/**
+ * A GET as an unattended call of github_api's spec under `scope`: asserted as the scope's action on its `GET /path`.
+ * Each request has its own deadline, READ_DEADLINE_MS, its answer read whole included: past it the request is stopped,
+ * and the call answers UNAVAILABLE with `next`, having listed nothing, so its cursor is unchanged. The caller's abort
+ * still stops it at once, as itself.
+ */
 const getter =
-  (deps: EventsDeps, call: Call, scope: ApiScope): Get =>
-  (path, query, maxBytes) =>
-    deps.api.run({ method: "GET", path, query }, { ...call, script: true }, scope, maxBytes === undefined ? undefined : { inlineBytes: maxBytes, readBytes: maxBytes })
+  (deps: EventsDeps, call: Call, scope: ApiScope, next: string): Get =>
+  async (path, query, maxBytes) => {
+    const ms = deps.deadlineMs ?? READ_DEADLINE_MS
+    const deadline = new AbortController()
+    const signal = call.signal === undefined ? deadline.signal : AbortSignal.any([call.signal, deadline.signal])
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        // Settled first, so the request stopping after it is not what the call answers.
+        reject(new GitHubPluginError("UNAVAILABLE", `GitHub did not answer GET ${path} within ${ms / 1000} seconds.`, next))
+        deadline.abort()
+      }, ms)
+    })
+    try {
+      return await Promise.race([deps.api.run({ method: "GET", path, query }, { ...call, script: true, signal }, scope, maxBytes === undefined ? undefined : { inlineBytes: maxBytes, readBytes: maxBytes }), late])
+    } finally {
+      clearTimeout(timer)
+    }
+  }
 
 /**
  * The tool's and the method's one run: asserts github_events_list for the caller, then lists, with GETs only. Each GET
@@ -978,13 +1169,13 @@ const getter =
  */
 export async function runEvents(deps: EventsDeps, input: unknown, call: Call): Promise<EventsListResult> {
   await assertAction(deps, EVENTS_ACTION, call)
-  return listEvents(getter(deps, call, EVENTS_SCOPE), deps.identity, input, (deps.now ?? Date.now)(), deps.host)
+  return listEvents(getter(deps, call, EVENTS_SCOPE, "Call events_list again with the same cursor; if GitHub keeps answering slowly, run /github-status."), deps.identity, input, (deps.now ?? Date.now)(), deps.host)
 }
 
 /** probe's one run: asserts github_probe for the caller, then its one GET /user under PROBE_SCOPE. */
 export async function runProbe(deps: EventsDeps, input: unknown, call: Call): Promise<ProbeResult> {
   await assertAction(deps, PROBE_ACTION, call)
-  return probeEvents(getter(deps, call, PROBE_SCOPE), deps.identity, input, deps.host)
+  return probeEvents(getter(deps, call, PROBE_SCOPE, "Call probe again; if GitHub keeps answering slowly, run /github-status."), deps.identity, input, deps.host)
 }
 
 function summary(result: EventsListResult): string {

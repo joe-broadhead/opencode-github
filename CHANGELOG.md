@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`events_list`'s searches page by time, so a result that changes while a search pages loses nothing.** A search
+  paged by page number over results sorted by time: a result already read that changed between two requests moved to
+  the end, every later result moved up a place, and the first result of the next page was never listed, with no gap.
+  Each page now asks again from the last second the page before it read, up to the read's cut, and a result read twice
+  is listed once; a second read whole by itself is read again from its first result when one leaves it meanwhile.
+- **A search answer over 32 MB no longer stops every stream.** It answered `TOO_LARGE` on every call, notifications
+  included. Its range is now read again in pages of 10, and within a second read whole, as ten pages of 10 at the same
+  offsets, then pages of one. Only a result alone over 32 MB is left out, with one `gap` (`window-truncated`), and the
+  search goes on after it. `TOO_LARGE` remains for a notifications answer over 32 MB.
+- **Each of `events_list`'s and `probe`'s requests has 60 seconds**, its answer read whole included: past that it stops
+  and the call answers `UNAVAILABLE`, with the cursor unchanged. The caller's own abort still stops it at once.
+
 ## [0.0.7] - 2026-11-18
 
 ### Fixed

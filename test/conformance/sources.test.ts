@@ -43,12 +43,19 @@ const TOKEN = "gho_" + "t".repeat(36)
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } })
 
-/** GitHub's REST answers from the recorded data: searches by their qualifier, oldest first, paged; notifications newest first. */
+/**
+ * GitHub's REST answers from the recorded data: searches by their qualifier's range (`>=from` or `from..to`, both ends
+ * inclusive), oldest first, paged; notifications newest first.
+ */
 function answer(url: URL): Response {
   const query = url.searchParams
   const page = Number(query.get("page") ?? 1)
   const per = Number(query.get("per_page") ?? 30)
-  const qualifier = (name: string) => new RegExp(`${name}:>=(\\S+)`).exec(query.get("q") ?? "")?.[1]
+  const within = (at: string, name: string) => {
+    const match = new RegExp(`${name}:(?:>=(\\S+)|(\\S+)\\.\\.(\\S+))`).exec(query.get("q") ?? "")!
+    const time = Date.parse(at)
+    return match[1] !== undefined ? time >= Date.parse(match[1]) : time >= Date.parse(match[2]!) && time <= Date.parse(match[3]!)
+  }
   const paged = (all: unknown[]) => json({ total_count: all.length, incomplete_results: false, items: all.slice((page - 1) * per, page * per) })
   switch (url.pathname) {
     case "/user":
@@ -58,16 +65,14 @@ function answer(url: URL): Response {
       // A GitHub App user token gets 422 for a search of issues and pull requests together.
       const kind = /(?:^|\s)is:(issue|pull-request)(?:\s|$)/.exec(query.get("q") ?? "")?.[1]
       if (kind === undefined) return new Response(JSON.stringify({ message: "Validation Failed" }), { status: 422 })
-      const from = Date.parse(qualifier("updated")!)
       return paged(
         (GITHUB["issues"] as { updated_at: string }[])
-          .filter((item) => Date.parse(item.updated_at) >= from && ("pull_request" in item) === (kind === "pull-request"))
+          .filter((item) => within(item.updated_at, "updated") && ("pull_request" in item) === (kind === "pull-request"))
           .sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at)),
       )
     }
     case "/search/commits": {
-      const from = Date.parse(qualifier("committer-date")!)
-      return paged((GITHUB["commits"] as { commit: { committer: { date: string } } }[]).filter((item) => Date.parse(item.commit.committer.date) >= from))
+      return paged((GITHUB["commits"] as { commit: { committer: { date: string } } }[]).filter((item) => within(item.commit.committer.date, "committer-date")))
     }
     case "/notifications": {
       const since = Date.parse(query.get("since")!)
