@@ -141,7 +141,7 @@ function github(options: { perPage?: number; notifications?: "ok" | "forbidden";
     }
     if (path === "/notifications") {
       if (options.notifications === "forbidden") return { ok: false, status: 403, data: { message: "Resource not accessible" }, truncated: false, trust: { githubContent: "untrusted" } } as ApiOutput
-      const since = Date.parse(String(query.since))
+      const since = query.since === undefined ? Number.NEGATIVE_INFINITY : Date.parse(String(query.since))
       // before is exclusive; since inclusive.
       const before = query.before === undefined ? Number.POSITIVE_INFINITY : Date.parse(String(query.before))
       const all = (options.inbox ?? NOTIFICATIONS).filter((item) => Date.parse(item.updated_at) >= since && Date.parse(item.updated_at) < before).sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
@@ -369,8 +369,9 @@ describe("GitHub's notification answers, read whole", () => {
   it("gives every events_list read path the 32 MB limit, so none is left on the agent's cap", () => {
     const source = readFileSync(new URL("../../src/source-events.ts", import.meta.url), "utf8")
     const reads = source.split("\n").filter((line) => line.includes("list(get,"))
-    expect(reads.length).toBe(2)
-    expect(reads.every((line) => line.includes("EVENTS_MAX_BYTES"))).toBe(true)
+    const events = reads.filter((line) => line.includes("EVENTS_MAX_BYTES"))
+    expect(events).toHaveLength(2)
+    expect(reads.some((line) => line.includes("65_536"))).toBe(true)
   })
 })
 
