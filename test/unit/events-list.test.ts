@@ -307,10 +307,12 @@ describe("events_list", () => {
     expect(next.refused ?? []).toEqual([])
   })
 
-  it("stops with UNAVAILABLE on a failed search, and with TOO_LARGE on one no page size reads whole", async () => {
+  it("stops with UNAVAILABLE on a failed search, and with TOO_LARGE on a notifications page no size reads whole", async () => {
     const failing = async () => ({ ok: false, status: 422, data: {}, truncated: false, trust: { githubContent: "untrusted" } }) as ApiOutput
     expect(await code(listEvents(failing, github().identity, { since: SINCE }, NOW))).toBe("UNAVAILABLE")
-    const cut = async () => ({ ok: true, status: 200, data: "{", truncated: true, trust: { githubContent: "untrusted" } }) as ApiOutput
+    // A search page over the cap is read again at half the size (`pageAt`), and one result over it answers a gap; a
+    // notifications page over the cap cannot be paged down, so it is TOO_LARGE.
+    const cut = async (path: string) => (path === "/notifications" ? { ok: true, status: 200, data: "{", truncated: true, trust: { githubContent: "untrusted" } } : { ok: true, status: 200, data: { total_count: 0, incomplete_results: false, items: [] }, truncated: false, trust: { githubContent: "untrusted" } }) as ApiOutput
     expect(await code(listEvents(cut, github().identity, { since: SINCE }, NOW))).toBe("TOO_LARGE")
   })
 
@@ -335,20 +337,15 @@ describe("events_list", () => {
     expect(ids).toEqual(EXPECTED)
   })
 
-  it("answers TOO_LARGE, never UNAVAILABLE, when one item alone is over the read cap", async () => {
-    let asked = 0
-    const cut = async () => {
-      asked++
-      return { ok: true, status: 200, data: { total_count: 1, incomplete_results: false, items: [] }, truncated: true, trust: { githubContent: "untrusted" } } as ApiOutput
-    }
-    const refused = (await listEvents(cut, github().identity, { since: SINCE }, NOW).catch((error: unknown) => error)) as GitHubPluginError
-    expect(refused).toBeInstanceOf(GitHubPluginError)
-    expect(refused.code).toBe("TOO_LARGE")
-    expect(refused.detail).toContain("/search/issues")
-    // Halved from 100 to one item: 100, 50, 25, 12, 6, 3, 1.
-    expect(asked).toBe(7)
-    // Nothing tells the caller to try again later: no page size changes it.
-    expect(refused.nextStep).not.toMatch(/again|try/i)
+  it("answers a gap, never TOO_LARGE and never a failure, when one item alone is over the read cap", async () => {
+    const cut = async (path: string) =>
+      (path === "/notifications"
+        ? { ok: true, status: 200, data: [], truncated: false, trust: { githubContent: "untrusted" } }
+        : { ok: true, status: 200, data: { total_count: 1, incomplete_results: false, items: [] }, truncated: path === "/search/issues", trust: { githubContent: "untrusted" } }) as ApiOutput
+    const result = (await listEvents(cut, github().identity, { since: SINCE }, NOW)) as EventsListResult
+    // Halved from 100 to one item, and one result is still over the cap: the page answers the loss and reads on.
+    expect(result.gap).toEqual({ reason: "window-truncated", since: "2026-10-01T00:00:00.000Z" })
+    expect(result.events).toEqual([])
   })
 })
 

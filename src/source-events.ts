@@ -102,8 +102,10 @@ const SEARCH_PAGES = 6
 export const SEARCH_CAP = 1000
 /**
  * The most search requests one call makes, across its three searches (issues, pull requests, commits): GitHub allows
- * 30 a minute for a signed-in user. Three reads of SEARCH_PAGES make at most 18, which leaves room for one second read
- * whole (SEARCH_CAP / SEARCH_PER_PAGE = 10 requests).
+ * 30 a minute for a signed-in user. Three reads of SEARCH_PAGES make at most 18, and one second read whole makes 10
+ * (SEARCH_CAP / SEARCH_PER_PAGE). A page GitHub cuts costs one more request for each halving (`pageAt`), so a call at
+ * the floor reads fewer pages, and a second it cannot read whole in what is left of the budget is answered as a gap
+ * (`searchSecond`) rather than holding the stream there for good.
  */
 export const SEARCH_BUDGET = 30
 /** The most notifications one call reads (10 pages of 50); a backlog over it is walked oldest first across calls. */
@@ -334,6 +336,17 @@ interface Budget {
   left: number
 }
 
+/**
+ * A page whose one result, alone, is over the 100,000 bytes `github_api` reads whole. No page size reads it, so the
+ * stream leaves it out, answers the loss as a gap, and moves past it (`search`, `searchSecond`). The contract's
+ * `TOO_LARGE` is the whole answer over the source's `maxBytes`, not one result, so it is not answered here.
+ */
+interface Cut {
+  readonly cut: true
+  readonly size: number
+  readonly page: number
+}
+
 /** An item as the stream that read it. */
 const streamOf = (item: Item | undefined, s: StreamName): Item | undefined => (item === undefined ? undefined : { ...item, s })
 
@@ -354,7 +367,7 @@ const searchItems = (data: unknown) => (record(data) ? data["items"] : undefined
  * The cursor is a position (a time and an id), never a page number: a step down does not move it, and the next call
  * resumes at the same position.
  */
-async function pageAt(get: Get, spec: Search, range: string, offset: number, size: number, budget: Budget): Promise<(Answer & { size: number; page: number }) | undefined> {
+async function pageAt(get: Get, spec: Search, range: string, offset: number, size: number, budget: Budget): Promise<(Answer & { size: number; page: number }) | Cut | undefined> {
   for (let at = size; ; at = Math.floor(at / 2)) {
     if (budget.left <= 0) return undefined
     budget.left--
@@ -362,8 +375,8 @@ async function pageAt(get: Get, spec: Search, range: string, offset: number, siz
     const answer = await list(get, spec.path, { q: spec.query(range), sort: spec.sort, order: "asc", per_page: at, page }, searchItems)
     if (answer === undefined) return undefined
     if (!answer.truncated) return { ...answer, size: at, page }
-    // One result alone is over the cap: no page size, and no later call, reads it whole.
-    if (at <= PAGE_FLOOR) fail("TOO_LARGE", `GitHub's answer to ${spec.path} is cut at 100,000 bytes even for one result: result ${page} there cannot be read whole.`, "Nothing in events_list changes it: read that one result with GitHub's own tools.")
+    // One result alone is over the cap: no page size reads it, so the caller leaves it out and moves past it.
+    if (at <= PAGE_FLOOR) return { cut: true, size: at, page }
   }
 }
 
@@ -376,25 +389,35 @@ async function search(get: Get, spec: Search, from: Key, need: number, budget: B
   const hold: SearchRead = { items: [], complete: false, last: from.t, start: from }
   const items: Item[] = []
   const ids = new Set<string>()
+  // Every result read, once: a smaller page can read one again, and a count of what pages answered would count it twice.
+  const seen = new Set<string>()
   let last = from.t
-  // Where the next page starts, on the grid of whole pages read; `fetched` counts what they answered.
+  // Where the next page starts, on the grid of whole pages read.
   let offset = 0
-  let fetched = 0
   let read = false
   const range = `>=${isoSeconds(startOf(from))}`
   for (let step = 0; step < SEARCH_PAGES; step++) {
     const answer = await pageAt(get, spec, range, offset, pages.size, budget)
     if (answer === undefined) break
+    if ("cut" in answer) {
+      // One result is over the cap, at the floor. It is left out and the page answers a gap from the last result read,
+      // and the stream moves past it: to the second of the next readable result, so nothing after it is lost.
+      const next = await pageAt(get, spec, range, answer.page, PAGE_FLOOR, budget)
+      const past = next !== undefined && !("cut" in next) && next.items.length > 0 ? spec.make(next.items[0]!) : undefined
+      // `last` moves to where the stream continues, so everything it read before the cut is listed: nothing at that
+      // second is left behind, and nothing unread is listed.
+      return { items: items.sort(compare), complete: past === undefined, last: past === undefined ? last + 1000 : past.t, start: past === undefined ? { t: last, i: AFTER_SECOND } : { t: past.t, i: "" }, skipped: last }
+    }
     // GitHub's search timed out and may have left results out: list nothing past the position, and read it again on the
     // next call, rather than move past what it left out.
     if (answer.incomplete) return hold
     read = true
     pages.size = answer.size
     offset = answer.page * answer.size
-    fetched += answer.items.length
     for (const raw of answer.items) {
       const item = spec.make(raw)
       if (!item) continue
+      seen.add(item.i)
       last = Math.max(last, item.t)
       // GitHub may order a second's results differently from one page to the next: each item is listed once.
       if (compare(item, from) > 0 && !ids.has(item.i)) {
@@ -402,8 +425,9 @@ async function search(get: Get, spec: Search, from: Key, need: number, budget: B
         items.push(item)
       }
     }
-    // total_count says where the results end; without it, a short page does, at the size this page was read at.
-    const ended = answer.items.length === 0 || (answer.total !== undefined ? fetched >= Math.min(answer.total, SEARCH_CAP) : answer.items.length < answer.size)
+    // total_count says where the results end; without it, a short page does, at the size this page was read at. The
+    // count is of the results read, never of what pages answered, so one read twice does not end the stream early.
+    const ended = answer.items.length === 0 || (answer.total !== undefined ? seen.size >= Math.min(answer.total, SEARCH_CAP) : answer.items.length < answer.size)
     if (ended) return { items: items.sort(compare), complete: true, last, start: from }
     if (items.length > need && items.some((item) => item.t < last)) break
   }
@@ -429,25 +453,38 @@ async function searchSecond(get: Get, spec: Search, from: Key, second: number, b
   const range = `${at}..${at}`
   const items: Item[] = []
   const ids = new Set<string>()
+  // Every result of the second read, once: a smaller page can read one again.
+  const seen = new Set<string>()
   let offset = 0
-  let fetched = 0
   for (let step = 0; step < Math.ceil(SEARCH_CAP / pages.size); step++) {
     const answer = await pageAt(get, spec, range, offset, pages.size, budget)
     if (answer === undefined) return hold
+    if ("cut" in answer) {
+      // One result of this second is over the cap, so the second cannot be read whole: as for a second with more
+      // results than GitHub answers, the stream moves past it and the page answers the gap.
+      return { items: items.sort(compare), complete: false, last: second + 1000, start: past, skipped: second }
+    }
     if (answer.incomplete) return hold
     if (answer.total !== undefined && answer.total > SEARCH_CAP) return { items: [], complete: false, last: second, start: past, skipped: second }
     pages.size = answer.size
     offset = answer.page * answer.size
-    fetched += answer.items.length
     for (const raw of answer.items) {
       const item = spec.make(raw)
-      if (item && item.t === second && compare(item, from) > 0 && !ids.has(item.i)) {
+      if (!item || item.t !== second) continue
+      seen.add(item.i)
+      if (compare(item, from) > 0 && !ids.has(item.i)) {
         ids.add(item.i)
         items.push(item)
       }
     }
-    // A short page ends it, at the size this page was read at.
-    const ended = answer.items.length < answer.size || (answer.total !== undefined && fetched >= answer.total)
+    if (answer.total !== undefined && answer.total > 1 && answer.size <= 1) {
+      // At one result a page, every page of this second must be over the cap at a larger size, and one call reads no
+      // more pages than its budget holds: the second cannot be read whole, so the stream moves past it with the gap,
+      // rather than asking for the same pages again on every call.
+      return { items: items.sort(compare), complete: false, last: second + 1000, start: past, skipped: second }
+    }
+    // A short page ends it, at the size this page was read at; so does having read every result of the second.
+    const ended = answer.items.length < answer.size || (answer.total !== undefined && seen.size >= answer.total)
     if (!ended) continue
     // The second is read whole: list what is after the position, or move past it.
     if (items.length === 0) return { items: [], complete: false, last: second + 1000, start: past }

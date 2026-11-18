@@ -21,8 +21,19 @@ const note = (id: string, updated: string, type = "Release") => ({ id, reason: "
 /**
  * `shuffle`: ties reshuffled on every request. `deepest`: the furthest notification GitHub pages to (422 past it).
  * `retain`: GitHub deletes notifications older than this on its own clock (`clock.now`, the time of the page asked).
+ * `keep`: a page over 100,000 bytes, holding the whole results that fit before the cut: this many, or the page whole.
+ * `big`: a result alone over 100,000 bytes, so a page holding it keeps only the whole results before it.
  */
-function world(data: { issues?: ReturnType<typeof issue>[]; commits?: ReturnType<typeof commit>[]; inbox?: ReturnType<typeof note>[]; shuffle?: boolean; deepest?: number; retain?: number }) {
+function world(data: {
+  issues?: ReturnType<typeof issue>[]
+  commits?: ReturnType<typeof commit>[]
+  inbox?: ReturnType<typeof note>[]
+  shuffle?: boolean
+  deepest?: number
+  retain?: number
+  keep?: (perPage: number, page: number) => number | undefined
+  big?: (path: string, raw: Record<string, unknown>) => boolean
+}) {
   const clock = { now: NOW }
   const calls: { path: string; query: Record<string, unknown> }[] = []
   let seed = 7
@@ -37,7 +48,14 @@ function world(data: { issues?: ReturnType<typeof issue>[]; commits?: ReturnType
       const t = Date.parse(at)
       return match[1] !== undefined ? t >= Date.parse(match[1]) : t >= Date.parse(match[2]!) && t <= Date.parse(match[3]!)
     }
-    const answer = <T>(all: T[]) => ok({ total_count: all.length, incomplete_results: false, items: all.slice(0, SEARCH_CAP).slice((page - 1) * per, page * per) })
+    // A page at 100,000 bytes: the whole results that fit, before the cut, and `truncated` on the answer.
+    const answer = <T extends Record<string, unknown>>(all: T[]) => {
+      const slice = all.slice(0, SEARCH_CAP).slice((page - 1) * per, page * per)
+      const firstBig = slice.findIndex((raw) => data.big?.(path, raw) === true)
+      const kept = firstBig === -1 ? (data.keep?.(per, page) ?? slice.length) : firstBig
+      const data_ = { total_count: all.length, incomplete_results: false, items: slice.slice(0, kept) }
+      return kept < slice.length ? { ...ok(data_), truncated: true } : ok(data_)
+    }
     if (path === "/search/issues") {
       const pulls = q.includes("is:pull-request")
       const all = (data.issues ?? []).filter((i) => within(i.updated_at, "updated") && i.html_url.includes("/pull/") === pulls).sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at) || tie() || b.number - a.number)
@@ -426,5 +444,85 @@ describe("late arrivals", () => {
     expect(new Set(ids(pages)).size).toBe(61)
     const again = await read(w, NOW + 60_000, { account: LOGIN, cursor: pages.at(-1)!.cursor, limit: 7 })
     expect(ids(again)).toEqual([])
+  })
+})
+
+describe("a page GitHub cuts, and one result over the cap (review round 5)", () => {
+  const BASE = Date.parse("2026-10-01T00:00:00Z")
+  // 37 results in one stream, a second apart: the read's six pages of 12 reach the last of them in one call.
+  const many = (count = 37) => Array.from({ length: count }, (_, k) => issue(1000 + k, iso(BASE + k * 1000)))
+  const each = (all: ReturnType<typeof issue>[]) => all.map((i) => `octo/app#${i.number}@${i.updated_at}`)
+  // The reviewer's shape: 100 is cut, 50 is cut, 25 reads page 1 whole and page 2 is cut, so 12 starts at result 25.
+  const reviewer = (perPage: number, page: number) => (perPage >= 50 ? 0 : perPage === 25 && page === 2 ? 0 : undefined)
+  const sizes = (w: World) => w.calls.filter((call) => call.path === "/search/issues").map((call) => `${call.query.per_page}:${call.query.page}`)
+
+  it("lists 37 results once where the step to 12 starts before the offset it reached", async () => {
+    const w = world({ issues: many(), keep: reviewer })
+    const pages = await read(w, NOW, { since: iso(BASE), limit: 500 })
+    expect(gaps(pages)).toEqual([])
+    const seen = ids(pages)
+    expect(seen).toEqual(each(many()))
+    expect(pages.at(-1)!.more).toBe(false)
+    // The 25-to-12 step is asked at page 3, which starts at result 25: page 1 at 25 read result 25 already.
+    expect(sizes(w).slice(0, 5)).toEqual(["100:1", "50:1", "25:1", "25:2", "12:3"])
+  })
+
+  it("lists the last two results where they share one second after the page before them was cut", async () => {
+    const all = many()
+    const last = iso(BASE + 35 * 1000)
+    const tied = [...all.slice(0, 35), issue(1035, last), issue(1036, last)]
+    const pages = await read(world({ issues: tied, keep: reviewer }), NOW, { since: iso(BASE), limit: 500 })
+    expect(gaps(pages)).toEqual([])
+    const seen = ids(pages)
+    expect(new Set(seen).size).toBe(seen.length)
+    expect(seen).toEqual(each(tied))
+  })
+
+  it("lists every result where the page holding the last of them is cut", async () => {
+    const keep = (perPage: number, page: number) => (perPage >= 50 ? 0 : perPage === 25 && page === 2 ? 0 : perPage === 12 && page === 4 ? 0 : undefined)
+    const w = world({ issues: many(), keep })
+    const pages = await read(w, NOW, { since: iso(BASE), limit: 500 })
+    expect(gaps(pages)).toEqual([])
+    expect(ids(pages)).toEqual(each(many()))
+    expect(pages.at(-1)!.more).toBe(false)
+  })
+
+  it("leaves out one result over the cap at the floor, answers one gap, and lists the rest", async () => {
+    const all = many()
+    const over = all[26]!
+    const w = world({ issues: all, big: (_path, raw) => raw["number"] === over.number })
+    const pages = await read(w, NOW, { since: iso(BASE), limit: 500 })
+    // The one result the plugin cannot read is answered as a gap, from where it was lost, never as a failed call.
+    expect(gaps(pages)).toEqual([{ reason: "window-truncated", since: all[25]!.updated_at }])
+    expect(ids(pages)).toEqual(each(all.filter((i) => i !== over)))
+    expect(pages.at(-1)!.more).toBe(false)
+  })
+
+  it("skips a second holding one result over the cap, answers one gap for it, and reads on past it", async () => {
+    const T = "2026-11-02T00:00:00Z"
+    const burst = Array.from({ length: 900 }, (_, k) => commit(`r${String(k).padStart(5, "0")}`, T))
+    // GitHub orders the second's ties by descending sha, so the 250th result there is r00750.
+    const w = world({ commits: burst, big: (path, raw) => path === "/search/commits" && raw["sha"] === "r00750" })
+    const pages = await read(w, NOW, { since: "2026-10-31T00:00:00Z", limit: 100 })
+    expect(gaps(pages)).toEqual([{ reason: "window-truncated", since: iso(Date.parse(T)) }])
+    const listed = ids(pages)
+    expect(listed.length).toBeGreaterThan(0)
+    expect(listed.length).toBeLessThan(900)
+    expect(new Set(listed).size).toBe(listed.length)
+    // The second is never read again once passed.
+    const again = await page(w, NOW + 60_000, { account: LOGIN, cursor: pages.at(-1)!.cursor })
+    expect(again.events).toEqual([])
+    expect(again.gap).toBeUndefined()
+  })
+
+  it("walks a crowded second one result a page, listing some or answering a gap on every call", async () => {
+    const T = "2026-11-02T00:00:00Z"
+    const burst = Array.from({ length: 60 }, (_, k) => commit(`r${String(k).padStart(5, "0")}`, T))
+    const pages = await read(world({ commits: burst, keep: (perPage) => (perPage >= 2 ? 0 : undefined) }), NOW, { since: "2026-10-31T00:00:00Z", limit: 10 })
+    expect(new Set(ids(pages)).size).toBe(ids(pages).length)
+    expect(ids(pages).length).toBeGreaterThan(0)
+    expect(gaps(pages).length).toBeLessThanOrEqual(1)
+    // Every call but the last moves on: it lists a result, or answers the gap for the rest of the second.
+    expect(pages.slice(0, -1).every((p) => p.events.length > 0 || p.gap !== undefined)).toBe(true)
   })
 })
