@@ -94,12 +94,12 @@ const PER_PAGE = 50
 /** Results per search page: GitHub's most. */
 export const SEARCH_PER_PAGE = 100
 /**
- * The most bytes one search answer may hold. `events_list` reads GitHub's own answer, not the 100,000-byte cut
- * `github_api` shows an agent, so a page of SEARCH_PER_PAGE results arrives whole: 100 issues of at most about 270 KB
- * each (GitHub's 65,536-character body) is about 27 MB. An answer over this is refused by name, never cut and never
- * skipped.
+ * The most bytes one answer of `events_list`'s own reads may hold, its searches and its notifications: GitHub's answer,
+ * not the 100,000-byte cut `github_api` shows an agent. A page of SEARCH_PER_PAGE results arrives whole (100 issues of
+ * at most about 270 KB each is about 27 MB), and so does a page of notifications. An answer over this is refused by
+ * name, never cut and never skipped.
  */
-export const SEARCH_MAX_BYTES = 32 * 1024 * 1024
+export const EVENTS_MAX_BYTES = 32 * 1024 * 1024
 /** The most pages one search reads from its position in one call. */
 const SEARCH_PAGES = 6
 /** GitHub answers at most this many results for one search query, whatever its total_count says. */
@@ -139,7 +139,7 @@ const STREAMS: readonly StreamName[] = ["i", "p", "c", "n"]
 
 /**
  * A GET through github_api's spec, as the caller. `maxBytes` is how much of the answer to read whole: a source's own
- * read (`events_list`) sets SEARCH_MAX_BYTES, and every other read keeps github_api's 100,000-byte inline cap.
+ * read (`events_list`) sets EVENTS_MAX_BYTES, and every other read keeps github_api's 100,000-byte inline cap.
  */
 export type Get = (path: string, query: Record<string, string | number | boolean>, maxBytes?: number) => Promise<ApiOutput>
 /** The signed-in login, as the sign-in recorded it (GitHub's GET /user at sign-in); undefined when nobody is signed in. */
@@ -309,13 +309,13 @@ async function list(get: Get, path: string, query: Record<string, string | numbe
 }
 
 /**
- * One search page, read whole. GitHub's answer is read up to SEARCH_MAX_BYTES, not the 100,000-byte cut github_api shows
+ * One search page, read whole. GitHub's answer is read up to EVENTS_MAX_BYTES, not the 100,000-byte cut github_api shows
  * an agent; an answer over that, which GitHub's own limits make impossible, is named by its limit and never cut.
  */
 async function searchPage(get: Get, spec: Search, range: string, page: number): Promise<Answer> {
-  const answer = (await list(get, spec.path, { q: spec.query(range), sort: spec.sort, order: "asc", per_page: SEARCH_PER_PAGE, page }, searchItems, [], SEARCH_MAX_BYTES))!
+  const answer = (await list(get, spec.path, { q: spec.query(range), sort: spec.sort, order: "asc", per_page: SEARCH_PER_PAGE, page }, searchItems, [], EVENTS_MAX_BYTES))!
   if (answer.truncated) {
-    fail("TOO_LARGE", `GitHub's answer to ${spec.path} is over ${SEARCH_MAX_BYTES / (1024 * 1024)} MB, the most events_list reads whole.`, "Nothing in events_list changes it: the answer is over the bytes events_list reads whole.")
+    fail("TOO_LARGE", `GitHub's answer to ${spec.path} is over ${EVENTS_MAX_BYTES / (1024 * 1024)} MB, the most events_list reads whole.`, "Nothing in events_list changes it: the answer is over the bytes events_list reads whole.")
   }
   return answer
 }
@@ -474,9 +474,9 @@ async function notifications(get: Get, state: Notified, account: string, cut: nu
   const base = startOf(position)
   const before = isoSeconds(Math.floor(cut / 1000) * 1000 + 1000)
   const ask: Ask = async (since, page, perPage) => {
-    const read = await list(get, "/notifications", { all: true, participating: true, since: isoSeconds(since), before, per_page: perPage, page }, (data) => data, [401, 403, 404, 422])
-    // Notifications keep github_api's cap, and are not read at a smaller page: one page over it is named by its limit.
-    if (read?.truncated === true) fail("TOO_LARGE", `GitHub's answer to /notifications is over 100,000 bytes for a page of ${perPage} notifications.`, "Nothing in events_list changes it: read notifications with GitHub's own tools.")
+    const read = await list(get, "/notifications", { all: true, participating: true, since: isoSeconds(since), before, per_page: perPage, page }, (data) => data, [401, 403, 404, 422], EVENTS_MAX_BYTES)
+    // A page over the limit events_list reads whole is named by that limit, as a search page is.
+    if (read?.truncated === true) fail("TOO_LARGE", `GitHub's answer to /notifications is over ${EVENTS_MAX_BYTES / (1024 * 1024)} MB, the most events_list reads whole.`, "Nothing in events_list changes it: the answer is over the bytes events_list reads whole.")
     return read
   }
   /** Whether the window from `since` holds an n-th notification; undefined when GitHub will not say. */

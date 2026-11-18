@@ -4,6 +4,7 @@
 // signed-in login is the sign-in's own (no GitHub call), as `registerApiTool`'s identity reads it. Every login,
 // repository and link is made up.
 import { createHash } from "node:crypto"
+import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import type { ApiOutput } from "../../src/api/contract.js"
 import { registerApiTool } from "../../src/api/tool.js"
@@ -144,7 +145,10 @@ function github(options: { perPage?: number; notifications?: "ok" | "forbidden";
       // before is exclusive; since inclusive.
       const before = query.before === undefined ? Number.POSITIVE_INFINITY : Date.parse(String(query.before))
       const all = (options.inbox ?? NOTIFICATIONS).filter((item) => Date.parse(item.updated_at) >= since && Date.parse(item.updated_at) < before).sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
-      return ok(all.slice((page - 1) * Number(query.per_page), page * Number(query.per_page)))
+      const listed = all.slice((page - 1) * Number(query.per_page), page * Number(query.per_page))
+      // A bare list over the limit is cut to a string, as capInline cuts one: no items, and truncated.
+      if (Buffer.byteLength(JSON.stringify(listed)) > (maxBytes ?? 100_000)) return { ...ok(JSON.stringify(listed).slice(0, maxBytes ?? 100_000)), truncated: true } as ApiOutput
+      return ok(listed)
     }
     throw new Error(`the synthetic GitHub has no ${path}`)
   }
@@ -328,6 +332,45 @@ describe("events_list", () => {
     expect(refused).toBeInstanceOf(GitHubPluginError)
     expect(refused.code).toBe("TOO_LARGE")
     expect(refused.detail).toContain("32 MB")
+  })
+})
+
+describe("GitHub's notification answers, read whole", () => {
+  // A notification is about 4.7 KB in GitHub's own example: 60 of them are about 280 KB, over the agent's cap.
+  const T = Date.parse("2026-11-01T00:00:00Z")
+  const posts = Array.from({ length: 60 }, (_, k) => ({
+    id: `${9000 + k}`,
+    reason: "subscribed",
+    updated_at: new Date(T + k * 60_000).toISOString().replace(".000Z", "Z"),
+    subject: { title: `v${k} ${"x".repeat(4_600)}`, type: "Release" },
+    repository: { full_name: "octo/app", html_url: "https://github.com/octo/app" },
+  }))
+
+  it("reads 60 notifications of about 280 KB whole, and lists each once", async () => {
+    const fake = github({ issues: [], commits: [], inbox: posts })
+    const result = (await list(fake)({ since: "2026-10-31T00:00:00Z", limit: PAGE.max })) as EventsListResult
+    expect(result.events).toHaveLength(60)
+    expect(new Set(result.events.map((event) => event.external_id)).size).toBe(60)
+    expect(result.more).toBe(false)
+    // A page of 50 of them is about 235 KB: over the 100,000-byte cap an answer shown to an agent gets.
+    expect(fake.calls.filter((call) => call.path === "/notifications").at(-1)!.query).toMatchObject({ per_page: 50 })
+  })
+
+  it("names the 32 MB limit for a notifications answer over it, and never UNAVAILABLE", async () => {
+    const huge = posts.map((post, k) => ({ ...post, id: `${8000 + k}`, subject: { title: "y".repeat(900_000), type: "Release" } }))
+    const fake = github({ issues: [], commits: [], inbox: huge })
+    const refused = (await listEvents(fake.get, fake.identity, { since: "2026-10-31T00:00:00Z", limit: PAGE.max }, NOW).catch((error: unknown) => error)) as GitHubPluginError
+    expect(refused).toBeInstanceOf(GitHubPluginError)
+    expect(refused.code).toBe("TOO_LARGE")
+    expect(refused.detail).toContain("/notifications")
+    expect(refused.detail).toContain("32 MB")
+  })
+
+  it("gives every events_list read path the 32 MB limit, so none is left on the agent's cap", () => {
+    const source = readFileSync(new URL("../../src/source-events.ts", import.meta.url), "utf8")
+    const reads = source.split("\n").filter((line) => line.includes("list(get,"))
+    expect(reads.length).toBe(2)
+    expect(reads.every((line) => line.includes("EVENTS_MAX_BYTES"))).toBe(true)
   })
 })
 
