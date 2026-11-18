@@ -35,7 +35,7 @@ When you add a rule here, add it to the scan and its self-test too.
 ## Design
 
 - GitHub's own MCP tools are the tool surface. The plugin adds `github_events_list` (`src/source-events.ts`), its
-  source `github.activity` under the source contract (`@we-the-rebel-alliance/source-contract`, pinned to a tag in
+  sources `github.activity` and the list snapshot `github.notifications` under the source contract (`@we-the-rebel-alliance/source-contract`, pinned to a tag in
   `package-lock.json` and bundled into `dist/index.js`; `package.json`'s `sources` declares it), and the contract's
   `probe` tools RPC method; they make only GETs through `github_api`'s spec, as a script call, so each asserts its own
   action (`github_events_list`, `github_probe`) on its own `GET /path` first. The account and owner are the sign-in's
