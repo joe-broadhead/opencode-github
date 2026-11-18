@@ -153,6 +153,37 @@
         "urlHosts": [
           "github.com"
         ]
+      },
+      {
+        "id": "github.notifications",
+        "kind": "snapshot",
+        "tool": "events_list",
+        "input": {
+          "source": "github",
+          "list": "notifications"
+        },
+        "output": "list",
+        "accounts": {
+          "named": false
+        },
+        "permission": {
+          "tool": "github_events_list",
+          "rules": [
+            {
+              "action": "github_events_list",
+              "resource": "GET /notifications"
+            }
+          ]
+        },
+        "private": true,
+        "cost": {
+          "class": "free"
+        },
+        "maxAgeSec": 900,
+        "maxBytes": 65536,
+        "urlHosts": [
+          "github.com"
+        ]
       }
     ]
   },
