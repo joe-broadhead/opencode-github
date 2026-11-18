@@ -130,8 +130,10 @@ async function cases(): Promise<PageCase[]> {
   const done = (await list({ source: SOURCE, account: ACCOUNT, cursor: first, limit: 500 }))["cursor"] as string
   const state = JSON.parse(Buffer.from(first, "base64url").toString("utf8")) as Record<string, unknown>
   const { v: _v, s: _s, b: _b, ...positions } = state
-  const streams = positions["p"] as Record<string, [number, string]>
-  const expired = encodeBoundCursor({ plugin: NAMESPACE, source: SOURCE, account: ACCOUNT }, { ...positions, p: { ...streams, n: [OUTSIDE, ""] } })
+  // The notifications' position, the fourth, moved before GitHub's three months: a time in base 36, as the cursor writes it.
+  const streams = positions["p"] as [string, string][]
+  const outside = OUTSIDE % 1000 === 0 ? (OUTSIDE / 1000).toString(36) : `~${OUTSIDE.toString(36)}`
+  const expired = encodeBoundCursor({ plugin: NAMESPACE, source: SOURCE, account: ACCOUNT }, { ...positions, p: [...streams.slice(0, 3), [outside, ""]] })
   return [
     { name: "a first listing, one commit refused for a secret", input: { source: SOURCE, account: ACCOUNT, since: SINCE }, expect: "page" },
     { name: "two at a time", input: { source: SOURCE, account: ACCOUNT, since: SINCE, limit: 2 }, expect: "page" },

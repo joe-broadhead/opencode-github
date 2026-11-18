@@ -19,7 +19,7 @@
 // A search reads pages of 100 from its position up to the read's cut, paging by time: each page after the first asks
 // again from the last second the one before it read, so a result that changes while the search pages moves past the cut
 // and nothing slides into a page already read. When a page lies in one second, or every result it read shares one, that
-// second is read whole by itself (GitHub answers up to 1,000), in the plugin's order by id, so the position walks it
+// second is read whole by itself (GitHub answers up to 1,000), in the plugin's order (by a hash of each id), so the position walks it
 // across calls and then moves past it. A page whose answer is over what events_list reads whole is read again in pages
 // of 10, then 1; a result alone over it is left out, and the read answers a gap for it. A call makes at most 30 search
 // requests, GitHub's limit a minute, and each request has READ_DEADLINE_MS.
@@ -158,20 +158,43 @@ export type Get = (path: string, query: Record<string, string | number | boolean
 /** The signed-in login, as the sign-in recorded it (GitHub's GET /user at sign-in); undefined when nobody is signed in. */
 export type Identity = () => Promise<string | undefined>
 
+/**
+ * A place in a stream: a time, and inside its second an order key `i` ("" before every item of the second, AFTER_SECOND
+ * after all of them). An item's order key is ORDER_KEY_LENGTH characters of a hash of its id for the searches (so a
+ * position never spells out a repository's name), and the notification's id for notifications. `raw` marks a position
+ * carried over from a 0.0.6 or 0.0.7 cursor inside a second, which ordered that second by id: until the stream leaves
+ * that second, its items there keep that order (`i` is the id), so the walk goes on where it stopped.
+ */
 interface Key {
   readonly t: number
   readonly i: string
+  readonly raw?: true
 }
 
 interface Item extends Key {
   readonly s: StreamName
+  /** What the item is, whatever its order key: `owner/repo#n`, `owner/repo@sha`, or the notification's id. */
+  readonly id: string
   readonly event: SourceEvent
 }
+
+/**
+ * The length of a search item's order key: 66 bits of SHA-256 of its id, in base64url. Two different items of one second
+ * share a key with odds of about one in 10^16 for a second of 1,000 results; the tie is then broken by id, except
+ * against a cursor's position, which holds only the key.
+ */
+export const ORDER_KEY_LENGTH = 11
+/** A search item's order key inside its second: its id, hashed. */
+export const orderKey = (id: string) => createHash("sha256").update(id).digest("base64url").slice(0, ORDER_KEY_LENGTH)
+/** A notification's order key: its id, which GitHub gives as digits, or the hash of an id that is not. */
+const notificationKey = (id: string) => (/^\d{1,20}$/.test(id) ? id : orderKey(id))
 
 
 const record = (value: unknown): value is Data => typeof value === "object" && value !== null && !Array.isArray(value)
 const text = (value: unknown) => (typeof value === "string" && value.trim() !== "" ? value.trim() : undefined)
-const compare = (a: Key, b: Key) => a.t - b.t || (a.i < b.i ? -1 : a.i > b.i ? 1 : 0)
+const order = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+/** Time, then the order key; two items with one key, by id. */
+const compare = (a: Key & { id?: string }, b: Key & { id?: string }) => a.t - b.t || order(a.i, b.i) || (a.id !== undefined && b.id !== undefined ? order(a.id, b.id) : 0)
 const time = (value: unknown) => {
   const at = text(value)
   const parsed = at === undefined ? Number.NaN : Date.parse(at)
@@ -230,7 +253,7 @@ export function issueItem(raw: unknown, account: string): Item | undefined {
     url: text(raw["html_url"])!,
     labels: [merged ? "merged" : (text(raw["state"]) ?? "open"), ...labels],
   })
-  return { s: pr ? "p" : "i", t: at, i: id, event }
+  return { s: pr ? "p" : "i", t: at, i: orderKey(id), id, event }
 }
 
 /** A commit from /search/commits, at its committer date. */
@@ -248,7 +271,8 @@ export function commitItem(raw: unknown, account: string): Item | undefined {
   return {
     s: "c",
     t: at,
-    i: `${repo}@${sha}`,
+    i: orderKey(`${repo}@${sha}`),
+    id: `${repo}@${sha}`,
     event: makeEvent({
       source: SOURCE,
       account,
@@ -279,7 +303,8 @@ export function notificationItem(raw: unknown, account: string): Item | undefine
   return {
     s: "n",
     t: at,
-    i: id,
+    i: notificationKey(id),
+    id,
     event: makeEvent({
       source: SOURCE,
       account,
@@ -432,7 +457,7 @@ async function search(get: Get, spec: Search, from: Key, need: number, budget: B
       if (item.t <= end) newest = Math.max(at, item.t)
       // The next page reads this page's last second again, and GitHub may order a second's results differently from one
       // request to the next: each change is listed once.
-      const key = `${item.i}@${item.t}`
+      const key = `${item.id}@${item.t}`
       if (compare(item, from) > 0 && !keys.has(key)) {
         keys.add(key)
         items.push(item)
@@ -455,7 +480,7 @@ async function search(get: Get, spec: Search, from: Key, need: number, budget: B
       if (whole.skipped !== undefined || (whole.items.length === 0 && whole.start === from)) break
       const second = at
       items.splice(0, items.length, ...items.filter((item) => secondOf(item.t) !== second), ...whole.items)
-      for (const item of whole.items) keys.add(`${item.i}@${item.t}`)
+      for (const item of whole.items) keys.add(`${item.id}@${item.t}`)
       if (whole.oversized !== undefined) oversized ??= whole.oversized
       // Everything before the next second is read.
       last = Math.max(last, second + 1000)
@@ -517,7 +542,7 @@ async function pastLarge(get: Get, spec: Search, from: Key, at: number, cut: num
 }
 
 /**
- * One second of a search stream, read whole with a query for that second alone, in the plugin's own order (by id), so
+ * One second of a search stream, read whole with a query for that second alone, in the plugin's own order (by order key, a hash of each id), so
  * the position walks its items across calls whatever order GitHub gives them in. Its items after the position are
  * listed; when none is left, the stream moves past the second. A second with more results than GitHub answers
  * (SEARCH_CAP) cannot be read whole: the stream moves past it, and the page answers the gap (`skipped`). A result only
@@ -573,8 +598,8 @@ async function searchSecond(get: Get, spec: Search, from: Key, second: number, b
       total ??= answer.total
       for (const raw of answer.items) {
         const item = spec.make(raw)
-        if (item && item.t === second && compare(item, from) > 0 && !ids.has(item.i)) {
-          ids.add(item.i)
+        if (item && item.t === second && compare(item, from) > 0 && !ids.has(item.id)) {
+          ids.add(item.id)
           items.push(item)
         }
       }
@@ -735,7 +760,7 @@ async function truncatedRead(ask: Ask, state: Notified, since: number, account: 
 }
 
 /** The owner a page and a probe name: `github:` and the login, labelled with the login. The same everywhere. */
-const ownerOf = (login: string, host?: string): EventsOwner =>
+export const ownerOf = (login: string, host?: string): EventsOwner =>
   host === undefined ? { id: `github:${login}`, label: login } : { id: `github:${login}@${host.toLowerCase()}`, label: `${login} (${host.toLowerCase()})` }
 /** The account a page names, and a cursor and a grant are bound to: the login as GitHub compares logins, lowercase. */
 const accountOf = (login: string) => login.toLowerCase()
@@ -778,36 +803,53 @@ interface CursorState {
 const SEEN = /^([0-9a-f]{8})([0-9a-z]{1,11})$/
 
 /**
+ * The cursor's format, `k` in it. 1: positions as a list in STREAMS order, each `[time, key]` (`[time, id, 1]` for a
+ * position carried over from 0.0.6 or 0.0.7 inside a second), the lookback as `[behind, hashes]`, and every time in
+ * base 36 (`timeOf`). A cursor without `k` is 0.0.6's and 0.0.7's: times in milliseconds, and positions keyed by stream
+ * whose search ids order their second by id.
+ */
+const CURSOR_FORMAT = 1
+/**
+ * The most characters a cursor of format 1 has, well under the source contract's 1,024 (EVENT_LIMITS.cursor): its
+ * fields are bounded (a login of 39, an owner hash of 16, search order keys of ORDER_KEY_LENGTH, a notification key of
+ * 20 digits, times of at most 9 characters), so with every field at its longest and all LOOKBACK_REMEMBERED
+ * notifications remembered it is 763; past CURSOR_MAX the lookback would forget its oldest notifications. Only a
+ * position carried over from an older cursor inside a second, which keeps that cursor's id until its stream leaves the
+ * second, can pass it, and stays shorter than the cursor it came from.
+ */
+export const CURSOR_MAX = 960
+/** A time in a cursor: whole seconds in base 36, or `~` and milliseconds in base 36 for a time inside a second. */
+const timeText = (at: number) => (at % 1000 === 0 ? (at / 1000).toString(36) : `~${at.toString(36)}`)
+const TIME = /^(~?)([0-9a-z]{1,11})$/
+const timeOf = (value: unknown): number | undefined => {
+  const match = typeof value === "string" ? TIME.exec(value) : null
+  if (!match) return undefined
+  const at = Number.parseInt(match[2]!, 36) * (match[1] === "~" ? 1 : 1000)
+  return Number.isSafeInteger(at) ? at : undefined
+}
+
+/**
  * The cursor's state. A cursor bound to another plugin, source or account, holding another sign-in's owner, or of
- * another version (one issued before the source contract) is CURSOR_INVALID: start again with since. A cursor without
- * a lookback (0.0.5's) has none: it looks again at nothing before its position.
+ * another version (one issued before the source contract) is CURSOR_INVALID: start again with since. A cursor of 0.0.6
+ * or 0.0.7 (no `k`) is read as it was written, and the read goes on from it with nothing lost or listed again.
  */
 function stateOf(cursor: string, account: string, owner: EventsOwner): CursorState {
   const decoded = decodeBoundCursor(bindingOf(account), cursor)
   if (!decoded.ok) return refuseCursor()
   const state = decoded.state
-  const named = state["a"] === account
-  const positions = record(state["p"]) ? state["p"] : undefined
-  const keys = STREAMS.map((stream) => {
-    const pair = positions?.[stream]
-    return Array.isArray(pair) && pair.length === 2 && typeof pair[0] === "number" && Number.isSafeInteger(pair[0]) && typeof pair[1] === "string" ? { t: pair[0], i: pair[1] } : undefined
-  })
-  if (!named || state["o"] !== digest(owner) || keys.some((key) => key === undefined)) return refuseCursor()
-  const from = { i: keys[0]!, p: keys[1]!, c: keys[2]!, n: keys[3]! }
-  const gapAt = state["g"]
-  const cut = state["u"]
-  const lostAt = state["q"]
-  for (const value of [gapAt, cut, lostAt]) if (value !== undefined && !(typeof value === "number" && Number.isSafeInteger(value))) return refuseCursor()
+  if (state["a"] !== account || state["o"] !== digest(owner)) return refuseCursor()
+  return state["k"] === CURSOR_FORMAT ? current(state) : state["k"] === undefined ? earlier(state) : refuseCursor()
+}
+
+/** The read's state the cursor carries, after its positions: the gap, the cut, the loss and the lookback. */
+function withLookback(from: Record<StreamName, Key>, times: readonly (number | undefined)[], behind: number | undefined, hashes: unknown): CursorState {
+  const [gapAt, cut, lostAt] = times
   const read = {
-    ...(gapAt === undefined ? {} : { gapAt: gapAt as number }),
-    ...(cut === undefined ? {} : { cut: cut as number }),
-    ...(lostAt === undefined ? {} : { lostAt: lostAt as number }),
+    ...(gapAt === undefined ? {} : { gapAt }),
+    ...(cut === undefined ? {} : { cut }),
+    ...(lostAt === undefined ? {} : { lostAt }),
   }
-  const lookback = state["l"]
-  if (lookback === undefined) return { from, notified: { position: from.n, floor: from.n.t + 1000, seen: new Map() }, ...read }
-  const behind = record(lookback) ? lookback["f"] : undefined
-  const hashes = record(lookback) ? lookback["h"] : undefined
-  if (typeof behind !== "number" || !Number.isSafeInteger(behind) || !Array.isArray(hashes) || hashes.length > LOOKBACK_REMEMBERED) return refuseCursor()
+  if (behind === undefined || !Array.isArray(hashes) || hashes.length > LOOKBACK_REMEMBERED) return refuseCursor()
   const seen = new Map<string, number>()
   for (const entry of hashes) {
     const match = typeof entry === "string" ? SEEN.exec(entry) : null
@@ -815,6 +857,47 @@ function stateOf(cursor: string, account: string, owner: EventsOwner): CursorSta
     seen.set(match[1]!, from.n.t - Number.parseInt(match[2]!, 36))
   }
   return { from, notified: { position: from.n, floor: from.n.t - behind, seen }, ...read }
+}
+
+/** A cursor of format 1. */
+function current(state: Record<string, unknown>): CursorState {
+  const positions = Array.isArray(state["p"]) && state["p"].length === STREAMS.length ? state["p"] : []
+  const keys = positions.map((entry: unknown, index) => {
+    if (!Array.isArray(entry) || typeof entry[1] !== "string") return undefined
+    const t = timeOf(entry[0])
+    // Only a search position may be carried over from an older cursor.
+    const raw = entry.length === 3 && entry[2] === 1 && index < 3
+    return t !== undefined && (entry.length === 2 || raw) ? { t, i: entry[1] as string, ...(raw ? { raw: true as const } : {}) } : undefined
+  })
+  if (keys.length !== STREAMS.length || keys.some((key) => key === undefined)) return refuseCursor()
+  const from = { i: keys[0]!, p: keys[1]!, c: keys[2]!, n: keys[3]! }
+  const times = ["g", "u", "q"].map((name) => (state[name] === undefined ? undefined : (timeOf(state[name]) ?? refuseCursor())))
+  const lookback = Array.isArray(state["l"]) && state["l"].length === 2 ? state["l"] : []
+  const behind = typeof lookback[0] === "string" && /^-?[0-9a-z]{1,11}$/.test(lookback[0]) ? Number.parseInt(lookback[0], 36) : undefined
+  return withLookback(from, times, behind, lookback[1])
+}
+
+/**
+ * A cursor of 0.0.6 or 0.0.7. Its search positions inside a second ordered that second by id: they are carried over as
+ * such (`raw`), so the walk goes on where it stopped.
+ */
+function earlier(state: Record<string, unknown>): CursorState {
+  const positions = record(state["p"]) ? state["p"] : undefined
+  const keys = STREAMS.map((stream) => {
+    const pair = positions?.[stream]
+    if (!(Array.isArray(pair) && pair.length === 2 && typeof pair[0] === "number" && Number.isSafeInteger(pair[0]) && typeof pair[1] === "string")) return undefined
+    const inside = stream !== "n" && pair[1] !== "" && pair[1] !== AFTER_SECOND
+    return { t: pair[0], i: pair[1], ...(inside ? { raw: true as const } : {}) }
+  })
+  if (keys.some((key) => key === undefined)) return refuseCursor()
+  const from = { i: keys[0]!, p: keys[1]!, c: keys[2]!, n: keys[3]! }
+  const times = ["g", "u", "q"].map((name) => {
+    const value = state[name]
+    return value === undefined ? undefined : typeof value === "number" && Number.isSafeInteger(value) ? value : refuseCursor()
+  })
+  const lookback = state["l"]
+  const behind = record(lookback) && typeof lookback["f"] === "number" && Number.isSafeInteger(lookback["f"]) ? lookback["f"] : undefined
+  return withLookback(from, times, behind, record(lookback) ? lookback["h"] : undefined)
 }
 
 /** The signed-in login, or AUTH_REQUIRED; `method` names the caller in the message. */
@@ -857,12 +940,16 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   // is listed on any page of the read; the next read lists it.
   const end = state.cut ?? Math.floor(now - SETTLE_MS)
 
+  // A position a 0.0.6 or 0.0.7 cursor left inside a second ordered it by id: that second's items keep that order, so
+  // the walk goes on exactly where it stopped, and the position stays so until the stream leaves the second.
+  const carried = (stream: "i" | "p" | "c", item: Item | undefined): Item | undefined =>
+    item !== undefined && from[stream].raw && item.t === from[stream].t ? { ...item, i: item.id, raw: true } : item
   // GitHub refuses a search for issues and pull requests together from a GitHub App user token (HTTP 422): one each.
   const searches: Record<"i" | "p" | "c", Search> = {
     // An item belongs to the stream that read it, so that stream's position moves past it.
-    i: { path: "/search/issues", sort: "updated", query: (range) => `is:issue involves:${login} updated:${range}`, make: (raw) => streamOf(issueItem(raw, account), "i") },
-    p: { path: "/search/issues", sort: "updated", query: (range) => `is:pull-request involves:${login} updated:${range}`, make: (raw) => streamOf(issueItem(raw, account), "p") },
-    c: { path: "/search/commits", sort: "committer-date", query: (range) => `author:${login} committer-date:${range}`, make: (raw) => commitItem(raw, account) },
+    i: { path: "/search/issues", sort: "updated", query: (range) => `is:issue involves:${login} updated:${range}`, make: (raw) => carried("i", streamOf(issueItem(raw, account), "i")) },
+    p: { path: "/search/issues", sort: "updated", query: (range) => `is:pull-request involves:${login} updated:${range}`, make: (raw) => carried("p", streamOf(issueItem(raw, account), "p")) },
+    c: { path: "/search/commits", sort: "committer-date", query: (range) => `author:${login} committer-date:${range}`, make: (raw) => carried("c", commitItem(raw, account)) },
   }
   const budget: Budget = { left: SEARCH_BUDGET }
   const searched: Record<"i" | "p" | "c", SearchRead> = { i: { items: [], complete: true, last: Number.POSITIVE_INFINITY, start: from.i }, p: { items: [], complete: true, last: Number.POSITIVE_INFINITY, start: from.p }, c: { items: [], complete: true, last: Number.POSITIVE_INFINITY, start: from.c } }
@@ -915,7 +1002,7 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
     if (!refused && listed.length === fits) break
     if (!refused) listed.push(item)
     // A late notification lies behind the position: it never moves the position back.
-    if (compare(item, positions[item.s]) > 0) positions[item.s] = { t: item.t, i: item.i }
+    if (compare(item, positions[item.s]) > 0) positions[item.s] = { t: item.t, i: item.i, ...(item.raw ? { raw: true as const } : {}) }
     if (item.s === "n") {
       seen.set(seenKey(item), item.t)
       notificationsListed++
@@ -980,21 +1067,32 @@ function remember(position: Key, floor: number, seen: ReadonlyMap<string, number
 }
 
 /**
- * The cursor: each stream's position, the lookback, while a read goes on its cut and its gap, and any loss the next read
- * answers; the lookback shrinks until it fits.
+ * The cursor, of format CURSOR_FORMAT: each stream's position, the lookback, while a read goes on its cut and its gap,
+ * and any loss the next read answers; the lookback forgets its oldest notifications until the cursor is at most
+ * CURSOR_MAX characters.
  */
-function encodeState(account: string, owner: EventsOwner, positions: Record<StreamName, Key>, floor: number, seen: Map<string, number>, read: { gapAt: number | undefined; cut: number | undefined; lostAt: number | undefined }): string {
-  const p = Object.fromEntries(STREAMS.map((stream) => [stream, [positions[stream].t, positions[stream].i]]))
+export function encodeState(account: string, owner: EventsOwner, positions: Record<StreamName, Key>, floor: number, seen: Map<string, number>, read: { gapAt: number | undefined; cut: number | undefined; lostAt: number | undefined }): string {
+  const p = STREAMS.map((stream) => {
+    const { t, i, raw } = positions[stream]
+    return raw ? [timeText(t), i, 1] : [timeText(t), i]
+  })
+  const times = Object.fromEntries(
+    (
+      [
+        ["g", read.gapAt],
+        ["u", read.cut],
+        ["q", read.lostAt],
+      ] as const
+    ).flatMap(([name, at]) => (at === undefined ? [] : [[name, timeText(at)]])),
+  )
   let entries = [...seen].sort((a, b) => b[1] - a[1])
   let start = floor
   for (;;) {
-    const l = { f: positions.n.t - start, h: entries.map(([hash, at]) => `${hash}${(positions.n.t - at).toString(36)}`) }
-    try {
-      return encodeBoundCursor(bindingOf(account), { a: account, o: digest(owner), p, l, ...(read.gapAt === undefined ? {} : { g: read.gapAt }), ...(read.cut === undefined ? {} : { u: read.cut }), ...(read.lostAt === undefined ? {} : { q: read.lostAt }) })
-    } catch (error) {
-      // The package refuses a cursor over EVENT_LIMITS.cursor characters.
-      if (entries.length === 0) throw error
-    }
+    const l = [(positions.n.t - start).toString(36), entries.map(([hash, at]) => `${hash}${(positions.n.t - at).toString(36)}`)]
+    // The package refuses a cursor over EVENT_LIMITS.cursor characters; only one carried over from an older cursor can
+    // pass CURSOR_MAX with no lookback left.
+    const cursor = encodeBoundCursor(bindingOf(account), { k: CURSOR_FORMAT, a: account, o: digest(owner), p, l, ...times })
+    if (cursor.length <= CURSOR_MAX || entries.length === 0) return cursor
     // Too long: forget the oldest, and start the lookback after it.
     start = Math.max(start, entries[entries.length - 1]![1] + 1000)
     entries = entries.filter(([, at]) => at >= start)

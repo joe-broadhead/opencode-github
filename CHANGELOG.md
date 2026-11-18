@@ -15,6 +15,11 @@ All notable changes to this project are documented here. The format follows [Kee
   included. Its range is now read again in pages of 10, and within a second read whole, as ten pages of 10 at the same
   offsets, then pages of one. Only a result alone over 32 MB is left out, with one `gap` (`window-truncated`), and the
   search goes on after it. `TOO_LARGE` remains for a notifications answer over 32 MB.
+- **A cursor is at most 960 characters, under the source contract's 1,024.** A search position spelled out its item's
+  id, so three positions in repositories with the longest names, with a cut, a gap and a loss, made a cursor of 1,038
+  characters, which the contract refuses. A position now holds an 11-character hash of the id (a second's results are
+  ordered by it), times are seconds in base 36, and positions are a list: the longest cursor is 763 characters. A cursor
+  of 0.0.6 or 0.0.7 is still read and continued, with nothing lost or listed twice.
 - **Each of `events_list`'s and `probe`'s requests has 60 seconds**, its answer read whole included: past that it stops
   and the call answers `UNAVAILABLE`, with the cursor unchanged. The caller's own abort still stops it at once.
 

@@ -30,6 +30,7 @@ import {
   listEvents,
   loginOf,
   notificationItem,
+  orderKey,
   probeEvents,
   probeMethod,
   runEvents,
@@ -77,15 +78,13 @@ const NOTIFICATIONS = [
   { id: "n2", reason: "subscribed", updated_at: "2026-10-06T10:00:00Z", subject: { title: "v1.2.0", type: "Release" }, repository: { full_name: "octo/app", html_url: "https://github.com/octo/app" } },
 ]
 
-/** The events from SINCE at NOW, oldest first; ties by stream, then by the plugin's id. */
+/** The events from SINCE at NOW, oldest first; ties by stream, then by the plugin's order key, a hash of the id. */
 const EXPECTED = [
   "octo/app@a1",
   "octo/app#1@2026-10-01T09:00:00.000Z",
   "octo/app#2@2026-10-02T10:00:00.000Z",
   "octo/lib@b2",
-  "octo/app#8@2026-10-05T08:00:00.000Z",
-  "octo/app#9@2026-10-05T08:00:00.000Z",
-  "octo/lib#7@2026-10-05T08:00:00.000Z",
+  ...["octo/app#8", "octo/app#9", "octo/lib#7"].sort((a, b) => (orderKey(a) < orderKey(b) ? -1 : 1)).map((id) => `${id}@2026-10-05T08:00:00.000Z`),
   "notification:n2@2026-10-06T10:00:00.000Z",
   ...Array.from({ length: 4 }, (_, index) => `octo/lib#${20 + index}@2026-10-2${index}T12:00:00.000Z`),
 ]
@@ -469,7 +468,11 @@ describe("history GitHub no longer keeps", () => {
     while (pages.at(-1)!.more) pages.push(await page(fake, now, { account: LOGIN, cursor: pages.at(-1)!.cursor, limit: input["limit"] }))
     return pages
   }
-  const positionN = (cursor: string) => ((JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as { p: Record<string, [number, string]> }).p["n"] as [number, string])[0]
+  /** The notifications' position in a cursor: the fourth of its positions, a time in base 36 (`~` and milliseconds inside a second). */
+  const positionN = (cursor: string) => {
+    const time = (JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as { p: [string, string][] }).p[3]![0]
+    return time.startsWith("~") ? Number.parseInt(time.slice(1), 36) : Number.parseInt(time, 36) * 1000
+  }
 
   it("keeps notifications three months: 89 days, the shortest", () => {
     expect(NOTIFICATION_RETENTION_MS).toBe(89 * DAY)

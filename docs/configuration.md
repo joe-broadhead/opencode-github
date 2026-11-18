@@ -653,7 +653,10 @@ shares an owner with a github.com one). A listing names the account it reads; on
 refused with `ACCOUNT_MISMATCH`, and so is a cursor issued for another account, before any GitHub call. The cursor is
 the source contract's bound cursor, tied to this plugin, the source and the account, with a digest of the owner
 inside, so a cursor that was changed, issued before a sign-in to another account, or issued by 0.0.2 or earlier
-(account `default`) is `CURSOR_INVALID`: start again with `since`.
+(account `default`) is `CURSOR_INVALID`: start again with `since`. **A cursor is at most 960 characters**, under the
+contract's 1,024: a search position holds an 11-character hash of its item's id, never a repository's name, and times
+are seconds in base 36. A cursor 0.0.6 or 0.0.7 issued is still read, and the read goes on from it with nothing lost or
+listed twice; inside a second it stopped in, it keeps that cursor's order by id until the second ends.
 
 It asserts `github_events_list`, then makes only GET requests, through `github_api`'s own spec with the plugin's
 sign-in. Each GET asserts the tool's own permission, `github_events_list`, on its own `GET /path` first, not
@@ -685,7 +688,7 @@ first asks again from the last second the page before it read. So a result that 
 moves it to the end of GitHub's order, leaves the range (its change is after the cut, and the next read lists it), and
 nothing slides into a page already read; a result read twice is listed once. A page that lies in one second cannot be
 paged past by time (a rebase-merge gives hundreds of commits one committer date): that second is read whole by itself,
-up to GitHub's 1,000 results, and listed in the plugin's own order (by id), so the position walks through it across
+up to GitHub's 1,000 results, and listed in the plugin's own order (by a hash of each id), so the position walks through it across
 calls and then moves past it; with two such seconds, the earlier is read first. A result that leaves such a second while
 it is read changes the second's total, and the second is read again from its first result. A call makes at most 30
 search requests, and each request, its answer read whole included, has 60 seconds: past that it stops, and the call
