@@ -111,6 +111,15 @@ export type Call = {
  * resource is not one of `resources` (another path, a redirect or a page elsewhere, any change) is refused before it
  * is sent. Never set from a caller's input: only the plugin's own code passes it.
  */
+/**
+ * How much of an answer a caller reads whole. `github_api`'s own calls keep the 100,000-byte inline cap, which suits an
+ * answer shown to an agent; a source that reads GitHub's own answer (`events_list`) sets its own, larger, limit.
+ */
+export interface ReadLimits {
+  readonly inlineBytes?: number
+  readonly readBytes?: number
+}
+
 export type ApiScope = { readonly action: string; readonly resources: readonly string[] }
 
 const REJECTED = "GitHub rejected the saved sign-in. Sign in again."
@@ -193,7 +202,12 @@ async function statusShown(ctx: ApiContext, integrationID: string, connectionID:
 export async function registerApiTool(
   ctx: ApiContext,
   deps: ApiDeps,
-): Promise<{ dispose(): Promise<void>; run(input: ApiInput, call: Call, scope?: ApiScope): Promise<ApiOutput>; signedIn(): Promise<boolean>; identity(): Promise<string | undefined> }> {
+): Promise<{
+  dispose(): Promise<void>
+  run(input: ApiInput, call: Call, scope?: ApiScope, limits?: ReadLimits): Promise<ApiOutput>
+  signedIn(): Promise<boolean>
+  identity(): Promise<string | undefined>
+}> {
   const send: Fetch = deps.fetch ?? ((url, init) => fetch(url, init))
 
   const assert = (call: Call, action: string, resource: string, metadata: Record<string, unknown>) =>
@@ -290,7 +304,7 @@ export async function registerApiTool(
     }
   }
 
-  const run = async (input: ApiInput, call: Call, scope?: ApiScope): Promise<ApiOutput> => {
+  const run = async (input: ApiInput, call: Call, scope?: ApiScope, limits?: ReadLimits): Promise<ApiOutput> => {
     const described = describeCall(input, deps.endpoints)
     // A scoped read is refused outside its resources before a download target is even looked at.
     if (scope) inScope(scope, described.resource)
@@ -317,6 +331,8 @@ export async function registerApiTool(
     }
     const callDeps = {
       token: credential.access,
+      ...(limits?.readBytes === undefined ? {} : { maxReadBytes: limits.readBytes }),
+      ...(limits?.inlineBytes === undefined ? {} : { maxInlineBytes: limits.inlineBytes }),
       endpoints: deps.endpoints,
       service: deps.service,
       deviceSignIn: deps.deviceSignIn === true,

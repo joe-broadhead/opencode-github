@@ -58,7 +58,7 @@ import {
 } from "@we-the-rebel-alliance/source-contract/events"
 import type { OwnedMethod, ToolCall } from "@we-the-rebel-alliance/source-contract/tools-rpc"
 import type { ApiInput, ApiOutput } from "./api/contract.js"
-import type { ApiScope, Call } from "./api/tool.js"
+import type { ApiScope, Call, ReadLimits } from "./api/tool.js"
 import { GitHubPluginError } from "./errors.js"
 import { SERVER_NAME } from "./rpc.js"
 import { EVENTS_TOOL_NAME } from "./tools.js"
@@ -91,16 +91,26 @@ const LOGIN = /^[A-Za-z0-9-]{1,39}$/
 export const SETTLE_MS = 5 * 60_000
 /** Results per notifications page: GitHub's most. */
 const PER_PAGE = 50
-/** Results per search page: GitHub's most. */
-export const SEARCH_PER_PAGE = 100
+/**
+ * Results per search page. GitHub's own limits make one result at most about 270 KB (a body of 65,536 characters), so
+ * a page of 50 holds about 13.5 MB at worst: under SEARCH_MAX_BYTES.
+ */
+export const SEARCH_PER_PAGE = 50
+/**
+ * The most bytes one search answer may hold. `events_list` reads GitHub's own answer, not the 100,000-byte cut
+ * `github_api` shows an agent, so a page of SEARCH_PER_PAGE results arrives whole; one over this is not a page size
+ * GitHub can produce, and is refused by name rather than cut.
+ */
+export const SEARCH_MAX_BYTES = 16 * 1024 * 1024
 /** The most pages one search reads from its position in one call. */
 const SEARCH_PAGES = 6
 /** GitHub answers at most this many results for one search query, whatever its total_count says. */
 export const SEARCH_CAP = 1000
 /**
  * The most search requests one call makes, across its three searches (issues, pull requests, commits): GitHub allows
- * 30 a minute for a signed-in user. Three reads of SEARCH_PAGES make at most 18, which leaves room for one second read
- * whole (SEARCH_CAP / SEARCH_PER_PAGE = 10 requests).
+ * 30 a minute for a signed-in user. A search that finds one crowded second stops at its first full page (`search`), so
+ * its three searches make 3 and one second read whole makes 20 (SEARCH_CAP / SEARCH_PER_PAGE); three searches of
+ * SEARCH_PAGES with no crowded second make 18.
  */
 export const SEARCH_BUDGET = 30
 /** The most notifications one call reads (10 pages of 50); a backlog over it is walked oldest first across calls. */
@@ -130,8 +140,11 @@ type Data = Record<string, unknown>
 type StreamName = "i" | "p" | "c" | "n"
 const STREAMS: readonly StreamName[] = ["i", "p", "c", "n"]
 
-/** A GET through github_api's spec, as the caller. */
-export type Get = (path: string, query: Record<string, string | number | boolean>) => Promise<ApiOutput>
+/**
+ * A GET through github_api's spec, as the caller. `maxBytes` is how much of the answer to read whole: a source's own
+ * read (`events_list`) sets SEARCH_MAX_BYTES, and every other read keeps github_api's 100,000-byte inline cap.
+ */
+export type Get = (path: string, query: Record<string, string | number | boolean>, maxBytes?: number) => Promise<ApiOutput>
 /** The signed-in login, as the sign-in recorded it (GitHub's GET /user at sign-in); undefined when nobody is signed in. */
 export type Identity = () => Promise<string | undefined>
 
@@ -157,7 +170,7 @@ const time = (value: unknown) => {
 /** GitHub's search qualifiers take whole seconds. */
 const isoSeconds = (at: number) => `${new Date(Math.floor(at / 1000) * 1000).toISOString().slice(0, 19)}Z`
 
-type EventsCode = "INPUT_INVALID" | "SOURCE_UNKNOWN" | "CURSOR_INVALID" | "ACCOUNT_MISMATCH" | "AUTH_REQUIRED" | "UNAVAILABLE"
+type EventsCode = "INPUT_INVALID" | "SOURCE_UNKNOWN" | "CURSOR_INVALID" | "ACCOUNT_MISMATCH" | "AUTH_REQUIRED" | "TOO_LARGE" | "UNAVAILABLE"
 const fail = (code: EventsCode, message: string, next: string): never => {
   throw new GitHubPluginError(code, message, next)
 }
@@ -273,17 +286,41 @@ export function notificationItem(raw: unknown, account: string): Item | undefine
   }
 }
 
-/** A GET's list, or UNAVAILABLE; `allowed` lists the statuses that mean "not for this sign-in", read as none. */
-async function list(get: Get, path: string, query: Record<string, string | number | boolean>, pick: (data: unknown) => unknown, allowed: readonly number[] = []): Promise<{ items: unknown[]; total?: number; incomplete: boolean } | undefined> {
-  const output = await get(path, query)
+/** A GET's one page: its list, where the results end, whether GitHub timed out, and whether the answer was cut. */
+interface Answer {
+  readonly items: unknown[]
+  readonly total?: number
+  readonly incomplete: boolean
+  readonly truncated: boolean
+}
+
+/**
+ * A GET's list, or UNAVAILABLE; `allowed` lists the statuses that mean "not for this sign-in", read as none, and
+ * `maxBytes` is how much of the answer to read whole. A cut answer is reported, not failed: each caller names its own
+ * limit, and one cut below a single item is no list at all.
+ */
+async function list(get: Get, path: string, query: Record<string, string | number | boolean>, pick: (data: unknown) => unknown, allowed: readonly number[] = [], maxBytes?: number): Promise<Answer | undefined> {
+  const output = await get(path, query, maxBytes)
   if (allowed.includes(output.status)) return undefined
   if (!output.ok) fail("UNAVAILABLE", `GitHub answered ${path} with ${output.status}.`, output.nextStep ?? "Call events_list again with the same cursor; if it keeps failing, run /github-status.")
-  if (output.truncated) fail("UNAVAILABLE", `GitHub's answer to ${path} was too large to read whole.`, "Call events_list again with the same cursor and a smaller limit.")
   const items = pick(output.data)
-  if (!Array.isArray(items)) fail("UNAVAILABLE", `GitHub answered ${path} without a list.`, "Call events_list again with the same cursor; if it keeps failing, run /github-status.")
-  const total = record(output.data) && typeof output.data["total_count"] === "number" ? output.data["total_count"] : undefined
-  const incomplete = record(output.data) && output.data["incomplete_results"] === true
-  return { items: items as unknown[], ...(total === undefined ? {} : { total }), incomplete }
+  if (!Array.isArray(items) && !output.truncated) fail("UNAVAILABLE", `GitHub answered ${path} without a list.`, "Call events_list again with the same cursor; if it keeps failing, run /github-status.")
+  const data = record(output.data) ? output.data : {}
+  const total = typeof data["total_count"] === "number" ? data["total_count"] : undefined
+  const incomplete = data["incomplete_results"] === true
+  return { items: Array.isArray(items) ? items : [], ...(total === undefined ? {} : { total }), incomplete, truncated: output.truncated }
+}
+
+/**
+ * One search page, read whole. GitHub's answer is read up to SEARCH_MAX_BYTES, not the 100,000-byte cut github_api shows
+ * an agent; an answer over that, which GitHub's own limits make impossible, is named by its limit and never cut.
+ */
+async function searchPage(get: Get, spec: Search, range: string, page: number): Promise<Answer> {
+  const answer = (await list(get, spec.path, { q: spec.query(range), sort: spec.sort, order: "asc", per_page: SEARCH_PER_PAGE, page }, searchItems, [], SEARCH_MAX_BYTES))!
+  if (answer.truncated) {
+    fail("TOO_LARGE", `GitHub's answer to ${spec.path} is over ${SEARCH_MAX_BYTES / (1024 * 1024)} MB, the most events_list reads whole.`, "Nothing in events_list changes it: GitHub's own limits keep one result under this, so this is not a page size to change.")
+  }
+  return answer
 }
 
 /** One stream's read: its items after its position, oldest first; whether it ended; the last time it read. */
@@ -338,7 +375,7 @@ async function search(get: Get, spec: Search, from: Key, need: number, budget: B
   let read = false
   for (let page = 1; page <= SEARCH_PAGES && budget.left > 0; page++) {
     budget.left--
-    const answer = (await list(get, spec.path, { q: spec.query(`>=${isoSeconds(startOf(from))}`), sort: spec.sort, order: "asc", per_page: SEARCH_PER_PAGE, page }, searchItems))!
+    const answer = await searchPage(get, spec, `>=${isoSeconds(startOf(from))}`, page)
     // GitHub's search timed out and may have left results out: list nothing past the position, and read it again on the
     // next call, rather than move past what it left out.
     if (answer.incomplete) return hold
@@ -358,6 +395,10 @@ async function search(get: Get, spec: Search, from: Key, need: number, budget: B
     const ended = answer.items.length === 0 || (answer.total !== undefined ? fetched >= Math.min(answer.total, SEARCH_CAP) : answer.items.length < SEARCH_PER_PAGE)
     if (ended) return { items: items.sort(compare), complete: true, last, start: from }
     if (items.length > need && items.some((item) => item.t < last)) break
+    // A full page whose results all share one second is a crowded second: only that second, read whole
+    // (`searchSecond`), can move the stream on, and the rest of this read's pages can only find more of it. Reading it
+    // now keeps the call's budget for that read. A short page would have ended the read above.
+    if (answer.items.length === SEARCH_PER_PAGE && items.length > 0 && items.every((item) => item.t === last)) return { ...hold, stuck: last }
   }
   if (!read) return hold
   // Every item found shares the last second read (or none is new): only that second, read whole, moves the stream on.
@@ -384,7 +425,7 @@ async function searchSecond(get: Get, spec: Search, from: Key, second: number, b
   for (let page = 1; page <= SEARCH_CAP / SEARCH_PER_PAGE; page++) {
     if (budget.left <= 0) return hold
     budget.left--
-    const answer = (await list(get, spec.path, { q: spec.query(`${at}..${at}`), sort: spec.sort, order: "asc", per_page: SEARCH_PER_PAGE, page }, searchItems))!
+    const answer = await searchPage(get, spec, `${at}..${at}`, page)
     if (answer.incomplete) return hold
     if (answer.total !== undefined && answer.total > SEARCH_CAP) return { items: [], complete: false, last: second, start: past, skipped: second }
     fetched += answer.items.length
@@ -439,8 +480,12 @@ async function notifications(get: Get, state: Notified, account: string, cut: nu
   const { position } = state
   const base = startOf(position)
   const before = isoSeconds(Math.floor(cut / 1000) * 1000 + 1000)
-  const ask: Ask = (since, page, perPage) =>
-    list(get, "/notifications", { all: true, participating: true, since: isoSeconds(since), before, per_page: perPage, page }, (data) => data, [401, 403, 404, 422])
+  const ask: Ask = async (since, page, perPage) => {
+    const read = await list(get, "/notifications", { all: true, participating: true, since: isoSeconds(since), before, per_page: perPage, page }, (data) => data, [401, 403, 404, 422])
+    // Notifications keep github_api's cap, and are not read at a smaller page: one page over it is named by its limit.
+    if (read?.truncated === true) fail("TOO_LARGE", `GitHub's answer to /notifications is over 100,000 bytes for a page of ${perPage} notifications.`, "Nothing in events_list changes it: read notifications with GitHub's own tools.")
+    return read
+  }
   /** Whether the window from `since` holds an n-th notification; undefined when GitHub will not say. */
   const has = async (since: number, n: number) => {
     const read = await ask(since, n, 1)
@@ -906,7 +951,7 @@ const PROBE_OUTPUT = {
 export interface EventsDeps {
   readonly ctx: { readonly permission: Pick<Plugin.Context["permission"], "assert"> }
   /** github_api's spec, as `registerApiTool` returns it. */
-  readonly api: { run(input: ApiInput, call: Call, scope?: ApiScope): Promise<ApiOutput> }
+  readonly api: { run(input: ApiInput, call: Call, scope?: ApiScope, limits?: ReadLimits): Promise<ApiOutput> }
   /** The signed-in login, as the sign-in recorded it: `registerApiTool`'s `identity`. It calls no GitHub API. */
   readonly identity: Identity
   /** The GitHub Enterprise Server host (the `host` option), which qualifies the owner; absent for github.com. */
@@ -929,8 +974,8 @@ const assertAction = (deps: EventsDeps, action: string, call: Call) =>
 /** A GET as an unattended call of github_api's spec under `scope`: asserted as the scope's action on its `GET /path`. */
 const getter =
   (deps: EventsDeps, call: Call, scope: ApiScope): Get =>
-  (path, query) =>
-    deps.api.run({ method: "GET", path, query }, { ...call, script: true }, scope)
+  (path, query, maxBytes) =>
+    deps.api.run({ method: "GET", path, query }, { ...call, script: true }, scope, maxBytes === undefined ? undefined : { inlineBytes: maxBytes, readBytes: maxBytes })
 
 /**
  * The tool's and the method's one run: asserts github_events_list for the caller, then lists, with GETs only. Each GET

@@ -87,7 +87,8 @@ async function read(w: World, now: number | ((k: number) => number), input: Reco
 const ids = (pages: EventsListResult[]) => pages.flatMap((p) => p.events.map((e) => e.external_id))
 const gaps = (pages: EventsListResult[]) => pages.flatMap((p) => (p.gap ? [p.gap] : []))
 
-describe("a notification burst (review MEDIUM 1)", () => {
+// A page of 50 reads more calls than a page of 100 did, so these read more requests: 30 s, not vitest's 5 s.
+describe("a notification burst (review MEDIUM 1)", { timeout: 30_000 }, () => {
   // 30 older issue changes, then releases one a minute.
   const issues = Array.from({ length: 30 }, (_, k) => issue(k + 1, iso(Date.parse("2026-10-31T01:00:00Z") + k * 60_000)))
   const releases = (count: number) => Array.from({ length: count }, (_, k) => note(`${1000 + k}`, iso(Date.parse("2026-11-01T00:00:00Z") + k * 60_000)))
@@ -176,7 +177,8 @@ describe("search results in one second (review MEDIUM 2)", () => {
   })
 })
 
-describe("two crowded seconds at once (review round 2, L-A)", () => {
+// A page of 50 reads a crowded second in twice the requests, so these read more calls: 30 s, not vitest's 5 s.
+describe("two crowded seconds at once (review round 2, L-A)", { timeout: 30_000 }, () => {
   const T = Date.parse("2026-11-02T00:00:00Z")
   const pr = (n: number, at: string) => ({ ...issue(n, at), html_url: `https://github.com/octo/app/pull/${n}`, pull_request: { merged_at: null } })
   for (const [inIssues, inCommits, apart] of [

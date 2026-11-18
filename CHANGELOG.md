@@ -6,13 +6,13 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
-- **A search page GitHub cuts is read again at half the size.** A page over the 100,000 bytes `github_api` reads whole is
-  dropped whole and asked for again at half the page size, down to one item (100, 50, 25, 12, 6, 3, 1), and the stream
-  pages on at the size that read whole, so nothing is skipped and nothing is listed twice. Before, a cut page failed the
-  listing with `UNAVAILABLE`, whose next step asked for a smaller `limit`: that asked for the same page and failed the
-  same way. The cursor is a position, never a page number, so a step down does not move it; the page is asked for by the
-  offset its whole pages cover. One result alone over the cap answers `TOO_LARGE`, naming it, and never `UNAVAILABLE`;
-  a notifications page over the cap answers `TOO_LARGE` too.
+- **`events_list` reads GitHub's search answers whole, up to 16 MB a page of 50, instead of the 100 KB cap meant for
+  answers shown to an agent.** A page of search results was cut to the 100,000 bytes `github_api` shows an agent, and
+  a cut page failed the listing with `UNAVAILABLE`, whose next step asked for a smaller `limit`: that asked for the
+  same page and failed the same way. GitHub's own limits (a body of 65,536 characters) keep one search result at most
+  about 270 KB, so a page of 50 is at most about 13.5 MB. An answer over 16 MB, which those limits make impossible,
+  answers `TOO_LARGE` naming the limit, never `UNAVAILABLE` and never a skip. Events keep the contract's own size
+  limits, so a page sent to a consumer stays bounded whatever GitHub answered. `github_api` still cuts at 100,000 bytes.
 
 ## [0.0.6] - 2026-11-17
 

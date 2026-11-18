@@ -381,6 +381,22 @@ describe("callRest", () => {
     ])
   })
 
+  it("reads a large answer whole when the caller sets a bigger limit, and keeps 100,000 bytes by default", async () => {
+    // A page of search results for a source's own read: 1.2 MB, which the default cap would cut to a few items.
+    const items = Array.from({ length: 50 }, (_, index) => ({ id: index, body: "x".repeat(24_000) }))
+    const { fetch } = fakeFetch({ "https://api.github.com/big": () => json(items) })
+    const input = rest({ method: "GET", path: "/big" })
+    const target = restTarget(input, GITHUB_COM)
+    const whole = await callRest(input, target, { ...deps(fetch), maxInlineBytes: 16 * 1024 * 1024, maxReadBytes: 16 * 1024 * 1024 })
+    expect(whole.truncated).toBe(false)
+    expect((whole.data as unknown[]).length).toBe(50)
+    // github_api's own calls keep the 100,000-byte cap.
+    const cut = await callRest(input, target, deps(fetch))
+    expect(cut.truncated).toBe(true)
+    expect((cut.data as unknown[]).length).toBeLessThan(50)
+    expect(Buffer.byteLength(JSON.stringify(cut.data))).toBeLessThanOrEqual(MAX_INLINE_BYTES)
+  })
+
   it("cuts a large result to whole items, with a next step", async () => {
     const items = Array.from({ length: 2000 }, (_, index) => ({ id: index, body: "x".repeat(100) }))
     const { fetch } = fakeFetch({ "https://api.github.com/big": () => json(items) })

@@ -91,11 +91,28 @@ const EXPECTED = [
 
 const ok = (data: unknown): ApiOutput => ({ ok: true, status: 200, data, truncated: false, trust: { githubContent: "untrusted" } })
 
-function github(options: { perPage?: number; notifications?: "ok" | "forbidden"; login?: string; inbox?: typeof NOTIFICATIONS; incomplete?: number } = {}) {
+function github(options: { perPage?: number; notifications?: "ok" | "forbidden"; login?: string; inbox?: typeof NOTIFICATIONS; incomplete?: number; issues?: typeof ISSUES; commits?: typeof COMMITS } = {}) {
   const calls: { path: string; query: Record<string, unknown> }[] = []
   /** How many issue searches GitHub still answers as timed out, with incomplete_results. */
   let incomplete = options.incomplete ?? 0
-  const get = async (path: string, query: Record<string, string | number | boolean>) => {
+  /**
+   * An answer as github_api gives it: over `maxBytes` it keeps the whole list items that fit, and says `truncated`.
+   * `maxBytes` is what the caller reads whole: 100,000 unless events_list's own search reads set more.
+   */
+  const capped = (data: { total_count: number; incomplete_results: boolean; items: unknown[] }, maxBytes?: number) => {
+    const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value) ?? "")
+    const max = maxBytes ?? 100_000
+    if (bytes(data) <= max) return ok(data)
+    const kept: unknown[] = []
+    let used = bytes({ ...data, items: [] })
+    for (const item of data.items) {
+      used += bytes(item) + 1
+      if (used > max) break
+      kept.push(item)
+    }
+    return { ...ok({ ...data, items: kept }), truncated: true }
+  }
+  const get = async (path: string, query: Record<string, string | number | boolean>, maxBytes?: number) => {
     calls.push({ path, query })
     const per = options.perPage ?? Number(query.per_page)
     const page = Number(query.page ?? 1)
@@ -112,14 +129,14 @@ function github(options: { perPage?: number; notifications?: "ok" | "forbidden";
       // As GitHub answers a GitHub App user token: a search for issues and pull requests together is refused.
       const kind = /(?:^|\s)is:(issue|pull-request)(?:\s|$)/.exec(String(query.q))?.[1]
       if (kind === undefined) return { ok: false, status: 422, data: { message: "Validation Failed" }, truncated: false, trust: { githubContent: "untrusted" } } as ApiOutput
-      const all = ISSUES.filter((item) => within(item.updated_at, "updated") && ("pull_request" in item) === (kind === "pull-request")).sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at) || b.number - a.number)
+      const all = (options.issues ?? ISSUES).filter((item) => within(item.updated_at, "updated") && ("pull_request" in item) === (kind === "pull-request")).sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at) || b.number - a.number)
       // A search that timed out answers what it found so far: here, nothing past its first result.
       if (incomplete > 0) return incomplete--, ok({ total_count: all.length, incomplete_results: true, items: all.slice(0, 1) })
-      return ok({ total_count: all.length, incomplete_results: false, items: pageOf(all) })
+      return capped({ total_count: all.length, incomplete_results: false, items: pageOf(all) }, maxBytes)
     }
     if (path === "/search/commits") {
-      const all = COMMITS.filter((item) => within(item.commit.committer.date, "committer-date"))
-      return ok({ total_count: all.length, incomplete_results: false, items: pageOf(all) })
+      const all = (options.commits ?? COMMITS).filter((item) => within(item.commit.committer.date, "committer-date"))
+      return capped({ total_count: all.length, incomplete_results: false, items: pageOf(all) }, maxBytes)
     }
     if (path === "/notifications") {
       if (options.notifications === "forbidden") return { ok: false, status: 403, data: { message: "Resource not accessible" }, truncated: false, trust: { githubContent: "untrusted" } } as ApiOutput
@@ -215,8 +232,8 @@ describe("events_list", () => {
     const fake = github()
     await list(fake)({ since: "2026-10-01T09:00:00.500Z" })
     expect(fake.calls.filter((call) => call.path === "/search/issues").map((call) => call.query)).toEqual([
-      { q: `is:issue involves:${LOGIN} updated:>=2026-10-01T09:00:00Z`, sort: "updated", order: "asc", per_page: 100, page: 1 },
-      { q: `is:pull-request involves:${LOGIN} updated:>=2026-10-01T09:00:00Z`, sort: "updated", order: "asc", per_page: 100, page: 1 },
+      { q: `is:issue involves:${LOGIN} updated:>=2026-10-01T09:00:00Z`, sort: "updated", order: "asc", per_page: 50, page: 1 },
+      { q: `is:pull-request involves:${LOGIN} updated:>=2026-10-01T09:00:00Z`, sort: "updated", order: "asc", per_page: 50, page: 1 },
     ])
     expect(fake.calls.find((call) => call.path === "/search/commits")!.query).toMatchObject({ q: `author:${LOGIN} committer-date:>=2026-10-01T09:00:00Z`, sort: "committer-date", order: "asc" })
     expect(fake.calls.find((call) => call.path === "/notifications")!.query).toMatchObject({ all: true, participating: true, since: "2026-10-01T09:00:00Z" })
@@ -301,11 +318,64 @@ describe("events_list", () => {
     expect(next.refused ?? []).toEqual([])
   })
 
-  it("stops with UNAVAILABLE on a failed search or one too large to read whole", async () => {
+  it("stops with UNAVAILABLE on a failed search, and with TOO_LARGE, naming 16 MB, on an answer over the read limit", async () => {
     const failing = async () => ({ ok: false, status: 422, data: {}, truncated: false, trust: { githubContent: "untrusted" } }) as ApiOutput
     expect(await code(listEvents(failing, github().identity, { since: SINCE }, NOW))).toBe("UNAVAILABLE")
-    const cut = async () => ({ ok: true, status: 200, data: "{", truncated: true, trust: { githubContent: "untrusted" } }) as ApiOutput
-    expect(await code(listEvents(cut, github().identity, { since: SINCE }, NOW))).toBe("UNAVAILABLE")
+    // GitHub's own limits keep a page of 50 search results under 16 MB, so this names the limit rather than cutting or
+    // skipping: the answer is not one events_list reads whole at any page size.
+    const cut = async (path: string) => (path === "/notifications" ? ok([]) : { ok: true, status: 200, data: "{", truncated: true, trust: { githubContent: "untrusted" } }) as ApiOutput
+    const refused = (await listEvents(cut, github().identity, { since: SINCE }, NOW).catch((error: unknown) => error)) as GitHubPluginError
+    expect(refused).toBeInstanceOf(GitHubPluginError)
+    expect(refused.code).toBe("TOO_LARGE")
+    expect(refused.detail).toContain("16 MB")
+  })
+})
+
+describe("GitHub's own search answers, read whole", () => {
+  const BASE = Date.parse("2026-10-02T00:00:00Z")
+  const many = (count: number, body: number, first = 1) => Array.from({ length: count }, (_, k) => issue("octo/big", first + k, new Date(BASE + k * 1000).toISOString().replace(".000Z", "Z"), { body: "x".repeat(body) }))
+  const listed = (all: ReturnType<typeof issue>[]) => all.map((item) => `octo/big#${item.number}@${new Date(Date.parse(item.updated_at)).toISOString()}`)
+
+  it("reads a 1.2 MB page of 50 results whole, and lists every result once", async () => {
+    const all = many(50, 24_000)
+    const fake = github({ issues: all, commits: [], inbox: [] })
+    const result = (await list(fake)({ since: SINCE, limit: PAGE.max })) as EventsListResult
+    // 50 results of 24,000 characters is about 1.2 MB: over the 100,000-byte cap an answer shown to an agent gets.
+    expect(result.events.map((event) => event.external_id)).toEqual(listed(all))
+    expect(result.more).toBe(false)
+    expect(fake.calls.filter((call) => call.path === "/search/issues").at(-1)!.query).toMatchObject({ per_page: 50 })
+  })
+
+  it("reads one result whose body is GitHub's 65,536-character limit, and keeps the event within the contract's", async () => {
+    const all = many(1, 65_536)
+    const result = (await list(github({ issues: all, commits: [], inbox: [] }))({ since: SINCE })) as EventsListResult
+    expect(result.events).toHaveLength(1)
+    expect(result.events[0]!.text).toHaveLength(EVENT_LIMITS.text)
+  })
+
+  it("lists two results over the old 100,000-byte cap once each, where a cut page used to lose them", async () => {
+    const all = many(2, 120_000)
+    const result = (await list(github({ issues: all, commits: [], inbox: [] }))({ since: SINCE, limit: PAGE.max })) as EventsListResult
+    expect(result.events.map((event) => event.external_id)).toEqual(listed(all))
+    expect(result.more).toBe(false)
+  })
+
+  it("lists 37 results once, in one page, with more false", async () => {
+    const all = many(37, 2_000)
+    const result = (await list(github({ issues: all, commits: [], inbox: [] }))({ since: SINCE, limit: PAGE.max })) as EventsListResult
+    expect(result.events).toHaveLength(37)
+    expect(new Set(result.events.map((event) => event.external_id)).size).toBe(37)
+    expect(result.more).toBe(false)
+  })
+
+  it("names the 16 MB limit for an answer over it, and never UNAVAILABLE", async () => {
+    // 50 results of 340,000 characters is about 17 MB: more than events_list reads whole, and named as such.
+    const fake = github({ issues: many(50, 340_000), commits: [], inbox: [] })
+    const refused = (await listEvents(fake.get, fake.identity, { since: SINCE }, NOW).catch((error: unknown) => error)) as GitHubPluginError
+    expect(refused).toBeInstanceOf(GitHubPluginError)
+    expect(refused.code).toBe("TOO_LARGE")
+    expect(refused.detail).toContain("/search/issues")
+    expect(refused.detail).toContain("16 MB")
   })
 })
 

@@ -56,6 +56,10 @@ type CallDeps = {
   readonly script?: boolean
   /** GitHub Enterprise Server: no MCP tools, so next steps never name one. */
   readonly enterprise?: boolean
+  /** The most bytes an answer may hold, whole: MAX_READ_BYTES, or what a caller that reads a source's own answer sets. */
+  readonly maxReadBytes?: number
+  /** The most bytes of one inline result: MAX_INLINE_BYTES, or what a caller that reads a source's own answer sets. */
+  readonly maxInlineBytes?: number
 }
 
 /** How a request may follow redirects: never for a change; for a read, within the API base; a download also to storage hosts. */
@@ -178,14 +182,14 @@ export async function callRest(input: RestInput, target: RestTarget, deps: CallD
     const overwrite = input.download.overwrite === true
     const file = await downloadTarget(deps.root, input.download.path, overwrite)
     const response = await send(target.url, { method: input.method, headers, body }, deps, { follow: "storage", what: target.resource })
-    if (!response.ok) return finish(response, await readBody(response, input.method), deps, target.path)
+    if (!response.ok) return finish(response, await readBody(response, input.method, deps.maxReadBytes), deps, target.path)
     const saved = await save(response, file, { overwrite, maxBytes: deps.maxDownloadBytes ?? MAX_DOWNLOAD_BYTES })
     return { ...base(response), download: saved, truncated: false }
   }
 
   const follow: Follow = input.method === "GET" || input.method === "HEAD" ? "api" : "never"
   const response = await send(target.url, { method: input.method, headers, body }, deps, { follow, what: target.resource })
-  const first = await readBody(response, input.method)
+  const first = await readBody(response, input.method, deps.maxReadBytes)
   if (!input.paginate || input.method !== "GET" || !response.ok) return finish(response, first, deps, target.path)
 
   // Pages: join arrays, or the one array of a list object such as { total_count, items }.
@@ -198,7 +202,7 @@ export async function callRest(input: RestInput, target: RestTarget, deps: CallD
   while (next && pages < maxPages && itemCount(data) < maxItems) {
     await deps.authorize(next.resource, "page")
     const page = await send(next.url, { method: "GET", headers }, deps, { follow: "api", what: target.resource })
-    const read = await readBody(page, "GET")
+    const read = await readBody(page, "GET", deps.maxReadBytes)
     if (!page.ok) return finish(page, read, deps, target.path)
     const joined = join_(data, read.data)
     if (joined === undefined) break
@@ -218,7 +222,7 @@ export async function callGraphql(input: GraphqlInput, deps: CallDeps): Promise<
     follow: "never",
     what: "POST /graphql",
   })
-  const output = finish(response, await readBody(response, "POST"), deps)
+  const output = finish(response, await readBody(response, "POST", deps.maxReadBytes), deps)
   const errors = (output.data as { errors?: unknown } | undefined)?.errors
   return Array.isArray(errors) && errors.length > 0 ? { ...output, ok: false } : output
 }
@@ -314,13 +318,13 @@ function redirected(what: string, next: URL, onApi: RestTarget | undefined): Git
 
 type Body = { data?: unknown; contentType?: string; truncated: boolean; binary?: number }
 
-async function readBody(response: Response, method: string): Promise<Body> {
+async function readBody(response: Response, method: string, maxBytes?: number): Promise<Body> {
   const contentType = response.headers.get("content-type")?.split(";")[0]?.trim() || undefined
   if (method === "HEAD" || response.status === 204 || !response.body) {
     await response.body?.cancel().catch(() => undefined)
     return { truncated: false, ...(contentType ? { contentType } : {}) }
   }
-  const { bytes, truncated } = await readCapped(response, MAX_READ_BYTES)
+  const { bytes, truncated } = await readCapped(response, maxBytes ?? MAX_READ_BYTES)
   const text = () => new TextDecoder().decode(bytes)
   if (contentType && /json/i.test(contentType)) {
     try {
@@ -438,7 +442,8 @@ function finish(response: Response, body: Body, deps: CallDeps, path?: string): 
     return { ...output, truncated: false, nextStep: nextStep ?? `The response is ${body.binary} bytes of ${body.contentType}; ${save}.` }
   }
   if (body.data === undefined) return { ...output, ...(nextStep ? { nextStep } : {}) }
-  const capped = capInline(body.data)
+  const inline = deps.maxInlineBytes ?? MAX_INLINE_BYTES
+  const capped = capInline(body.data, inline)
   const truncated = output.truncated || capped.truncated
   return {
     ...output,
@@ -447,7 +452,7 @@ function finish(response: Response, body: Body, deps: CallDeps, path?: string): 
     ...(nextStep
       ? { nextStep }
       : truncated
-        ? { nextStep: `The result was cut at 100,000 bytes. Narrow it with query parameters such as per_page${deps.enterprise ? "" : ", or read one file with get_file_contents"}.` }
+        ? { nextStep: `The result was cut at ${inline === MAX_INLINE_BYTES ? "100,000" : inline.toLocaleString("en-US")} bytes. Narrow it with query parameters such as per_page${deps.enterprise ? "" : ", or read one file with get_file_contents"}.` }
         : {}),
   }
 }
@@ -570,21 +575,21 @@ function capItems(value: unknown, max: number): { data: unknown; dropped: boolea
   return { data: list.key === undefined ? items : { ...(value as object), [list.key]: items }, dropped: true }
 }
 
-/** Keeps the inline result under MAX_INLINE_BYTES: whole list items where it can, else a cut text. */
-function capInline(value: unknown): { data: unknown; truncated: boolean } {
+/** Keeps the inline result under `max`: whole list items where it can, else a cut text. */
+function capInline(value: unknown, max: number): { data: unknown; truncated: boolean } {
   const size = (item: unknown) => Buffer.byteLength(typeof item === "string" ? item : (JSON.stringify(item) ?? ""))
-  if (size(value) <= MAX_INLINE_BYTES) return { data: value, truncated: false }
-  if (typeof value === "string") return { data: Buffer.from(value).subarray(0, MAX_INLINE_BYTES).toString("utf8"), truncated: true }
+  if (size(value) <= max) return { data: value, truncated: false }
+  if (typeof value === "string") return { data: Buffer.from(value).subarray(0, max).toString("utf8"), truncated: true }
   const list = listOf(value)
   if (list) {
     const kept: unknown[] = []
     let used = list.key === undefined ? 2 : size({ ...(value as object), [list.key]: [] })
     for (const item of list.items) {
       used += size(item) + 1
-      if (used > MAX_INLINE_BYTES) break
+      if (used > max) break
       kept.push(item)
     }
     return { data: list.key === undefined ? kept : { ...(value as object), [list.key]: kept }, truncated: true }
   }
-  return { data: Buffer.from(JSON.stringify(value)).subarray(0, MAX_INLINE_BYTES).toString("utf8"), truncated: true }
+  return { data: Buffer.from(JSON.stringify(value)).subarray(0, max).toString("utf8"), truncated: true }
 }
