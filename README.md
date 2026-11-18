@@ -9,7 +9,7 @@ GitHub is a trademark of GitHub, Inc.; this unofficial plugin is not endorsed by
 
 ## Requirements
 
-- OpenCode `>=2.2.3 <2.4.0`, tested on 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7 and 2.3.0. A later 2.2 or 2.3 release loads too, and the status marks it
+- OpenCode `>=2.2.3 <2.4.0`, tested on 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7, 2.3.0, 2.3.1 and 2.3.2. A later 2.2 or 2.3 release loads too, and the status marks it
   untested. Outside `>=2.2.3 <2.4.0` the plugin does not load, unless you set
   [`allowUntestedHost`](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/configuration.md#allowuntestedhost).
 - macOS or Linux.
@@ -492,7 +492,7 @@ still stores its token.
 - **The token limits what is possible.** The scopes you granted decide what the account's token can do. The default `repo` scope reaches every repository the account can write.
 - **Toolsets are a selection.** The default `toolsets` turn on 15 of the 24 toolsets, which show 69 tools. Nine toolsets are off by default, such as `copilot` and `gists`, and GitHub's two issue artifact tools need a feature flag the plugin does not turn on. See the [toolsets table](docs/configuration.md#toolsets).
 - **An allow on `github_api` covers writes.** An allow for `github_api` authorises every `api` call, reads included, and also its writes, downloads and uploads. Grant it only to a session that may change GitHub, or set `access` to `"read-only"` for a read-only script.
-- **Tested on OpenCode 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7 and 2.3.0 only.** Other releases in `>=2.2.3 <2.4.0` run untested.
+- **Tested on OpenCode 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7, 2.3.0, 2.3.1 and 2.3.2 only.** Other releases in `>=2.2.3 <2.4.0` run untested.
 - **Agents without the base allow ask before reads.** Every GitHub request asserts `github_api` on its own `METHOD /path` first. An agent without the base `* * allow` rule gets no default block, so its `github_api` reads ask, and a script's reads there are refused with `PERMISSION_DENIED` until that agent's rules allow them (see [Permissions](#permissions)). `events_list` is not affected: its reads assert `github_events_list`, so an allow for that tool, which Jelly writes, is enough.
 - **A GitHub App sign-in expires after six months.** Its 8-hour user token is renewed with its refresh token, which lasts six months; after that, or once GitHub refuses it, `/connect` asks for a new sign-in. The App reaches only the accounts it is installed on.
 - **Jelly.** The `access` and `unknownTools` settings declare their choices, which only a Jelly that includes app#1301 reads; an older Jelly refuses the plugin's declaration.

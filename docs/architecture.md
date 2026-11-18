@@ -205,7 +205,7 @@ answers a bad envelope with `rpc.invalid_input`.
 
 The executor does not run `execute.before` and `execute.after` hooks; GitHub has none, so results are unchanged.
 `ctx.tool.list()` returning callable executors is not documented as an entry point: the embedded host test and the
-stock test (`test/stock`, stock `opencode serve` 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7 and 2.3.0) check the whole path against the loopback fake.
+stock test (`test/stock`, stock `opencode serve` 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7, 2.3.0, 2.3.1 and 2.3.2) check the whole path against the loopback fake.
 
 ## Drift check
 

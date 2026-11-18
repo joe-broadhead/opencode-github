@@ -76,6 +76,8 @@ describe("tested hosts", () => {
   it("the untested example is 2.2.99, and no doc names a future release as tested", () => {
     const all = SOURCES.map(([, text]) => text).join("\n")
     expect(all).toContain("2.2.99")
-    expect(all).not.toMatch(/\b(?:2\.2\.(?:8|9[0-8])|2\.3\.[1-9]\d*)\b(?!\d)/)
+    // Every 2.2 or 2.3 release a doc names is one the checks run on, apart from the example outside the list.
+    const named = [...new Set([...all.matchAll(/\b2\.[23]\.\d+\b/g)].map((match) => match[0]!))]
+    expect(named.filter((version) => version !== "2.2.99" && !(TESTED_HOSTS as readonly string[]).includes(version))).toEqual([])
   })
 })

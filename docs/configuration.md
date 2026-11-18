@@ -909,7 +909,7 @@ GHE.com (data residency) is not supported yet; `host` refuses `*.ghe.com`.
 
 ## `allowUntestedHost`
 
-The plugin supports OpenCode `>=2.2.3 <2.4.0` and is tested on 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7 and 2.3.0. A release inside the
+The plugin supports OpenCode `>=2.2.3 <2.4.0` and is tested on 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7, 2.3.0, 2.3.1 and 2.3.2. A release inside the
 range that is not in that list, such as 2.2.99, still loads, and the status marks it untested. On a later 2.2 or 2.3 release it
 loads and works; the status shows `OpenCode: 2.2.99 (untested; supported range >=2.2.3 <2.4.0)`, and the status RPC
 `host.tested: false`, and the state and next step stay those of the connection. Outside the range, including
