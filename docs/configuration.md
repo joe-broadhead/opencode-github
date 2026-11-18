@@ -722,8 +722,11 @@ login, and refuses another account with `ACCOUNT_MISMATCH`.
 
 ## Sources
 
-`package.json` declares the plugin's one source in its top-level `sources` key, under source-contract version 1, so a
-consumer (Memory, jelly, Artifacts) reads it from the installed package:
+`package.json` declares the plugin's sources in its top-level `sources` key, under source-contract version 1, so a
+consumer (Memory, jelly, Artifacts) reads them from the installed package. `github.activity` is the events feed.
+`github.notifications` is a list snapshot of the latest notifications, the same `events_list` read with
+`{ "source": "github", "list": "notifications" }`, and its grant is `github_events_list` on `GET /notifications` only.
+`github.activity` is:
 
 | Key | Value |
 | --- | --- |
