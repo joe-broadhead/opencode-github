@@ -296,16 +296,32 @@ describe("events_list", () => {
     expect(fake.calls).toEqual([])
   })
 
-  it("refuses a cursor an earlier release issued, for the same sign-in too, with CURSOR_INVALID and a next step to start again", async () => {
+  it("reads a cursor of 0.0.2 for this sign-in, and refuses only a cursor no release wrote, or another sign-in's", async () => {
     const owner = createHash("sha256").update(OWNER.id).digest("hex").slice(0, 16)
-    // Contract 1's cursor, as 0.0.2 wrote it: account default and the owner's hash.
-    const legacy = encodeCursor(SOURCE, { a: "default", o: owner, p: { i: [Date.parse(SINCE), ""], c: [Date.parse(SINCE), ""], n: [Date.parse(SINCE), ""] } })
-    const fake = github()
-    const refused = await listEvents(fake.get, fake.identity, { account: LOGIN, cursor: legacy }, NOW).catch((error: unknown) => error)
-    expect(refused).toBeInstanceOf(GitHubPluginError)
-    expect((refused as GitHubPluginError).code).toBe("CURSOR_INVALID")
-    expect((refused as GitHubPluginError).nextStep).toBe("Call events_list without a cursor, with since, to start again.")
-    expect(fake.calls).toEqual([])
+    const positions = { i: [Date.parse(SINCE), ""], c: [Date.parse(SINCE), ""], n: [Date.parse(SINCE), ""] }
+    // Contract 1's cursor, as 0.0.2 wrote it: account default and the owner's hash. It lists what came after.
+    const legacy = encodeCursor(SOURCE, { a: "default", o: owner, p: positions })
+    const read = (await listEvents(github().get, github().identity, { account: "default", cursor: legacy, limit: PAGE.max }, NOW)) as EventsListResult
+    expect(read.events.map((event) => event.external_id)).toEqual(EXPECTED)
+    const refused = async (cursor: string) => {
+      const fake = github()
+      const error = await listEvents(fake.get, fake.identity, { account: LOGIN, cursor }, NOW).catch((caught: unknown) => caught)
+      expect(error).toBeInstanceOf(GitHubPluginError)
+      expect((error as GitHubPluginError).code).toBe("CURSOR_INVALID")
+      expect((error as GitHubPluginError).nextStep).toBe("Call events_list without a cursor, with since, to start again.")
+      expect(fake.calls).toEqual([])
+    }
+    // Another sign-in's 0.0.2 cursor, and one that names an account 0.0.2 never wrote.
+    await refused(encodeCursor(SOURCE, { a: "default", o: "0".repeat(16), p: positions }))
+    await refused(encodeCursor(SOURCE, { a: LOGIN, o: owner, p: positions }))
+    const bound = (state: Record<string, unknown>) => encodeBoundCursor({ plugin: NAMESPACE, source: SOURCE, account: LOGIN }, { a: LOGIN, o: owner, ...state })
+    const streams = { i: [Date.parse(SINCE), ""], p: [Date.parse(SINCE), ""], c: [Date.parse(SINCE), ""], n: [Date.parse(SINCE), ""] }
+    // 0.0.5's shape is read; with a read's cut but no lookback, no release wrote it.
+    expect(((await listEvents(github().get, github().identity, { account: LOGIN, cursor: bound({ p: streams }), limit: PAGE.max }, NOW)) as EventsListResult).events.map((event) => event.external_id)).toEqual(EXPECTED)
+    await refused(bound({ p: streams, u: NOW }))
+    // Format 1 always holds its lookback, and there is no format 2.
+    await refused(bound({ k: 1, p: [["0", ""], ["0", ""], ["0", ""], ["0", ""]] }))
+    await refused(bound({ k: 2, p: [["0", ""], ["0", ""], ["0", ""], ["0", ""]], l: ["0", []] }))
   })
 
   it("refuses an event whose title or text holds a secret for good, and moves the cursor past it", async () => {
@@ -397,8 +413,9 @@ describe("a crowded second at a page of 100", () => {
     expect(new Set(seen).size).toBe(1780)
     expect(seen.filter((id) => id.startsWith("octo/big#"))).toHaveLength(1380)
     expect(seen.filter((id) => id.startsWith("octo/big@"))).toHaveLength(400)
-    // master's paging exactly: the same eleven calls, so the second read is never starved of the budget.
-    expect(counts).toHaveLength(11)
+    // No more calls than master's eleven, so the second read is never starved of the budget: a second listed in part is
+    // read first by the next call.
+    expect(counts.length).toBeLessThanOrEqual(11)
   })
 })
 

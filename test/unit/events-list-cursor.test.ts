@@ -137,14 +137,21 @@ describe("the cursor's size", () => {
   const owner = ownerOf("a".repeat(39))
   const account = "a".repeat(39)
   /** Every field at its longest: times inside a second, a 20-digit notification, the lookback full and far back. */
-  const worst = (keys: [string, string, string]) =>
+  // A walk through a second at its last place, its total and its page size, at their longest.
+  const walk = { total: 1000, size: 100 }
+  const worst = (keys: [string, string, string], walking = false) =>
     encodeState(
       account,
       owner,
-      { i: { t: 9_999_999_999_999, i: keys[0] }, p: { t: 9_999_999_999_998, i: keys[1] }, c: { t: 9_999_999_999_997, i: keys[2] }, n: { t: 9_999_999_999_996, i: "9".repeat(20) } },
+      {
+        i: { t: 9_999_999_999_999, i: keys[0], ...(walking ? { walk } : {}) },
+        p: { t: 9_999_999_999_998, i: keys[1], ...(walking ? { walk } : {}) },
+        c: { t: 9_999_999_999_997, i: keys[2], ...(walking ? { walk } : {}) },
+        n: { t: 9_999_999_999_996, i: "9".repeat(20) },
+      },
       9_999_999_999_996 - 6 * 60 * 60_000,
       new Map(Array.from({ length: LOOKBACK_REMEMBERED }, (_, k) => [`${k}`.padStart(8, "f"), 9_999_999_999_996 - 6 * 60 * 60_000 + k])),
-      { gapAt: 9_999_999_999_995, cut: 9_999_999_999_994, lostAt: 9_999_999_999_993 },
+      { gapAt: 9_999_999_999_995, cut: 9_999_999_999_994, lostAt: 9_999_999_999_993, held: { stream: "c", second: 9_999_999_999_997 } },
     )
 
   it(`is at most ${CURSOR_MAX} characters with names of the longest GitHub allows in all three search positions, a cut, a gap and a loss`, () => {
@@ -154,11 +161,15 @@ describe("the cursor's size", () => {
     expect(keys.every((key) => key.length === ORDER_KEY_LENGTH)).toBe(true)
     const cursor = worst(keys)
     expect(CURSOR_MAX).toBe(960)
-    // 763 characters, with all 16 notifications remembered.
+    // 791 characters, with a held second and all 16 notifications remembered.
     expect(cursor.length).toBeLessThanOrEqual(CURSOR_MAX)
+    // All three search streams walking a second instead, at its last place: 799, the longest.
+    const walking = worst(["!rr", "!rr", "!rr"], true)
+    expect(walking.length).toBeLessThanOrEqual(CURSOR_MAX)
+    expect((decoded(walking)["p"] as unknown[][])[0]).toEqual([(9_999_999_999_999).toString(36).replace(/^/, "~"), "!rr", "rs", "2s"])
     const state = decoded(cursor)
     expect(state).toMatchObject({ k: 1, a: account })
-    expect(Object.keys(state).sort()).toEqual(["a", "b", "g", "k", "l", "o", "p", "q", "s", "u", "v"])
+    expect(Object.keys(state).sort()).toEqual(["a", "b", "g", "h", "k", "l", "o", "p", "q", "s", "u", "v"])
     // The whole lookback fits: nothing had to be forgotten.
     expect((state["l"] as [string, string[]])[1]).toHaveLength(LOOKBACK_REMEMBERED)
   })
@@ -174,5 +185,134 @@ describe("the cursor's size", () => {
     expect(result.more).toBe(true)
     expect(Buffer.from(result.cursor, "base64url").toString("utf8")).not.toContain("rrrr")
     expect(result.cursor.length).toBeLessThanOrEqual(CURSOR_MAX)
+  })
+})
+
+// The world 0.0.2 and 0.0.5 read, with pull requests in the crowded second too: 0.0.2 read issues and pull requests as
+// one stream, in one order. OLDER holds real cursors their own events_list (tags v0.0.2 and v0.0.5) issued over it, read
+// from 2026-10-01 at limit 120, and at limit 13 every other page, so several stop inside the second of 300 commits and
+// 40 issues and pull requests.
+const pr = (n: number, updated: string) => ({ ...issue(n, updated), html_url: `https://github.com/octo/app/pull/${n}`, pull_request: { merged_at: null } })
+const OLDER_WORLD = {
+  commits: [commit("c0", "2026-10-02T00:00:00Z"), ...Array.from({ length: 300 }, (_, k) => commit(`r${String(299 - k).padStart(5, "0")}`, T)), commit("z1", "2026-11-03T00:00:00Z")],
+  issues: [issue(1, "2026-11-01T10:00:00Z"), ...Array.from({ length: 40 }, (_, k) => (k % 2 === 1 ? pr(100 + k, T) : issue(100 + k, T))), issue(4, "2026-11-06T00:00:00Z"), pr(5, "2026-11-06T00:00:00Z")],
+  inbox: WORLD.inbox,
+}
+/** GitHub over OLDER_WORLD: a search with `is:` reads issues or pull requests, one without (0.0.2's) both. */
+const olderGithub = (world: typeof OLDER_WORLD): ReturnType<typeof github> => {
+  const plain = github(world as never)
+  return async (path, query) => {
+    const q = String(query.q ?? "")
+    if (path !== "/search/issues") return plain(path, query)
+    const kind = /is:(issue|pull-request)/.exec(q)?.[1]
+    const within = (at: string) => {
+      const match = /updated:(?:>=(\S+)|(\S+)\.\.(\S+))/.exec(q)!
+      const t = Date.parse(at)
+      return match[1] !== undefined ? t >= Date.parse(match[1]) : t >= Date.parse(match[2]!) && t <= Date.parse(match[3]!)
+    }
+    const all = world.issues.filter((i) => within(i.updated_at) && (kind === undefined || ("pull_request" in i) === (kind === "pull-request"))).sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at) || b.number - a.number)
+    const per = Number(query.per_page)
+    const page = Number(query.page ?? 1)
+    return ok({ total_count: all.length, incomplete_results: false, items: all.slice((page - 1) * per, page * per) })
+  }
+}
+/** Every event of OLDER_WORLD in an older release's order: by time, stream and id; 0.0.2 had one stream for issues and pull requests. */
+const olderOrder = (split: boolean) =>
+  [
+    ...OLDER_WORLD.commits.map((c) => ({ t: Date.parse(c.commit.committer.date), s: "c", id: `octo/app@${c.sha}`, event: `octo/app@${c.sha}` })),
+    ...OLDER_WORLD.issues.map((i) => ({ t: Date.parse(i.updated_at), s: split && "pull_request" in i ? "p" : "i", id: `octo/app#${i.number}`, event: `octo/app#${i.number}@${new Date(Date.parse(i.updated_at)).toISOString()}` })),
+    ...OLDER_WORLD.inbox.map((n) => ({ t: Date.parse(n.updated_at), s: "n", id: n.id, event: `notification:${n.id}@${new Date(Date.parse(n.updated_at)).toISOString()}` })),
+  ]
+    .sort((a, b) => a.t - b.t || (a.s < b.s ? -1 : a.s > b.s ? 1 : 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map((entry) => entry.event)
+
+const OLDER = {
+  "0.0.2": [
+    { listed: 2, cursor: "eyJhIjoiZGVmYXVsdCIsIm8iOiI0ZWI1MzBkM2I0YThhYmFiIiwicCI6eyJpIjpbMTc5MzUyNzIwMDAwMCwib2N0by9hcHAjMSJdLCJjIjpbMTc5MDg5OTIwMDAwMCwib2N0by9hcHBAYzAiXSwibiI6WzE3OTA4MTI4MDAwMDAsIiJdfSwidiI6MSwicyI6ImdpdGh1YiJ9" },
+    { listed: 122, cursor: "eyJhIjoiZGVmYXVsdCIsIm8iOiI0ZWI1MzBkM2I0YThhYmFiIiwicCI6eyJpIjpbMTc5MzUyNzIwMDAwMCwib2N0by9hcHAjMSJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMTE5Il0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX0sInYiOjEsInMiOiJnaXRodWIifQ" },
+    { listed: 242, cursor: "eyJhIjoiZGVmYXVsdCIsIm8iOiI0ZWI1MzBkM2I0YThhYmFiIiwicCI6eyJpIjpbMTc5MzUyNzIwMDAwMCwib2N0by9hcHAjMSJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMjM5Il0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX0sInYiOjEsInMiOiJnaXRodWIifQ" },
+    { listed: 349, cursor: "eyJhIjoiZGVmYXVsdCIsIm8iOiI0ZWI1MzBkM2I0YThhYmFiIiwicCI6eyJpIjpbMTc5MzkyMzIwMDAwMCwib2N0by9hcHAjNSJdLCJjIjpbMTc5MzY2NDAwMDAwMCwib2N0by9hcHBAejEiXSwibiI6WzE3OTQxMzIwMDAwMDAsIjkwMDQiXX0sInYiOjEsInMiOiJnaXRodWIifQ" },
+    { listed: 15, cursor: "eyJhIjoiZGVmYXVsdCIsIm8iOiI0ZWI1MzBkM2I0YThhYmFiIiwicCI6eyJpIjpbMTc5MzUyNzIwMDAwMCwib2N0by9hcHAjMSJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMDEyIl0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX0sInYiOjEsInMiOiJnaXRodWIifQ" },
+    { listed: 41, cursor: "eyJhIjoiZGVmYXVsdCIsIm8iOiI0ZWI1MzBkM2I0YThhYmFiIiwicCI6eyJpIjpbMTc5MzUyNzIwMDAwMCwib2N0by9hcHAjMSJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMDM4Il0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX0sInYiOjEsInMiOiJnaXRodWIifQ" },
+    { listed: 67, cursor: "eyJhIjoiZGVmYXVsdCIsIm8iOiI0ZWI1MzBkM2I0YThhYmFiIiwicCI6eyJpIjpbMTc5MzUyNzIwMDAwMCwib2N0by9hcHAjMSJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMDY0Il0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX0sInYiOjEsInMiOiJnaXRodWIifQ" },
+    { listed: 93, cursor: "eyJhIjoiZGVmYXVsdCIsIm8iOiI0ZWI1MzBkM2I0YThhYmFiIiwicCI6eyJpIjpbMTc5MzUyNzIwMDAwMCwib2N0by9hcHAjMSJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMDkwIl0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX0sInYiOjEsInMiOiJnaXRodWIifQ" },
+    { listed: 119, cursor: "eyJhIjoiZGVmYXVsdCIsIm8iOiI0ZWI1MzBkM2I0YThhYmFiIiwicCI6eyJpIjpbMTc5MzUyNzIwMDAwMCwib2N0by9hcHAjMSJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMTE2Il0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX0sInYiOjEsInMiOiJnaXRodWIifQ" },
+    { listed: 145, cursor: "eyJhIjoiZGVmYXVsdCIsIm8iOiI0ZWI1MzBkM2I0YThhYmFiIiwicCI6eyJpIjpbMTc5MzUyNzIwMDAwMCwib2N0by9hcHAjMSJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMTQyIl0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX0sInYiOjEsInMiOiJnaXRodWIifQ" },
+    { listed: 171, cursor: "eyJhIjoiZGVmYXVsdCIsIm8iOiI0ZWI1MzBkM2I0YThhYmFiIiwicCI6eyJpIjpbMTc5MzUyNzIwMDAwMCwib2N0by9hcHAjMSJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMTY4Il0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX0sInYiOjEsInMiOiJnaXRodWIifQ" },
+    { listed: 197, cursor: "eyJhIjoiZGVmYXVsdCIsIm8iOiI0ZWI1MzBkM2I0YThhYmFiIiwicCI6eyJpIjpbMTc5MzUyNzIwMDAwMCwib2N0by9hcHAjMSJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMTk0Il0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX0sInYiOjEsInMiOiJnaXRodWIifQ" },
+    { listed: 223, cursor: "eyJhIjoiZGVmYXVsdCIsIm8iOiI0ZWI1MzBkM2I0YThhYmFiIiwicCI6eyJpIjpbMTc5MzUyNzIwMDAwMCwib2N0by9hcHAjMSJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMjIwIl0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX0sInYiOjEsInMiOiJnaXRodWIifQ" },
+    { listed: 249, cursor: "eyJhIjoiZGVmYXVsdCIsIm8iOiI0ZWI1MzBkM2I0YThhYmFiIiwicCI6eyJpIjpbMTc5MzUyNzIwMDAwMCwib2N0by9hcHAjMSJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMjQ2Il0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX0sInYiOjEsInMiOiJnaXRodWIifQ" },
+    { listed: 275, cursor: "eyJhIjoiZGVmYXVsdCIsIm8iOiI0ZWI1MzBkM2I0YThhYmFiIiwicCI6eyJpIjpbMTc5MzUyNzIwMDAwMCwib2N0by9hcHAjMSJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMjcyIl0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX0sInYiOjEsInMiOiJnaXRodWIifQ" },
+    { listed: 301, cursor: "eyJhIjoiZGVmYXVsdCIsIm8iOiI0ZWI1MzBkM2I0YThhYmFiIiwicCI6eyJpIjpbMTc5MzUyNzIwMDAwMCwib2N0by9hcHAjMSJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMjk4Il0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX0sInYiOjEsInMiOiJnaXRodWIifQ" },
+    { listed: 327, cursor: "eyJhIjoiZGVmYXVsdCIsIm8iOiI0ZWI1MzBkM2I0YThhYmFiIiwicCI6eyJpIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHAjMTI0Il0sImMiOlsxNzkzNTc3NjAwMDAwLCJvY3RvL2FwcEByMDAyOTkiXSwibiI6WzE3OTA4MTI4MDAwMDAsIiJdfSwidiI6MSwicyI6ImdpdGh1YiJ9" },
+    { listed: 349, cursor: "eyJhIjoiZGVmYXVsdCIsIm8iOiI0ZWI1MzBkM2I0YThhYmFiIiwicCI6eyJpIjpbMTc5MzkyMzIwMDAwMCwib2N0by9hcHAjNSJdLCJjIjpbMTc5MzY2NDAwMDAwMCwib2N0by9hcHBAejEiXSwibiI6WzE3OTQxMzIwMDAwMDAsIjkwMDQiXX0sInYiOjEsInMiOiJnaXRodWIifQ" },
+  ],
+  "0.0.5": [
+    { listed: 2, cursor: "eyJ2IjoyLCJzIjoiZ2l0aHViIiwiYiI6ImIwNTJhODEyNTQ2MDI5MzAiLCJhIjoib2N0by1wZXJzb24iLCJvIjoiNGViNTMwZDNiNGE4YWJhYiIsInAiOnsiaSI6WzE3OTM1MjcyMDAwMDAsIm9jdG8vYXBwIzEiXSwicCI6WzE3OTA4MTI4MDAwMDAsIiJdLCJjIjpbMTc5MDg5OTIwMDAwMCwib2N0by9hcHBAYzAiXSwibiI6WzE3OTA4MTI4MDAwMDAsIiJdfX0" },
+    { listed: 122, cursor: "eyJ2IjoyLCJzIjoiZ2l0aHViIiwiYiI6ImIwNTJhODEyNTQ2MDI5MzAiLCJhIjoib2N0by1wZXJzb24iLCJvIjoiNGViNTMwZDNiNGE4YWJhYiIsInAiOnsiaSI6WzE3OTM1MjcyMDAwMDAsIm9jdG8vYXBwIzEiXSwicCI6WzE3OTA4MTI4MDAwMDAsIiJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMTE5Il0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX19" },
+    { listed: 242, cursor: "eyJ2IjoyLCJzIjoiZ2l0aHViIiwiYiI6ImIwNTJhODEyNTQ2MDI5MzAiLCJhIjoib2N0by1wZXJzb24iLCJvIjoiNGViNTMwZDNiNGE4YWJhYiIsInAiOnsiaSI6WzE3OTM1MjcyMDAwMDAsIm9jdG8vYXBwIzEiXSwicCI6WzE3OTA4MTI4MDAwMDAsIiJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMjM5Il0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX19" },
+    { listed: 349, cursor: "eyJ2IjoyLCJzIjoiZ2l0aHViIiwiYiI6ImIwNTJhODEyNTQ2MDI5MzAiLCJhIjoib2N0by1wZXJzb24iLCJvIjoiNGViNTMwZDNiNGE4YWJhYiIsInAiOnsiaSI6WzE3OTM5MjMyMDAwMDAsIm9jdG8vYXBwIzQiXSwicCI6WzE3OTM5MjMyMDAwMDAsIm9jdG8vYXBwIzUiXSwiYyI6WzE3OTM2NjQwMDAwMDAsIm9jdG8vYXBwQHoxIl0sIm4iOlsxNzk0MTMyMDAwMDAwLCI5MDA0Il19fQ" },
+    { listed: 15, cursor: "eyJ2IjoyLCJzIjoiZ2l0aHViIiwiYiI6ImIwNTJhODEyNTQ2MDI5MzAiLCJhIjoib2N0by1wZXJzb24iLCJvIjoiNGViNTMwZDNiNGE4YWJhYiIsInAiOnsiaSI6WzE3OTM1MjcyMDAwMDAsIm9jdG8vYXBwIzEiXSwicCI6WzE3OTA4MTI4MDAwMDAsIiJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMDEyIl0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX19" },
+    { listed: 41, cursor: "eyJ2IjoyLCJzIjoiZ2l0aHViIiwiYiI6ImIwNTJhODEyNTQ2MDI5MzAiLCJhIjoib2N0by1wZXJzb24iLCJvIjoiNGViNTMwZDNiNGE4YWJhYiIsInAiOnsiaSI6WzE3OTM1MjcyMDAwMDAsIm9jdG8vYXBwIzEiXSwicCI6WzE3OTA4MTI4MDAwMDAsIiJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMDM4Il0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX19" },
+    { listed: 67, cursor: "eyJ2IjoyLCJzIjoiZ2l0aHViIiwiYiI6ImIwNTJhODEyNTQ2MDI5MzAiLCJhIjoib2N0by1wZXJzb24iLCJvIjoiNGViNTMwZDNiNGE4YWJhYiIsInAiOnsiaSI6WzE3OTM1MjcyMDAwMDAsIm9jdG8vYXBwIzEiXSwicCI6WzE3OTA4MTI4MDAwMDAsIiJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMDY0Il0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX19" },
+    { listed: 93, cursor: "eyJ2IjoyLCJzIjoiZ2l0aHViIiwiYiI6ImIwNTJhODEyNTQ2MDI5MzAiLCJhIjoib2N0by1wZXJzb24iLCJvIjoiNGViNTMwZDNiNGE4YWJhYiIsInAiOnsiaSI6WzE3OTM1MjcyMDAwMDAsIm9jdG8vYXBwIzEiXSwicCI6WzE3OTA4MTI4MDAwMDAsIiJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMDkwIl0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX19" },
+    { listed: 119, cursor: "eyJ2IjoyLCJzIjoiZ2l0aHViIiwiYiI6ImIwNTJhODEyNTQ2MDI5MzAiLCJhIjoib2N0by1wZXJzb24iLCJvIjoiNGViNTMwZDNiNGE4YWJhYiIsInAiOnsiaSI6WzE3OTM1MjcyMDAwMDAsIm9jdG8vYXBwIzEiXSwicCI6WzE3OTA4MTI4MDAwMDAsIiJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMTE2Il0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX19" },
+    { listed: 145, cursor: "eyJ2IjoyLCJzIjoiZ2l0aHViIiwiYiI6ImIwNTJhODEyNTQ2MDI5MzAiLCJhIjoib2N0by1wZXJzb24iLCJvIjoiNGViNTMwZDNiNGE4YWJhYiIsInAiOnsiaSI6WzE3OTM1MjcyMDAwMDAsIm9jdG8vYXBwIzEiXSwicCI6WzE3OTA4MTI4MDAwMDAsIiJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMTQyIl0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX19" },
+    { listed: 171, cursor: "eyJ2IjoyLCJzIjoiZ2l0aHViIiwiYiI6ImIwNTJhODEyNTQ2MDI5MzAiLCJhIjoib2N0by1wZXJzb24iLCJvIjoiNGViNTMwZDNiNGE4YWJhYiIsInAiOnsiaSI6WzE3OTM1MjcyMDAwMDAsIm9jdG8vYXBwIzEiXSwicCI6WzE3OTA4MTI4MDAwMDAsIiJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMTY4Il0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX19" },
+    { listed: 197, cursor: "eyJ2IjoyLCJzIjoiZ2l0aHViIiwiYiI6ImIwNTJhODEyNTQ2MDI5MzAiLCJhIjoib2N0by1wZXJzb24iLCJvIjoiNGViNTMwZDNiNGE4YWJhYiIsInAiOnsiaSI6WzE3OTM1MjcyMDAwMDAsIm9jdG8vYXBwIzEiXSwicCI6WzE3OTA4MTI4MDAwMDAsIiJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMTk0Il0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX19" },
+    { listed: 223, cursor: "eyJ2IjoyLCJzIjoiZ2l0aHViIiwiYiI6ImIwNTJhODEyNTQ2MDI5MzAiLCJhIjoib2N0by1wZXJzb24iLCJvIjoiNGViNTMwZDNiNGE4YWJhYiIsInAiOnsiaSI6WzE3OTM1MjcyMDAwMDAsIm9jdG8vYXBwIzEiXSwicCI6WzE3OTA4MTI4MDAwMDAsIiJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMjIwIl0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX19" },
+    { listed: 249, cursor: "eyJ2IjoyLCJzIjoiZ2l0aHViIiwiYiI6ImIwNTJhODEyNTQ2MDI5MzAiLCJhIjoib2N0by1wZXJzb24iLCJvIjoiNGViNTMwZDNiNGE4YWJhYiIsInAiOnsiaSI6WzE3OTM1MjcyMDAwMDAsIm9jdG8vYXBwIzEiXSwicCI6WzE3OTA4MTI4MDAwMDAsIiJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMjQ2Il0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX19" },
+    { listed: 275, cursor: "eyJ2IjoyLCJzIjoiZ2l0aHViIiwiYiI6ImIwNTJhODEyNTQ2MDI5MzAiLCJhIjoib2N0by1wZXJzb24iLCJvIjoiNGViNTMwZDNiNGE4YWJhYiIsInAiOnsiaSI6WzE3OTM1MjcyMDAwMDAsIm9jdG8vYXBwIzEiXSwicCI6WzE3OTA4MTI4MDAwMDAsIiJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMjcyIl0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX19" },
+    { listed: 301, cursor: "eyJ2IjoyLCJzIjoiZ2l0aHViIiwiYiI6ImIwNTJhODEyNTQ2MDI5MzAiLCJhIjoib2N0by1wZXJzb24iLCJvIjoiNGViNTMwZDNiNGE4YWJhYiIsInAiOnsiaSI6WzE3OTM1MjcyMDAwMDAsIm9jdG8vYXBwIzEiXSwicCI6WzE3OTA4MTI4MDAwMDAsIiJdLCJjIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHBAcjAwMjk4Il0sIm4iOlsxNzkwODEyODAwMDAwLCIiXX19" },
+    { listed: 327, cursor: "eyJ2IjoyLCJzIjoiZ2l0aHViIiwiYiI6ImIwNTJhODEyNTQ2MDI5MzAiLCJhIjoib2N0by1wZXJzb24iLCJvIjoiNGViNTMwZDNiNGE4YWJhYiIsInAiOnsiaSI6WzE3OTM1Nzc2MDAwMDAsIm9jdG8vYXBwIzEzOCJdLCJwIjpbMTc5MzU3NzYwMDAwMCwib2N0by9hcHAjMTA5Il0sImMiOlsxNzkzNTc3NjAwMDAwLCJvY3RvL2FwcEByMDAyOTkiXSwibiI6WzE3OTA4MTI4MDAwMDAsIiJdfX0" },
+    { listed: 349, cursor: "eyJ2IjoyLCJzIjoiZ2l0aHViIiwiYiI6ImIwNTJhODEyNTQ2MDI5MzAiLCJhIjoib2N0by1wZXJzb24iLCJvIjoiNGViNTMwZDNiNGE4YWJhYiIsInAiOnsiaSI6WzE3OTM5MjMyMDAwMDAsIm9jdG8vYXBwIzQiXSwicCI6WzE3OTM5MjMyMDAwMDAsIm9jdG8vYXBwIzUiXSwiYyI6WzE3OTM2NjQwMDAwMDAsIm9jdG8vYXBwQHoxIl0sIm4iOlsxNzk0MTMyMDAwMDAwLCI5MDA0Il19fQ" },
+  ],
+}
+
+describe("a cursor of 0.0.0 to 0.0.5", () => {
+  it("is the format those releases wrote: 0.0.2's contract 1 with account default and one issue stream, 0.0.5's bound with no lookback", () => {
+    for (const { cursor } of OLDER["0.0.2"]) expect(decoded(cursor)).toMatchObject({ v: 1, a: "default", p: { i: expect.any(Array), c: expect.any(Array), n: expect.any(Array) } })
+    for (const { cursor } of OLDER["0.0.5"]) {
+      expect(decoded(cursor)).toMatchObject({ v: 2, a: LOGIN })
+      expect(decoded(cursor)["l"]).toBeUndefined()
+    }
+    // Some stop inside the crowded second, in the commits and in the issues and pull requests.
+    for (const version of ["0.0.2", "0.0.5"] as const) {
+      const inside = OLDER[version].map(({ cursor }) => decoded(cursor)["p"] as Record<string, [number, string]>).filter((p) => p["c"]![0] === Date.parse(T) && p["c"]![1] !== "")
+      expect(inside.length).toBeGreaterThan(0)
+      expect(OLDER[version].some(({ cursor }) => { const p = decoded(cursor)["p"] as Record<string, [number, string]>; return p["i"]![0] === Date.parse(T) && p["i"]![1] !== "" })).toBe(true)
+    }
+  })
+
+  for (const version of ["0.0.2", "0.0.5"] as const) {
+    for (const limit of [120, 13]) {
+      it(`continues every cursor ${version} issued with nothing lost and nothing listed twice, at limit ${limit}`, async () => {
+        const order = olderOrder(version === "0.0.5")
+        expect(order).toHaveLength(349)
+        for (const { listed, cursor } of OLDER[version]) {
+          const { events, gaps } = await read(olderGithub(OLDER_WORLD), NOW, { account: LOGIN, cursor, limit })
+          expect(new Set(events).size).toBe(events.length)
+          expect([...events].sort()).toEqual(order.slice(listed).sort())
+          expect(gaps).toEqual([])
+        }
+      })
+    }
+  }
+
+  it("reads a cursor of 0.0.2 with the account it came with, default, or with none, as well as with the login", async () => {
+    const { listed, cursor } = OLDER["0.0.2"][1]!
+    const rest = olderOrder(false).slice(listed).sort()
+    for (const account of ["default", undefined, LOGIN]) {
+      const { events } = await read(olderGithub(OLDER_WORLD), NOW, { ...(account === undefined ? {} : { account }), cursor, limit: 100 })
+      expect([...events].sort()).toEqual(rest)
+    }
+  })
+
+  it("carries the end of a read 0.0.5 finished: a later read lists only what came after", async () => {
+    const last = OLDER["0.0.5"].find(({ listed }) => listed === 349)!
+    const later = { ...OLDER_WORLD, issues: [...OLDER_WORLD.issues, issue(6, "2026-11-08T12:10:00Z")] }
+    const { events, gaps } = await read(olderGithub(later), NOW + 60 * 60_000, { account: LOGIN, cursor: last.cursor, limit: 100 })
+    expect(events).toEqual(["octo/app#6@2026-11-08T12:10:00.000Z"])
+    expect(gaps).toEqual([])
   })
 })

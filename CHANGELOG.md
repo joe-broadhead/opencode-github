@@ -15,11 +15,18 @@ All notable changes to this project are documented here. The format follows [Kee
   included. Its range is now read again in pages of 10, and within a second read whole, as ten pages of 10 at the same
   offsets, then pages of one. Only a result alone over 32 MB is left out, with one `gap` (`window-truncated`), and the
   search goes on after it. `TOO_LARGE` remains for a notifications answer over 32 MB.
+- **A second one call cannot read whole no longer stalls every stream.** A result over 32 MB in a crowded second, with
+  other searches paging in full, left too few requests to read it: it held, started again every call, and nothing past
+  it was listed, with `more: true` and no gap. The next call now reads such a second first, before the other searches;
+  if even that is not enough, the second is walked in GitHub's order across calls, listing what each call reads, with
+  the walk carried in the cursor. At most one call in a row lists nothing because of a second, and a second of n
+  results takes at most 1 + n/20 calls.
 - **A cursor is at most 960 characters, under the source contract's 1,024.** A search position spelled out its item's
   id, so three positions in repositories with the longest names, with a cut, a gap and a loss, made a cursor of 1,038
   characters, which the contract refuses. A position now holds an 11-character hash of the id (a second's results are
-  ordered by it), times are seconds in base 36, and positions are a list: the longest cursor is 763 characters. A cursor
-  of 0.0.6 or 0.0.7 is still read and continued, with nothing lost or listed twice.
+  ordered by it), times are seconds in base 36, and positions are a list: the longest cursor is 799 characters, a walk
+  in each search included. **Every cursor a release issued is still read and continued**, with nothing lost or listed
+  twice: 0.0.0's to 0.0.2's (refused since 0.0.3), 0.0.3's to 0.0.5's, and 0.0.6's and 0.0.7's. Only a cursor no release could have written is `CURSOR_INVALID`.
 - **Each of `events_list`'s and `probe`'s requests has 60 seconds**, its answer read whole included: past that it stops
   and the call answers `UNAVAILABLE`, with the cursor unchanged. The caller's own abort still stops it at once.
 

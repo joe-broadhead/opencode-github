@@ -652,11 +652,13 @@ login GitHub's `GET /user` named when you signed in (the Account `/github-status
 shares an owner with a github.com one). A listing names the account it reads; one that names another login than the signed-in one is
 refused with `ACCOUNT_MISMATCH`, and so is a cursor issued for another account, before any GitHub call. The cursor is
 the source contract's bound cursor, tied to this plugin, the source and the account, with a digest of the owner
-inside, so a cursor that was changed, issued before a sign-in to another account, or issued by 0.0.2 or earlier
-(account `default`) is `CURSOR_INVALID`: start again with `since`. **A cursor is at most 960 characters**, under the
-contract's 1,024: a search position holds an 11-character hash of its item's id, never a repository's name, and times
-are seconds in base 36. A cursor 0.0.6 or 0.0.7 issued is still read, and the read goes on from it with nothing lost or
-listed twice; inside a second it stopped in, it keeps that cursor's order by id until the second ends.
+inside, so a cursor that was changed, or issued before a sign-in to another account, is `CURSOR_INVALID`: start again
+with `since`. **A cursor is at most 960 characters**, under the contract's 1,024 (799 at its longest): a search position
+holds an 11-character hash of its item's id, never a repository's name, and times are seconds in base 36. **Every cursor
+a release issued is still read**, and the read goes on from it with nothing lost or listed twice: 0.0.6's and 0.0.7's,
+0.0.3's to 0.0.5's (no lookback), and 0.0.0's to 0.0.2's (contract 1, account `default`, which may come with the account
+`default` or none, and which the owner's digest inside ties to the sign-in). Inside a second it stopped in, an older
+cursor keeps its order by id until the second ends. Only a cursor no release could have written is refused.
 
 It asserts `github_events_list`, then makes only GET requests, through `github_api`'s own spec with the plugin's
 sign-in. Each GET asserts the tool's own permission, `github_events_list`, on its own `GET /path` first, not
@@ -703,9 +705,15 @@ in pages of 10, and within a second read whole, as ten pages of 10 at the same o
 over 32 MB is left out: the page that reaches it answers `gap` (`window-truncated`, from just after the result before
 it), and the search goes on after it. Two or more such results in a row are left out together, with one gap, and so is a
 result GitHub orders among them differently from one request to the next. A second read whole takes 10 more requests
-for each page of 100 over 32 MB in it, and 10 more for each page of 10 over it; one that needs more than a call has
-left after the other searches holds that search, call after call: hundreds of results of over 300 KB each in one second, or one result over 32 MB in a
-second of more than 100 while the other searches page in full. A notifications page of 50, a few KB each, is never near
+for each page of 100 over 32 MB in it, and 10 more for each page of 10 over it. A second a call cannot read whole for want of requests is never left waiting: the call that finds it held marks it
+in the cursor, and the next call reads it first, before the other searches, with every request but one for each of
+them. If even that is not enough (hundreds of results of over 300 KB each in one second, or two results over 32 MB in a
+second of 1,000), the second is walked in GitHub's own order: what each call reads of it is listed, a result over 32 MB
+on the way is left out with the gap, and the cursor carries the walk's place, page size and the second's total, so the
+next call goes on from there instead of reading the second again. So at most one call in a row lists nothing because of
+a second, and from then on each call reads at least 20 of its results (or `limit`, if smaller): a second of n results
+takes at most 1 + n/20 calls, 51 for GitHub's 1,000. A walked second whose total changes while it is walked (a commit's
+repository made private) is passed with a `window-truncated` gap from it, as its order can no longer be trusted. A notifications page of 50, a few KB each, is never near
 32 MB; one over it would answer `TOO_LARGE`. A search GitHub answers as incomplete (it timed out) lists nothing past that
 stream's position, and the next call reads it again, so nothing it left out is skipped. An event whose title or text
 holds a secret, such as a password in a URL, is never listed: it is in the page's `refused[]` with `reason: "secret"`,

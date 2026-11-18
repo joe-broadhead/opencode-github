@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest"
 import type { ApiOutput } from "../../src/api/contract.js"
 import { GitHubPluginError } from "../../src/errors.js"
 import { EVENT_LIMITS, resultProblems, type EventsListResult } from "@we-the-rebel-alliance/source-contract/events"
-import { EVENTS_MAX_BYTES, PAGE_BYTES, READ_DEADLINE_MS, SEARCH_BUDGET, SEARCH_CAP, SEARCH_SMALL_PAGE, listEvents, runEvents, runProbe } from "../../src/source-events.js"
+import { CURSOR_MAX, EVENTS_MAX_BYTES, PAGE_BYTES, READ_DEADLINE_MS, SEARCH_BUDGET, SEARCH_CAP, SEARCH_SMALL_PAGE, listEvents, runEvents, runProbe } from "../../src/source-events.js"
 
 const LOGIN = "octo-person"
 const NOW = Date.parse("2026-11-08T12:00:00Z")
@@ -351,5 +351,124 @@ describe("a deadline for each request (review L3)", () => {
     const deps = { ctx: { permission: { assert: async () => {} } }, api: { run: async (input: { path: string; query?: Record<string, string | number | boolean> }) => w.get(input.path, input.query ?? {}, EVENTS_MAX_BYTES) }, identity: w.identity, now: () => NOW, deadlineMs: 1_000 }
     const result = await runEvents(deps as never, { since: "2026-10-01" }, call)
     expect(result.events.map((event) => event.external_id)).toEqual(issues.map(eventOf))
+  })
+})
+
+describe("a crowded second holding results over 32 MB, while other searches page in full (review of #35, M1)", () => {
+  type Commit = { sha: string; html_url: string; repository: { full_name: string }; author: { login: string }; commit: { message: string; author: { name: string; email: string; date: string }; committer: { date: string } }; weight?: number }
+  const commit = (sha: string, at: number, weight?: number): Commit => ({ sha, html_url: `https://github.com/octo/app/commit/${sha}`, repository: { full_name: "octo/app" }, author: { login: LOGIN }, commit: { message: `c ${sha}`, author: { name: "O", email: "o@example.test", date: iso(at) }, committer: { date: iso(at) } }, ...(weight === undefined ? {} : { weight }) })
+  const X = T0 + 10 * 60_000
+  /** GitHub over issues, pull requests and commits, with `weight` counted as bytes; `before(n)` runs before the n-th commit search. */
+  function github(issues: Issue[], commits: Commit[], before?: (n: number, query: Record<string, unknown>) => void) {
+    let commitSearches = 0
+    const get = async (path: string, query: Record<string, string | number | boolean>, maxBytes?: number): Promise<ApiOutput> => {
+      if (path === "/notifications") return ok([])
+      if (path === "/search/commits") before?.(++commitSearches, query)
+      const q = String(query.q)
+      const name = path === "/search/commits" ? "committer-date" : "updated"
+      const match = new RegExp(`${name}:(?:>=(\\S+)|(\\S+)\\.\\.(\\S+))`).exec(q)!
+      const from = Date.parse(match[1] ?? match[2]!)
+      const to = match[1] !== undefined ? Number.POSITIVE_INFINITY : Date.parse(match[3]!)
+      const timeOf = (item: Issue | Commit) => Date.parse("commit" in item ? item.commit.committer.date : item.updated_at)
+      const pool: (Issue | Commit)[] = path === "/search/commits" ? commits : issues.filter((item) => (q.includes("is:pull-request") ? item.html_url.includes("/pull/") : !item.html_url.includes("/pull/")))
+      const all = pool.filter((item) => timeOf(item) >= from && timeOf(item) <= to).sort((a, b) => timeOf(a) - timeOf(b))
+      const per = Number(query.per_page)
+      const page = Number(query.page)
+      const items = all.slice(0, SEARCH_CAP).slice((page - 1) * per, page * per)
+      const data = { total_count: all.length, incomplete_results: false, items: items.map(({ weight: _, ...rest }) => rest) }
+      const text = JSON.stringify(data)
+      if (Buffer.byteLength(text) + items.reduce((sum, item) => sum + (item.weight ?? 0), 0) > (maxBytes ?? 100_000)) return { ...ok(text.slice(0, 64)), truncated: true }
+      return ok(data)
+    }
+    return { get, identity: async () => LOGIN }
+  }
+  const backlogOf = (count: number) => [
+    ...Array.from({ length: count }, (_, k) => issue(k + 1, iso(X + 1000 + k * 1000))),
+    ...Array.from({ length: count }, (_, k) => issue(10_000 + k, iso(X + 1000 + k * 1000), { html_url: `https://github.com/octo/app/pull/${10_000 + k}` })),
+  ]
+
+  /**
+   * The whole read: every page within the contract and the cursor's bound; how many calls in a row listed nothing; and
+   * whether any cursor carried a walk.
+   */
+  async function whole(w: ReturnType<typeof github>, limit: number) {
+    const listed: string[] = []
+    const found: unknown[] = []
+    let cursor: string | undefined
+    let idle = 0
+    let mostIdle = 0
+    let walked = false
+    for (let calls = 0; calls < 300; calls++) {
+      const result = (await listEvents(w.get, w.identity, cursor === undefined ? { since: "2026-10-01", limit } : { account: LOGIN, cursor, limit }, NOW)) as EventsListResult
+      expect(resultProblems(result, limit, PAGE_BYTES)).toEqual([])
+      expect(result.cursor.length).toBeLessThanOrEqual(CURSOR_MAX)
+      walked ||= ((JSON.parse(Buffer.from(result.cursor, "base64url").toString("utf8")) as { p: unknown[][] }).p ?? []).some((position) => position.length === 4)
+      listed.push(...result.events.map((event) => event.external_id))
+      if (result.gap) found.push(result.gap)
+      idle = result.events.length === 0 ? idle + 1 : 0
+      mostIdle = Math.max(mostIdle, idle)
+      cursor = result.cursor
+      if (!result.more) return { listed, found, mostIdle, walked, calls: calls + 1 }
+    }
+    throw new Error("the read did not end in 300 calls: it stalled")
+  }
+
+  // The reviewer's probe HOLD: 150 commits in one second, one of them over 32 MB, and issue and pull-request backlogs after.
+  for (const [limit, backlog] of [[100, 1500], [500, 1500], [100, 0], [100, 150]] as const) {
+    it(`HOLD: lists every result but the one over 32 MB, with one gap, never two calls in a row with nothing, at limit ${limit} with ${backlog} + ${backlog} after it`, async () => {
+      const commits = Array.from({ length: 150 }, (_, k) => commit(`x${String(k).padStart(4, "0")}`, X, k === 77 ? EVENTS_MAX_BYTES + 1 : undefined))
+      const issues = backlogOf(backlog)
+      const { listed, found, mostIdle } = await whole(github(issues, commits), limit)
+      expect(new Set(listed).size).toBe(listed.length)
+      expect([...listed].sort()).toEqual([...commits.filter((_, k) => k !== 77).map((c) => `octo/app@${c.sha}`), ...issues.map(eventOf)].sort())
+      expect(found).toEqual([{ reason: "window-truncated", since: new Date(X).toISOString() }])
+      // The call that finds the second held is the only one that lists nothing: the next reads it first.
+      expect(mostIdle).toBeLessThanOrEqual(1)
+    })
+  }
+
+  for (const [label, make] of [
+    ["two results over 32 MB in a second of 1,000", () => Array.from({ length: 1000 }, (_, k) => commit(`y${String(k).padStart(4, "0")}`, X, k === 77 || k === 577 ? EVENTS_MAX_BYTES + 1 : undefined))],
+    ["300 results of 400 KB in one second, whose pages of 100 are over 32 MB", () => Array.from({ length: 300 }, (_, k) => commit(`z${String(k).padStart(4, "0")}`, X, 400_000))],
+  ] as const) {
+    for (const limit of [500, 40]) {
+      it(`walks a second no call can read whole (${label}) across calls, at limit ${limit}, with 1,500 + 1,500 after it`, async () => {
+        const commits = make()
+        const issues = backlogOf(1500)
+        const heavy = commits.filter((c) => (c.weight ?? 0) > EVENTS_MAX_BYTES)
+        const { listed, found, mostIdle, walked } = await whole(github(issues, commits), limit)
+        expect(walked).toBe(true)
+        expect(new Set(listed).size).toBe(listed.length)
+        expect([...listed].sort()).toEqual([...commits.filter((c) => !heavy.includes(c)).map((c) => `octo/app@${c.sha}`), ...issues.map(eventOf)].sort())
+        expect(found).toEqual(heavy.length > 0 ? [{ reason: "window-truncated", since: new Date(X).toISOString() }] : [])
+        expect(mostIdle).toBeLessThanOrEqual(1)
+      })
+    }
+  }
+
+  it("walks a second at least 20 results a call where every page of 10 is over 32 MB: 1,000 results in at most 1 + 1,000/20 calls", async () => {
+    // Each result is 3.5 MB: a page of 10 is over 32 MB, so the walk reads one result a request, the slowest it goes.
+    const commits = Array.from({ length: 1000 }, (_, k) => commit(`s${String(k).padStart(4, "0")}`, X, 3_500_000))
+    const { listed, found, mostIdle, calls } = await whole(github([], commits), 500)
+    expect(new Set(listed).size).toBe(1000)
+    expect(found).toEqual([])
+    expect(mostIdle).toBeLessThanOrEqual(1)
+    expect(calls).toBeLessThanOrEqual(1 + 1000 / 20)
+  })
+
+  it("moves past a walked second whose results change under the walk, with one gap from it, and lists everything else", async () => {
+    const commits = Array.from({ length: 1000 }, (_, k) => commit(`v${String(k).padStart(4, "0")}`, X, k === 77 || k === 577 ? EVENTS_MAX_BYTES + 1 : undefined))
+    const after = Array.from({ length: 50 }, (_, k) => commit(`w${String(k).padStart(4, "0")}`, X + (k + 1) * 1000))
+    let walkSearches = 0
+    const w = github([], [...commits, ...after], (_, query) => {
+      // A commit of the second leaves it (its repository goes private) once the walk is under way.
+      if (String(query.q).includes(`${iso(X)}..${iso(X)}`) && ++walkSearches === 40) commits.splice(900, 1)
+    })
+    const { listed, found, mostIdle } = await whole(w, 500)
+    expect(walkSearches).toBeGreaterThanOrEqual(40)
+    expect(new Set(listed).size).toBe(listed.length)
+    expect(found).toEqual([{ reason: "window-truncated", since: new Date(X).toISOString() }])
+    expect(after.map((c) => `octo/app@${c.sha}`).every((id) => listed.includes(id))).toBe(true)
+    expect(mostIdle).toBeLessThanOrEqual(1)
   })
 })

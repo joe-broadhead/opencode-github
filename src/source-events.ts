@@ -169,6 +169,8 @@ interface Key {
   readonly t: number
   readonly i: string
   readonly raw?: true
+  /** A walk through this second in GitHub's order (`searchSecond`), where `i` is a `walkKey`. */
+  readonly walk?: Walk
 }
 
 interface Item extends Key {
@@ -377,6 +379,12 @@ interface SearchRead extends Read {
   readonly stuck?: number
   readonly skipped?: number
   readonly oversized?: number
+  /** Its second could not be read whole for want of requests: the next call reads it first. */
+  readonly held?: boolean
+  /** Its items are a walk through their second, in GitHub's order, which the position carries on. */
+  readonly walk?: Walk
+  /** Its items are all of their second after the position: once they are listed, the stream moves past the second. */
+  readonly ends?: boolean
 }
 
 /** One search stream: where it reads, how it sorts, and its query for a range of times. */
@@ -542,68 +550,114 @@ async function pastLarge(get: Get, spec: Search, from: Key, at: number, cut: num
 }
 
 /**
- * One second of a search stream, read whole with a query for that second alone, in the plugin's own order (by order key, a hash of each id), so
- * the position walks its items across calls whatever order GitHub gives them in. Its items after the position are
- * listed; when none is left, the stream moves past the second. A second with more results than GitHub answers
- * (SEARCH_CAP) cannot be read whole: the stream moves past it, and the page answers the gap (`skipped`). A result only
- * leaves the second while it is read (its change is after the cut), and then those after it move up a place: a page
- * whose total differs from the first page's reads the second again from its first result. A page over EVENTS_MAX_BYTES
- * is read again as pages of SEARCH_SMALL_PAGE at the same offsets, and one of those as pages of one result; a result
- * alone over it is left out (`oversized`), and the page that enters the second answers a gap for it. Without the budget
- * to read it whole, the stream holds, and the next call reads it.
+ * A walk through one second in GitHub's own order, for a second a call cannot read whole: its items are listed as they
+ * are read, keyed by their place (`walkKey`), and the stream's position carries the walk, so the next call goes on
+ * from it, in the same size of page, rather than reading the second again. `total` is the second's total_count when the
+ * walk began: a second whose total changes has lost a result while it was walked.
  */
-async function searchSecond(get: Get, spec: Search, from: Key, second: number, budget: Budget): Promise<SearchRead> {
+interface Walk {
+  readonly total: number
+  readonly size: number
+}
+
+/** The order key of the result at `offset` of a walked second: `!` sorts after "" and before every hashed key. */
+const walkKey = (offset: number) => `!${offset.toString(36).padStart(2, "0")}`
+const WALK_KEY = /^!([0-9a-z]{2,3})$/
+/** The place a walk key names; undefined for any other key. */
+const walkOffset = (key: string) => {
+  const match = WALK_KEY.exec(key)
+  return match ? Number.parseInt(match[1]!, 36) : undefined
+}
+
+/**
+ * One second of a search stream, read whole with a query for that second alone, in the plugin's own order (by order
+ * key, a hash of each id), so the position walks its items across calls whatever order GitHub gives them in. Its items
+ * after the position are listed; when none is left, the stream moves past the second. A second with more results than
+ * GitHub answers (SEARCH_CAP) cannot be read whole: the stream moves past it, and the page answers the gap (`skipped`).
+ * A result only leaves the second while it is read (its change is after the cut), and then those after it move up a
+ * place: a page whose total differs from the first page's reads the second again from its first result. A page over
+ * EVENTS_MAX_BYTES is read again as pages of SEARCH_SMALL_PAGE at the same offsets, and one of those as pages of one
+ * result; a result alone over it is left out (`oversized`), and the page that enters the second answers a gap for it.
+ *
+ * Without the budget to read it whole, the stream holds (`held`), and the next call reads it first. Read first
+ * (`first`), from a position before it, a second still too large for the call is walked instead (`Walk`): what was read
+ * is listed in GitHub's order, and the position carries the walk on. A walk goes on from its position (a `walkKey`);
+ * when its second's total has changed, the stream moves past the second with a gap (`skipped`).
+ */
+async function searchSecond(get: Get, spec: Search, from: Key, second: number, budget: Budget, first = false): Promise<SearchRead> {
   // Held, the stream has nothing between its position and the second (its read found only that second), so it holds
   // back only what comes after the second: the other streams list on up to it.
-  const hold: SearchRead = { items: [], complete: false, last: second + 1000, start: from }
+  const hold: SearchRead = { items: [], complete: false, last: second + 1000, start: from, held: true }
   const past: Key = { t: second, i: AFTER_SECOND }
   const at = isoSeconds(second)
-  let items: Item[] = []
+  // A walk goes on after its position's place; any other read starts at the second's first result.
+  const after = from.t === second && from.walk !== undefined ? walkOffset(from.i) : undefined
+  const walking = after !== undefined
+  const begin = walking ? after + 1 : 0
+  const mayWalk = walking || (first && compare(from, { t: second, i: "" }) <= 0)
+  let entries: { offset: number; item: Item }[] = []
   let ids = new Set<string>()
   // GitHub's page `page` of `size` results; each smaller size reads one page of the larger as ten, at the same offsets.
-  let page = 1
-  let size = SEARCH_PER_PAGE
+  let size = walking ? from.walk!.size : SEARCH_PER_PAGE
+  let page = Math.floor(begin / size) + 1
   // The results read, those left out included, against total_count.
-  let read = 0
-  let total: number | undefined
+  let read = (page - 1) * size
+  let total: number | undefined = walking ? from.walk!.total : undefined
   let oversized = false
+  // The last place, from where this read began, that holds only results left out: a walk moves past them.
+  let skippedTo: number | undefined
+  const walked = (ended: boolean): SearchRead => {
+    const items = entries.filter((entry) => entry.offset >= begin).map((entry) => ({ ...entry.item, i: walkKey(entry.offset) }))
+    const lost = oversized ? { oversized: second } : {}
+    const walk: Walk = { total: total ?? read, size }
+    if (ended && items.length === 0) return { items: [], complete: false, last: second + 1000, start: past, ...lost }
+    const start = skippedTo !== undefined ? { t: second, i: walkKey(skippedTo), walk } : from
+    return { items, complete: false, last: second + 1000, start, walk, ...(ended ? { ends: true } : {}), ...lost }
+  }
   for (;;) {
-    if (budget.left <= 0) return hold
+    if (budget.left <= 0) return mayWalk && read > begin ? walked(false) : hold
     budget.left--
     const answer = await searchPage(get, spec, `${at}..${at}`, page, size)
     if (answer === OVER) {
-      // The same results again, in smaller pages at the same offsets.
+      // The same results again, in smaller pages at the same offsets, from the first one this read needs.
       if (size > 1) {
-        page = (page - 1) * SEARCH_SMALL_PAGE + 1
-        size = size / SEARCH_SMALL_PAGE
+        const smaller = size / SEARCH_SMALL_PAGE
+        page = Math.floor(Math.max(begin, (page - 1) * size) / smaller) + 1
+        size = smaller
+        read = (page - 1) * size
         continue
       }
       // One result alone is over what events_list reads whole: it is left out, and the read answers a gap for it.
       oversized = true
+      if (!entries.some((entry) => entry.offset >= begin && entry.offset < read)) skippedTo = read
       read += 1
     } else {
-      if (answer.incomplete) return hold
+      if (answer.incomplete) return { ...hold, held: false }
       if (answer.total !== undefined && answer.total > SEARCH_CAP) return { items: [], complete: false, last: second, start: past, skipped: second }
       if (total !== undefined && answer.total !== undefined && answer.total !== total) {
-        // A result left the second while it was read: read it again from its first result.
-        items = []
+        // A result left the second while it was read. A walk cannot tell where, so it moves past the second with a gap;
+        // any other read reads the second again from its first result.
+        if (walking) return { items: [], complete: false, last: second, start: past, skipped: second }
+        entries = []
         ids = new Set()
         page = 1
         read = 0
         size = SEARCH_PER_PAGE
         total = undefined
         oversized = false
+        skippedTo = undefined
         continue
       }
       total ??= answer.total
-      for (const raw of answer.items) {
+      answer.items.forEach((raw, index) => {
         const item = spec.make(raw)
-        if (item && item.t === second && compare(item, from) > 0 && !ids.has(item.id)) {
+        const offset = (page - 1) * size + index
+        if (item && item.t === second && offset >= begin && (walking || compare(item, from) > 0) && !ids.has(item.id)) {
           ids.add(item.id)
-          items.push(item)
+          entries.push({ offset, item })
         }
-      }
-      read += answer.items.length
+      })
+      read = (page - 1) * size + answer.items.length
     }
     // total_count says where the results end; without it, a short page does.
     const ended = (answer !== OVER && answer.items.length === 0) || (total !== undefined ? read >= total : answer !== OVER && answer.items.length < size)
@@ -616,10 +670,12 @@ async function searchSecond(get: Get, spec: Search, from: Key, second: number, b
       }
       continue
     }
+    if (walking) return walked(true)
     // The second is read whole: list what is after the position, or move past it.
     const lost = oversized ? { oversized: second } : {}
+    const items = entries.map((entry) => entry.item)
     if (items.length === 0) return { items: [], complete: false, last: second + 1000, start: past, ...lost }
-    return { items: items.sort(compare), complete: false, last: second + 1000, start: from, ...lost }
+    return { items: items.sort(compare), complete: false, last: second + 1000, start: from, ends: true, ...lost }
   }
 }
 
@@ -785,6 +841,16 @@ function cursorAccount(cursor: string): string | undefined {
   }
 }
 
+/** The contract version a cursor names (`v`); undefined for anything that is not a cursor. */
+function cursorVersion(cursor: string): unknown {
+  try {
+    const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as unknown
+    return record(value) ? value["v"] : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** What a cursor holds: each stream's position, the notifications' lookback, and when the read answered its gap. */
 interface CursorState {
   readonly from: Record<StreamName, Key>
@@ -798,22 +864,25 @@ interface CursorState {
    * (`expired`), so a later loss in a read is never silent.
    */
   readonly lostAt?: number
+  /** A second a call could not read whole for want of requests, which the next call reads first. */
+  readonly held?: { readonly stream: "i" | "p" | "c"; readonly second: number }
 }
 
 const SEEN = /^([0-9a-f]{8})([0-9a-z]{1,11})$/
 
 /**
  * The cursor's format, `k` in it. 1: positions as a list in STREAMS order, each `[time, key]` (`[time, id, 1]` for a
- * position carried over from 0.0.6 or 0.0.7 inside a second), the lookback as `[behind, hashes]`, and every time in
- * base 36 (`timeOf`). A cursor without `k` is 0.0.6's and 0.0.7's: times in milliseconds, and positions keyed by stream
+ * position carried over from an older cursor inside a second, `[time, walk key, total, size]` for a walk), the lookback
+ * as `[behind, hashes]`, a held second as `h: [stream, time]`, and every time in base 36 (`timeOf`). A cursor without `k` is 0.0.6's and 0.0.7's: times in milliseconds, and positions keyed by stream
  * whose search ids order their second by id.
  */
 const CURSOR_FORMAT = 1
 /**
  * The most characters a cursor of format 1 has, well under the source contract's 1,024 (EVENT_LIMITS.cursor): its
  * fields are bounded (a login of 39, an owner hash of 16, search order keys of ORDER_KEY_LENGTH, a notification key of
- * 20 digits, times of at most 9 characters), so with every field at its longest and all LOOKBACK_REMEMBERED
- * notifications remembered it is 763; past CURSOR_MAX the lookback would forget its oldest notifications. Only a
+ * 20 digits, times of at most 9 characters, a walk's place, total and page size, a held second), so with every field at
+ * its longest, all three searches walking a second and all LOOKBACK_REMEMBERED notifications remembered it is 799; past
+ * CURSOR_MAX the lookback would forget its oldest notifications. Only a
  * position carried over from an older cursor inside a second, which keeps that cursor's id until its stream leaves the
  * second, can pass it, and stays shorter than the cursor it came from.
  */
@@ -829,16 +898,42 @@ const timeOf = (value: unknown): number | undefined => {
 }
 
 /**
- * The cursor's state. A cursor bound to another plugin, source or account, holding another sign-in's owner, or of
- * another version (one issued before the source contract) is CURSOR_INVALID: start again with since. A cursor of 0.0.6
- * or 0.0.7 (no `k`) is read as it was written, and the read goes on from it with nothing lost or listed again.
+ * The cursor's state. Every cursor a release wrote is read as it was written, and the read goes on from it with nothing
+ * lost or listed again: format 1 (`k`); 0.0.6's and 0.0.7's (positions in milliseconds, with a lookback); 0.0.3's to
+ * 0.0.5's (the same, without a lookback or a read's cut); and 0.0.0's to 0.0.2's (contract 1, unbound, account
+ * `default`, one stream for issues and pull requests), which only the owner's hash ties to the sign-in. Anything else,
+ * a cursor bound to another plugin, source or account, or holding another sign-in's owner, is CURSOR_INVALID: start
+ * again with since.
  */
 function stateOf(cursor: string, account: string, owner: EventsOwner): CursorState {
-  const decoded = decodeBoundCursor(bindingOf(account), cursor)
+  const decoded = decodeBoundCursor(bindingOf(account), cursor, { acceptV1: true })
   if (!decoded.ok) return refuseCursor()
   const state = decoded.state
-  if (state["a"] !== account || state["o"] !== digest(owner)) return refuseCursor()
+  if (state["o"] !== digest(owner)) return refuseCursor()
+  if (decoded.legacy) return state["a"] === "default" ? first(state) : refuseCursor()
+  if (state["a"] !== account) return refuseCursor()
   return state["k"] === CURSOR_FORMAT ? current(state) : state["k"] === undefined ? earlier(state) : refuseCursor()
+}
+
+/** A position an older cursor wrote: a time in milliseconds and an id, which ordered its second (`raw`) inside one. */
+function olderKey(pair: unknown, search: boolean): Key | undefined {
+  if (!(Array.isArray(pair) && pair.length === 2 && typeof pair[0] === "number" && Number.isSafeInteger(pair[0]) && typeof pair[1] === "string")) return undefined
+  const inside = search && pair[1] !== "" && pair[1] !== AFTER_SECOND
+  return { t: pair[0], i: pair[1], ...(inside ? { raw: true as const } : {}) }
+}
+
+/**
+ * A cursor of 0.0.0 to 0.0.2: issues and pull requests were one stream, in one order, so its position is each of the
+ * two streams' own: what it listed of either lies at or before it. It had no lookback.
+ */
+function first(state: Record<string, unknown>): CursorState {
+  const positions = record(state["p"]) ? state["p"] : undefined
+  if (positions === undefined || Object.keys(positions).sort().join() !== "c,i,n") return refuseCursor()
+  const issues = olderKey(positions["i"], true)
+  const commits = olderKey(positions["c"], true)
+  const notes = olderKey(positions["n"], false)
+  if (issues === undefined || commits === undefined || notes === undefined) return refuseCursor()
+  return withLookback({ i: issues, p: issues, c: commits, n: notes }, [undefined, undefined, undefined], undefined, undefined)
 }
 
 /** The read's state the cursor carries, after its positions: the gap, the cut, the loss and the lookback. */
@@ -849,6 +944,8 @@ function withLookback(from: Record<StreamName, Key>, times: readonly (number | u
     ...(cut === undefined ? {} : { cut }),
     ...(lostAt === undefined ? {} : { lostAt }),
   }
+  // 0.0.5 and earlier had no lookback: it looks again at nothing before the position.
+  if (behind === undefined && hashes === undefined) return { from, notified: { position: from.n, floor: from.n.t + 1000, seen: new Map() }, ...read }
   if (behind === undefined || !Array.isArray(hashes) || hashes.length > LOOKBACK_REMEMBERED) return refuseCursor()
   const seen = new Map<string, number>()
   for (const entry of hashes) {
@@ -862,34 +959,44 @@ function withLookback(from: Record<StreamName, Key>, times: readonly (number | u
 /** A cursor of format 1. */
 function current(state: Record<string, unknown>): CursorState {
   const positions = Array.isArray(state["p"]) && state["p"].length === STREAMS.length ? state["p"] : []
-  const keys = positions.map((entry: unknown, index) => {
+  const keys = positions.map((entry: unknown, index): Key | undefined => {
     if (!Array.isArray(entry) || typeof entry[1] !== "string") return undefined
     const t = timeOf(entry[0])
-    // Only a search position may be carried over from an older cursor.
-    const raw = entry.length === 3 && entry[2] === 1 && index < 3
-    return t !== undefined && (entry.length === 2 || raw) ? { t, i: entry[1] as string, ...(raw ? { raw: true as const } : {}) } : undefined
+    if (t === undefined) return undefined
+    const i = entry[1] as string
+    if (entry.length === 2) return { t, i }
+    // Only a search position may be carried over from an older cursor, or walk a second.
+    if (index >= 3) return undefined
+    if (entry.length === 3) return entry[2] === 1 ? { t, i, raw: true } : undefined
+    const total = typeof entry[2] === "string" && /^[0-9a-z]{1,3}$/.test(entry[2]) ? Number.parseInt(entry[2], 36) : undefined
+    const size = typeof entry[3] === "string" ? Number.parseInt(entry[3], 36) : undefined
+    const walks = entry.length === 4 && walkOffset(i) !== undefined && total !== undefined && total <= SEARCH_CAP && (size === 1 || size === SEARCH_SMALL_PAGE || size === SEARCH_PER_PAGE)
+    return walks ? { t, i, walk: { total, size: size! } } : undefined
   })
   if (keys.length !== STREAMS.length || keys.some((key) => key === undefined)) return refuseCursor()
   const from = { i: keys[0]!, p: keys[1]!, c: keys[2]!, n: keys[3]! }
   const times = ["g", "u", "q"].map((name) => (state[name] === undefined ? undefined : (timeOf(state[name]) ?? refuseCursor())))
-  const lookback = Array.isArray(state["l"]) && state["l"].length === 2 ? state["l"] : []
+  if (!(Array.isArray(state["l"]) && state["l"].length === 2)) return refuseCursor()
+  const lookback = state["l"]
   const behind = typeof lookback[0] === "string" && /^-?[0-9a-z]{1,11}$/.test(lookback[0]) ? Number.parseInt(lookback[0], 36) : undefined
-  return withLookback(from, times, behind, lookback[1])
+  const read = withLookback(from, times, behind, lookback[1])
+  if (state["h"] === undefined) return read
+  const h = state["h"]
+  const stream = Array.isArray(h) && h.length === 2 && typeof h[0] === "number" ? (["i", "p", "c"] as const)[h[0]] : undefined
+  const second = Array.isArray(h) ? timeOf(h[1]) : undefined
+  return stream !== undefined && second !== undefined ? { ...read, held: { stream, second } } : refuseCursor()
 }
 
 /**
- * A cursor of 0.0.6 or 0.0.7. Its search positions inside a second ordered that second by id: they are carried over as
- * such (`raw`), so the walk goes on where it stopped.
+ * A cursor of 0.0.3 to 0.0.7. Its search positions inside a second ordered that second by id: they are carried over as
+ * such (`raw`), so the walk goes on where it stopped. 0.0.6 and 0.0.7 added the lookback (`l`) and the read's gap, cut
+ * and loss; 0.0.5 and earlier had none of them.
  */
 function earlier(state: Record<string, unknown>): CursorState {
   const positions = record(state["p"]) ? state["p"] : undefined
-  const keys = STREAMS.map((stream) => {
-    const pair = positions?.[stream]
-    if (!(Array.isArray(pair) && pair.length === 2 && typeof pair[0] === "number" && Number.isSafeInteger(pair[0]) && typeof pair[1] === "string")) return undefined
-    const inside = stream !== "n" && pair[1] !== "" && pair[1] !== AFTER_SECOND
-    return { t: pair[0], i: pair[1], ...(inside ? { raw: true as const } : {}) }
-  })
+  const keys = STREAMS.map((stream) => olderKey(positions?.[stream], stream !== "n"))
   if (keys.some((key) => key === undefined)) return refuseCursor()
+  if (state["l"] === undefined && ["g", "u", "q"].some((name) => state[name] !== undefined)) return refuseCursor()
   const from = { i: keys[0]!, p: keys[1]!, c: keys[2]!, n: keys[3]! }
   const times = ["g", "u", "q"].map((name) => {
     const value = state[name]
@@ -918,8 +1025,11 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   if (!parsed.ok) return fail("INPUT_INVALID", `The events_list input is invalid: ${parsed.problems.join("; ")}.`, "Pass only since, cursor, limit (1 to 500), account and source, as the tool's schema describes.")
   const request = parsed.value
   if (request.source !== undefined && request.source !== SOURCE) fail("SOURCE_UNKNOWN", `This plugin has no source "${request.source}"; its one source is "${SOURCE}".`, `Leave source out, or pass "${SOURCE}".`)
-  const asked = request.account === undefined ? undefined : request.account.toLowerCase()
-  if (request.cursor !== undefined) {
+  // A cursor of 0.0.0 to 0.0.2 came with their one account, `default`, or none: it reads the signed-in account, as they
+  // did, and its owner's hash still ties it to the sign-in.
+  const first = request.cursor !== undefined && (request.account === undefined || request.account === "default") && cursorVersion(request.cursor) === 1
+  const asked = request.account === undefined || first ? undefined : request.account.toLowerCase()
+  if (request.cursor !== undefined && !first) {
     if (asked === undefined) fail("INPUT_INVALID", "A listing with a cursor names the account it reads: events_list has no account.", 'Pass "account", the signed-in login that probe and the previous result name, with the cursor.')
     const named = cursorAccount(request.cursor)
     if (named !== undefined && named !== asked) {
@@ -953,8 +1063,26 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   }
   const budget: Budget = { left: SEARCH_BUDGET }
   const searched: Record<"i" | "p" | "c", SearchRead> = { i: { items: [], complete: true, last: Number.POSITIVE_INFINITY, start: from.i }, p: { items: [], complete: true, last: Number.POSITIVE_INFINITY, start: from.p }, c: { items: [], complete: true, last: Number.POSITIVE_INFINITY, start: from.c } }
-  for (const stream of ["i", "p", "c"] as const) {
-    if (startOf(from[stream]) <= end) searched[stream] = await search(get, searches[stream], from[stream], request.limit, budget, end)
+  // A second a call could not read whole for want of requests is read first: a held second (`h` in the cursor), or one
+  // its stream walks across calls. It takes the budget less one request for each other search, which is enough for each
+  // to list what comes before it; nothing past it can be listed until it is read, so it never waits behind them again.
+  const searchStreams = ["i", "p", "c"] as const
+  const heldSecond = (stream: "i" | "p" | "c") =>
+    from[stream].walk !== undefined ? from[stream].t : state.held?.stream === stream && state.held.second >= from[stream].t ? state.held.second : undefined
+  const firsts = searchStreams.filter((stream) => heldSecond(stream) !== undefined).sort((a, b) => heldSecond(a)! - heldSecond(b)!)
+  const others = searchStreams.filter((stream) => !firsts.includes(stream) && startOf(from[stream]) <= end)
+  for (const stream of firsts) {
+    const allowance: Budget = { left: Math.max(0, budget.left - others.length) }
+    const allowed = allowance.left
+    searched[stream] = await searchSecond(get, searches[stream], from[stream], heldSecond(stream)!, allowance, true)
+    budget.left -= allowed - allowance.left
+  }
+  // Each search leaves one request for every search after it, so none is left without a page to read.
+  for (const [index, stream] of others.entries()) {
+    const allowance: Budget = { left: Math.max(0, budget.left - (others.length - 1 - index)) }
+    const allowed = allowance.left
+    searched[stream] = await search(get, searches[stream], from[stream], request.limit, allowance, end)
+    budget.left -= allowed - allowance.left
   }
   // A stream whose read found only one second reads that second whole, with what is left of the budget: the earliest
   // second first, as the merge lists it first, so the stream that holds every other back always gets the budget. It reads
@@ -1002,7 +1130,10 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
     if (!refused && listed.length === fits) break
     if (!refused) listed.push(item)
     // A late notification lies behind the position: it never moves the position back.
-    if (compare(item, positions[item.s]) > 0) positions[item.s] = { t: item.t, i: item.i, ...(item.raw ? { raw: true as const } : {}) }
+    if (compare(item, positions[item.s]) > 0) {
+      const walk = item.s === "n" ? undefined : searched[item.s].walk
+      positions[item.s] = { t: item.t, i: item.i, ...(item.raw ? { raw: true as const } : {}), ...(walk !== undefined && walkOffset(item.i) !== undefined ? { walk } : {}) }
+    }
     if (item.s === "n") {
       seen.set(seenKey(item), item.t)
       notificationsListed++
@@ -1016,6 +1147,23 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   }
   const remembered = remember(positions.n, lookback, seen)
   lookback = remembered.floor
+  // A second read to its end, and listed all of it, is past: the next call does not read it again.
+  for (const stream of searchStreams) {
+    const { ends, items } = searched[stream]
+    if (ends && items.length > 0 && positions[stream].i === items[items.length - 1]!.i && positions[stream].t === items[0]!.t) positions[stream] = { t: items[0]!.t, i: AFTER_SECOND }
+  }
+  // The earliest second held for want of requests, or read whole and listed in part, which the next call reads first:
+  // either is a second the stream's search would only find stuck again.
+  const held = searchStreams
+    .flatMap((stream) => {
+      const { held: wanting, ends, items, last } = searched[stream]
+      const position = positions[stream]
+      if (position.walk !== undefined) return []
+      if (wanting) return [{ stream, second: last - 1000 }]
+      const second = items[0]?.t
+      return ends && second !== undefined && position.t === second && position.i !== AFTER_SECOND ? [{ stream, second }] : []
+    })
+    .sort((a, b) => a.second - b.second)[0]
 
   // History lost: notifications GitHub no longer keeps or will not page to, a second with more search results than
   // GitHub answers, or a search result alone over what events_list reads whole. A read answers one gap, on the page where it restarts; no later page of the read answers another
@@ -1045,7 +1193,7 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   const refused = merged.slice(0, consumed).flatMap((item) => refusedIds.get(item.event.external_id) ?? [])
   const more = merged.length > consumed || STREAMS.some((stream) => !reads[stream].complete)
   const gapAt = more ? (gap !== undefined ? now : answered ? state.gapAt : undefined) : undefined
-  const cursor = encodeState(account, owner, positions, lookback, remembered.seen, { gapAt, cut: more ? end : undefined, lostAt })
+  const cursor = encodeState(account, owner, positions, lookback, remembered.seen, { gapAt, cut: more ? end : undefined, lostAt, held: more ? held : undefined })
   return eventsListResult({ source: SOURCE, account, owner }, listed.map((item) => item.event), cursor, more, {
     refused,
     ...(gap === undefined ? {} : { gap }),
@@ -1071,11 +1219,19 @@ function remember(position: Key, floor: number, seen: ReadonlyMap<string, number
  * and any loss the next read answers; the lookback forgets its oldest notifications until the cursor is at most
  * CURSOR_MAX characters.
  */
-export function encodeState(account: string, owner: EventsOwner, positions: Record<StreamName, Key>, floor: number, seen: Map<string, number>, read: { gapAt: number | undefined; cut: number | undefined; lostAt: number | undefined }): string {
+export function encodeState(
+  account: string,
+  owner: EventsOwner,
+  positions: Record<StreamName, Key>,
+  floor: number,
+  seen: Map<string, number>,
+  read: { gapAt: number | undefined; cut: number | undefined; lostAt: number | undefined; held?: CursorState["held"] },
+): string {
   const p = STREAMS.map((stream) => {
-    const { t, i, raw } = positions[stream]
-    return raw ? [timeText(t), i, 1] : [timeText(t), i]
+    const { t, i, raw, walk } = positions[stream]
+    return raw ? [timeText(t), i, 1] : walk !== undefined ? [timeText(t), i, walk.total.toString(36), walk.size.toString(36)] : [timeText(t), i]
   })
+  const held = read.held === undefined ? {} : { h: [STREAMS.indexOf(read.held.stream), timeText(read.held.second)] }
   const times = Object.fromEntries(
     (
       [
@@ -1091,7 +1247,7 @@ export function encodeState(account: string, owner: EventsOwner, positions: Reco
     const l = [(positions.n.t - start).toString(36), entries.map(([hash, at]) => `${hash}${(positions.n.t - at).toString(36)}`)]
     // The package refuses a cursor over EVENT_LIMITS.cursor characters; only one carried over from an older cursor can
     // pass CURSOR_MAX with no lookback left.
-    const cursor = encodeBoundCursor(bindingOf(account), { k: CURSOR_FORMAT, a: account, o: digest(owner), p, l, ...times })
+    const cursor = encodeBoundCursor(bindingOf(account), { k: CURSOR_FORMAT, a: account, o: digest(owner), p, l, ...times, ...held })
     if (cursor.length <= CURSOR_MAX || entries.length === 0) return cursor
     // Too long: forget the oldest, and start the lookback after it.
     start = Math.max(start, entries[entries.length - 1]![1] + 1000)

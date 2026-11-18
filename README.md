@@ -514,10 +514,10 @@ still stores its token.
   result alone over 32 MB, which is left out (two or more in a row are left out together). A read answers
   one gap; a loss it finds after that is answered by the next read. A notification
   GitHub delivers more than 6 hours late is not listed. If GitHub orders a second's search results differently from one
-  page to the next, a result can be missed while a second of more than 100 results is read. A second read whole takes 10
-  more requests for each page of 100 over 32 MB in it, and 10 more for each page of 10 over it; one that needs more than
-  a call has left after the other searches holds that search, call after call: hundreds of results of over 300 KB each in one second, or one
-  result over 32 MB in a second of more than 100 while the other searches page in full. A notification marked Done before `events_list` reads it may not be listed, and nothing tells the
+  page to the next, a result can be missed while a second of more than 100 results is read. A second one call cannot
+  read whole is read first by the next call, and walked across calls in GitHub's order if even that is not enough, so at
+  most one call in a row lists nothing because of it, and a second of n results takes at most 1 + n/20 calls; a walked
+  second that loses a result meanwhile is passed with a `window-truncated` gap. A notification marked Done before `events_list` reads it may not be listed, and nothing tells the
   plugin it was there. The conformance kit runs on GitHub answers that are invented, modelled on GitHub's REST docs,
   and not live-verified.
 - Updates are not automatic for a Git install, and `opencode plugin update` and `opencode plugin check` do not work on one: to move to a newer release, remove the old entry and add the new tag.
