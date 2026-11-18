@@ -3,7 +3,7 @@
 import { GitHubPluginError } from "./errors.js"
 
 export const HOST_RANGE = ">=2.2.3 <2.4.0"
-export const TESTED_HOSTS = ["2.2.3", "2.2.4", "2.2.5", "2.2.6", "2.2.7", "2.3.0"] as const
+export const TESTED_HOSTS = ["2.2.3", "2.2.4", "2.2.5", "2.2.6", "2.2.7", "2.3.0", "2.3.1", "2.3.2"] as const
 
 const LOWEST: Version = [2, 2, 3]
 const ABOVE: Version = [2, 4, 0]

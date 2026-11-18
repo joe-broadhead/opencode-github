@@ -167,7 +167,7 @@ describe("computeStatus", () => {
     const status = await computeStatus(fakeCtx({ server: "connected", label: "octocat" }).ctx, deps({ hostVersion: "2.2.99" }))
     expect(status).toMatchObject({ state: "connected", host: { version: "2.2.99", range: ">=2.2.3 <2.4.0", tested: false }, nextStep: "Nothing to do." })
     const outside = await computeStatus(fakeCtx({ server: "connected", label: "octocat" }).ctx, deps({ hostVersion: "2.4.0", hostWarning: "x" }))
-    expect(outside.nextStep).toBe("If GitHub misbehaves, use OpenCode 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7 or 2.3.0, where it is tested.")
+    expect(outside.nextStep).toBe("If GitHub misbehaves, use OpenCode 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7, 2.3.0, 2.3.1 or 2.3.2, where it is tested.")
   })
 
   // QA LIVE-1: an agent whose own rules already ask or deny for GitHub's tools needs no fix.

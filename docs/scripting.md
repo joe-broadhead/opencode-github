@@ -194,7 +194,7 @@ These fields have the same names and meanings in every plugin of this family:
 | Field | Value |
 | --- | --- |
 | `version` | The plugin's version. |
-| `host` | `{ version, range, tested }`: the OpenCode release, the supported range `>=2.2.3 <2.4.0`, and whether this release is one the plugin is tested on (2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7 or 2.3.0). |
+| `host` | `{ version, range, tested }`: the OpenCode release, the supported range `>=2.2.3 <2.4.0`, and whether this release is one the plugin is tested on (2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7, 2.3.0, 2.3.1 or 2.3.2). |
 | `state` | `connected`, `sign_in_required`, `connecting`, `failed`, `disabled`, `not_configured` or `conflict`. |
 | `unguardedAgents` | The agents without default rules, always present; `[]` when there are none. |
 | `nextStep` | The Next step row; `Nothing to do.` when nothing is needed. |

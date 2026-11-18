@@ -2,7 +2,15 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.8] - 2026-11-18
+
+### Changed
+
+- Tested on OpenCode 2.3.1 and 2.3.2, so `TESTED_HOSTS` now holds 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7, 2.3.0, 2.3.1 and
+  2.3.2. The supported range is unchanged (`>=2.2.3 <2.4.0`). The host and pack stages, CI and the release's install
+  check run on every one; the plugin is tested on 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7, 2.3.0, 2.3.1 and 2.3.2. They need
+  nothing else from this plugin: between 2.3.0 and 2.3.2 the only API changes are that `experimental.generate`
+  excludes video jobs and a new `codemode` session event kind.
 
 ### Fixed
 
@@ -33,11 +41,6 @@ All notable changes to this project are documented here. The format follows [Kee
   docs and the README's Known limits.
 - **Each of `events_list`'s and `probe`'s requests has 60 seconds**, its answer read whole included: past that it stops
   and the call answers `UNAVAILABLE`, with the cursor unchanged. The caller's own abort still stops it at once.
-
-## [0.0.7] - 2026-11-18
-
-### Fixed
-
 - **`events_list`'s reads (its searches and its notifications) take GitHub's answers whole, up to 32 MB a page, instead
   of the 100 KB cap meant for answers shown to an agent; an answer over 32 MB answers `TOO_LARGE`.** A page used to be
   cut to the 100,000 bytes `github_api` shows an agent, and a cut page failed the read with `UNAVAILABLE`, whose next
