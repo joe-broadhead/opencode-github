@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest"
 import type { ApiOutput } from "../../src/api/contract.js"
 import { EVENT_LIMITS, resultProblems, type EventsListResult } from "@we-the-rebel-alliance/source-contract/events"
-import { NOTIFICATION_LOOKBACK_MS, PAGE_BYTES, SEARCH_BUDGET, SEARCH_CAP, SETTLE_MS, listEvents } from "../../src/source-events.js"
+import { NOTIFICATION_LOOKBACK_MS, PAGE_BYTES, SEARCH_BUDGET, SEARCH_CAP, SETTLE_MS, listEvents, orderKey } from "../../src/source-events.js"
 
 const LOGIN = "octo-person"
 const NOW = Date.parse("2026-11-08T12:00:00Z")
@@ -154,9 +154,10 @@ describe("search results in one second (review MEDIUM 2)", () => {
         const listed = ids(pages)
         expect(gaps(pages)).toEqual([])
         expect(new Set(listed).size).toBe(listed.length)
+        // A second's results in the plugin's order: by order key, a hash of the id.
         expect(listed).toEqual([
           "octo/app@c0",
-          ...Array.from({ length: count }, (_, k) => `octo/app@r${String(k).padStart(5, "0")}`),
+          ...Array.from({ length: count }, (_, k) => `octo/app@r${String(k).padStart(5, "0")}`).sort((a, b) => (orderKey(a) < orderKey(b) ? -1 : 1)),
           "octo/app@z1",
           "notification:9001@2026-11-04T00:00:00.000Z",
         ])

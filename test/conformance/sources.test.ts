@@ -43,12 +43,19 @@ const TOKEN = "gho_" + "t".repeat(36)
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } })
 
-/** GitHub's REST answers from the recorded data: searches by their qualifier, oldest first, paged; notifications newest first. */
+/**
+ * GitHub's REST answers from the recorded data: searches by their qualifier's range (`>=from` or `from..to`, both ends
+ * inclusive), oldest first, paged; notifications newest first.
+ */
 function answer(url: URL): Response {
   const query = url.searchParams
   const page = Number(query.get("page") ?? 1)
   const per = Number(query.get("per_page") ?? 30)
-  const qualifier = (name: string) => new RegExp(`${name}:>=(\\S+)`).exec(query.get("q") ?? "")?.[1]
+  const within = (at: string, name: string) => {
+    const match = new RegExp(`${name}:(?:>=(\\S+)|(\\S+)\\.\\.(\\S+))`).exec(query.get("q") ?? "")!
+    const time = Date.parse(at)
+    return match[1] !== undefined ? time >= Date.parse(match[1]) : time >= Date.parse(match[2]!) && time <= Date.parse(match[3]!)
+  }
   const paged = (all: unknown[]) => json({ total_count: all.length, incomplete_results: false, items: all.slice((page - 1) * per, page * per) })
   switch (url.pathname) {
     case "/user":
@@ -58,16 +65,14 @@ function answer(url: URL): Response {
       // A GitHub App user token gets 422 for a search of issues and pull requests together.
       const kind = /(?:^|\s)is:(issue|pull-request)(?:\s|$)/.exec(query.get("q") ?? "")?.[1]
       if (kind === undefined) return new Response(JSON.stringify({ message: "Validation Failed" }), { status: 422 })
-      const from = Date.parse(qualifier("updated")!)
       return paged(
         (GITHUB["issues"] as { updated_at: string }[])
-          .filter((item) => Date.parse(item.updated_at) >= from && ("pull_request" in item) === (kind === "pull-request"))
+          .filter((item) => within(item.updated_at, "updated") && ("pull_request" in item) === (kind === "pull-request"))
           .sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at)),
       )
     }
     case "/search/commits": {
-      const from = Date.parse(qualifier("committer-date")!)
-      return paged((GITHUB["commits"] as { commit: { committer: { date: string } } }[]).filter((item) => Date.parse(item.commit.committer.date) >= from))
+      return paged((GITHUB["commits"] as { commit: { committer: { date: string } } }[]).filter((item) => within(item.commit.committer.date, "committer-date")))
     }
     case "/notifications": {
       const since = Date.parse(query.get("since")!)
@@ -125,8 +130,10 @@ async function cases(): Promise<PageCase[]> {
   const done = (await list({ source: SOURCE, account: ACCOUNT, cursor: first, limit: 500 }))["cursor"] as string
   const state = JSON.parse(Buffer.from(first, "base64url").toString("utf8")) as Record<string, unknown>
   const { v: _v, s: _s, b: _b, ...positions } = state
-  const streams = positions["p"] as Record<string, [number, string]>
-  const expired = encodeBoundCursor({ plugin: NAMESPACE, source: SOURCE, account: ACCOUNT }, { ...positions, p: { ...streams, n: [OUTSIDE, ""] } })
+  // The notifications' position, the fourth, moved before GitHub's three months: a time in base 36, as the cursor writes it.
+  const streams = positions["p"] as [string, string][]
+  const outside = OUTSIDE % 1000 === 0 ? (OUTSIDE / 1000).toString(36) : `~${OUTSIDE.toString(36)}`
+  const expired = encodeBoundCursor({ plugin: NAMESPACE, source: SOURCE, account: ACCOUNT }, { ...positions, p: [...streams.slice(0, 3), [outside, ""]] })
   return [
     { name: "a first listing, one commit refused for a secret", input: { source: SOURCE, account: ACCOUNT, since: SINCE }, expect: "page" },
     { name: "two at a time", input: { source: SOURCE, account: ACCOUNT, since: SINCE, limit: 2 }, expect: "page" },

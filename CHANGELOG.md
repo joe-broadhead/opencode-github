@@ -2,6 +2,38 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`events_list`'s searches page by time, so a result that changes while a search pages loses nothing.** A search
+  paged by page number over results sorted by time: a result already read that changed between two requests moved to
+  the end, every later result moved up a place, and the first result of the next page was never listed, with no gap.
+  Each page now asks again from the last second the page before it read, up to the read's cut, and a result read twice
+  is listed once; a second read whole by itself is read again from its first result when one leaves it meanwhile.
+- **A search answer over 32 MB no longer stops every stream.** It answered `TOO_LARGE` on every call, notifications
+  included. Its range is now read again in pages of 10, and within a second read whole, as ten pages of 10 at the same
+  offsets, then pages of one. Only a result alone over 32 MB is left out, with one `gap` (`window-truncated`), and the
+  search goes on after it. `TOO_LARGE` remains for a notifications answer over 32 MB.
+- **A second one call cannot read whole no longer stalls every stream.** A result over 32 MB in a crowded second, with
+  other searches paging in full, left too few requests to read it: it held, started again every call, and nothing past
+  it was listed, with `more: true` and no gap. The next call now reads such a second first, before the other searches;
+  if even that is not enough, the second is walked in GitHub's order across calls, listing what each call reads, with
+  the walk carried in the cursor. At most one call in a row lists nothing because of a second, and a second of n
+  results takes at most 1 + n/20 calls.
+- **A cursor is at most 960 characters, under the source contract's 1,024.** A search position spelled out its item's
+  id, so three positions in repositories with the longest names, with a cut, a gap and a loss, made a cursor of 1,038
+  characters, which the contract refuses. A position now holds an 11-character hash of the id (a second's results are
+  ordered by it), times are seconds in base 36, and positions are a list: the longest cursor is 799 characters, a walk
+  in each search included. **Every cursor a release issued is still read and continued**, with nothing lost or listed
+  twice: 0.0.0's to 0.0.2's (refused since 0.0.3), 0.0.3's to 0.0.5's, and 0.0.6's and 0.0.7's. Only a cursor no release could have written is `CURSOR_INVALID`.
+- **A known limit, now stated:** a commit that reaches a default branch after the commits stream has passed its
+  committer date (typically from a pull request merged later, or a cherry-pick) is never listed, with no gap, as in
+  every earlier release. The merge of a pull request the person is involved in is still listed. See the `events_list`
+  docs and the README's Known limits.
+- **Each of `events_list`'s and `probe`'s requests has 60 seconds**, its answer read whole included: past that it stops
+  and the call answers `UNAVAILABLE`, with the cursor unchanged. The caller's own abort still stops it at once.
+
 ## [0.0.7] - 2026-11-18
 
 ### Fixed

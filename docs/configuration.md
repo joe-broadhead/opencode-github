@@ -652,8 +652,13 @@ login GitHub's `GET /user` named when you signed in (the Account `/github-status
 shares an owner with a github.com one). A listing names the account it reads; one that names another login than the signed-in one is
 refused with `ACCOUNT_MISMATCH`, and so is a cursor issued for another account, before any GitHub call. The cursor is
 the source contract's bound cursor, tied to this plugin, the source and the account, with a digest of the owner
-inside, so a cursor that was changed, issued before a sign-in to another account, or issued by 0.0.2 or earlier
-(account `default`) is `CURSOR_INVALID`: start again with `since`.
+inside, so a cursor that was changed, or issued before a sign-in to another account, is `CURSOR_INVALID`: start again
+with `since`. **A cursor is at most 960 characters**, under the contract's 1,024 (799 at its longest): a search position
+holds an 11-character hash of its item's id, never a repository's name, and times are seconds in base 36. **Every cursor
+a release issued is still read**, and the read goes on from it with nothing lost or listed twice: 0.0.6's and 0.0.7's,
+0.0.3's to 0.0.5's (no lookback), and 0.0.0's to 0.0.2's (contract 1, account `default`, which may come with the account
+`default` or none, and which the owner's digest inside ties to the sign-in). Inside a second it stopped in, an older
+cursor keeps its order by id until the second ends. Only a cursor no release could have written is refused.
 
 It asserts `github_events_list`, then makes only GET requests, through `github_api`'s own spec with the plugin's
 sign-in. Each GET asserts the tool's own permission, `github_events_list`, on its own `GET /path` first, not
@@ -663,11 +668,12 @@ before the request is sent. It sends nothing but the three GETs below; another p
 is refused before it is sent:
 
 - **issues and pull requests** the user is involved in: `/search/issues` twice, with `is:issue involves:<login>
-  updated:>=<time>` and with `is:pull-request involves:<login> updated:>=<time>` (GitHub refuses a GitHub App token's
+  updated:<time>..<cut>` and with `is:pull-request involves:<login> updated:<time>..<cut>` (GitHub refuses a GitHub App token's
   search for both together), each sorted by update, oldest first, each its own stream in the cursor. One event each time one changes: kind `issue` or `pr`, the title, the body cut to
   4,096 characters, the author and assignees as `github:` actors, the state and labels, and its `html_url`;
-- **commits** the user authored: `/search/commits` with `author:<login> committer-date:>=<time>`, sorted by committer
-  date. Kind `commit`, the message, and its `html_url`;
+- **commits** the user authored: `/search/commits` with `author:<login> committer-date:<time>..<cut>`, sorted by committer
+  date. Kind `commit`, the message, and its `html_url`. A commit that reaches the default branch after the stream has
+  passed its committer date is not listed (see below);
 - **notifications**, where the sign-in may read them: `/notifications` with `participating` and `since`. A 401, 403
   or 404 leaves them out, as for a fine-grained token, which cannot read notifications. Those about an issue or a pull
   request are left out too, because the first stream lists them. Kind `event`, the subject's title and type, and the
@@ -678,14 +684,38 @@ before it. An event is listed once it is 5 minutes old, because GitHub's search 
 holds one cut** (the time of its first page, less those 5 minutes) on every page until it ends (`more: false`): nothing
 newer is listed by it, and the next read lists what came after.
 
-GitHub's search returns at most 1,000 results for one query, and allows 30 search requests a minute: each search reads
-at most 6 pages of 100 a call from its position, and the cursor moves past what was listed, so the next call's query
-starts later. When every result a search read shares one second (a rebase-merge gives hundreds of commits one committer
-date), that second is read whole by itself, up to GitHub's 1,000 results, and listed in the plugin's own order (by id),
-so the position walks through it across calls and then moves past it; with two such seconds, the earlier is read
-first. A call makes at most 30 search requests. Each result is listed once, even where GitHub orders a second's results
-differently from one page to the next; but if it does, a result can be missed while that second is read (GitHub does
-not say whether its order is stable). A search GitHub answers as incomplete (it timed out) lists nothing past that
+GitHub's search returns at most 1,000 results for one query, and allows 30 search requests a minute: each search makes
+at most 6 requests a call from its position, for pages of 100 up to the read's cut, and the cursor moves past what was
+listed, so the next call's query starts later. **A search pages by time, not by page number**: each page after the
+first asks again from the last second the page before it read. So a result that changes while the search pages, which
+moves it to the end of GitHub's order, leaves the range (its change is after the cut, and the next read lists it), and
+nothing slides into a page already read; a result read twice is listed once. A page that lies in one second cannot be
+paged past by time (a rebase-merge gives hundreds of commits one committer date): that second is read whole by itself,
+up to GitHub's 1,000 results, and listed in the plugin's own order (by a hash of each id), so the position walks through it across
+calls and then moves past it; with two such seconds, the earlier is read first. A result that leaves such a second while
+it is read changes the second's total, and the second is read again from its first result. A call makes at most 30
+search requests, and each request, its answer read whole included, has 60 seconds: past that it stops, and the call
+answers `UNAVAILABLE` with its cursor unchanged. Each result is listed once, even where GitHub orders a second's results
+differently from one page to the next; but if it does, a result can be missed while a second of more than 100 results
+is read (GitHub does not say whether its order is stable).
+
+**An answer over 32 MB.** `events_list` reads GitHub's answers whole, up to 32 MB a page, never the 100,000 bytes
+`github_api` shows an agent. Nothing in GitHub's limits keeps a page of 100 results under that (a result carries labels,
+people and a milestone, and a commit message has no limit), so a search page over it is read again from the same point
+in pages of 10, and within a second read whole, as ten pages of 10 at the same offsets, then pages of one. A result alone
+over 32 MB is left out: the page that reaches it answers `gap` (`window-truncated`, from just after the result before
+it), and the search goes on after it. Two or more such results in a row are left out together, with one gap, and so is a
+result GitHub orders among them differently from one request to the next. A second read whole takes 10 more requests
+for each page of 100 over 32 MB in it, and 10 more for each page of 10 over it. A second a call cannot read whole for want of requests is never left waiting: the call that finds it held marks it
+in the cursor, and the next call reads it first, before the other searches, with every request but one for each of
+them. If even that is not enough (hundreds of results of over 300 KB each in one second, or two results over 32 MB in a
+second of 1,000), the second is walked in GitHub's own order: what each call reads of it is listed, a result over 32 MB
+on the way is left out with the gap, and the cursor carries the walk's place, page size and the second's total, so the
+next call goes on from there instead of reading the second again. So at most one call in a row lists nothing because of
+a second, and from then on each call reads at least 20 of its results (or `limit`, if smaller): a second of n results
+takes at most 1 + n/20 calls, 51 for GitHub's 1,000. A walked second whose total changes while it is walked (a commit's
+repository made private) is passed with a `window-truncated` gap from it, as its order can no longer be trusted. A notifications page of 50, a few KB each, is never near
+32 MB; one over it would answer `TOO_LARGE`. A search GitHub answers as incomplete (it timed out) lists nothing past that
 stream's position, and the next call reads it again, so nothing it left out is skipped. An event whose title or text
 holds a secret, such as a password in a URL, is never listed: it is in the page's `refused[]` with `reason: "secret"`,
 and the cursor moves past it.
@@ -694,6 +724,14 @@ and the cursor moves past it.
 counts them, asking GitHub for one notification alone at a time (it lists them newest first), and reads the oldest 500:
 the backlog is walked oldest first, call after call, and nothing GitHub delivers meanwhile can push one out of it.
 Where GitHub will not page that far, or past 64,000, the call reads the newest 500 instead and answers a gap.
+
+**Commits that reach the default branch late are not listed.** GitHub's commit search covers only a repository's
+default branch, and says nothing of when a commit reached it. A commit whose committer date is earlier than the time it
+reached the default branch, typically one from a pull request merged later (with a merge commit, or a branch
+fast-forwarded) or a cherry-pick, becomes searchable only once the commits stream's position may already be past its
+date, so it is **never listed, and no gap says so**. The pull-request stream still lists the merge of a pull request the
+user is involved in (kind `pr`, labelled `merged`), so the change itself is seen, though not each of its commits. A
+lossless re-scan would need state for each commit, which the cursor cannot hold, so `events_list` does not re-scan.
 
 **A notification GitHub delivers late.** Each read looks again at the 6 hours before the notifications' position, and
 lists a notification stamped there that it has not listed yet; the cursor remembers the last 16 it listed in that time
@@ -706,8 +744,8 @@ answers `gap`, `{ reason: "expired", since }` from a cursor or `{ reason: "windo
 where `since` is where the notifications started, and reads them from the window's start. Where a read restarts
 counts from its cut, so it holds still while the read pages; whether GitHub may have deleted some is checked on
 GitHub's clock, on every page, as GitHub deletes them while the read pages. So does a backlog the call
-cannot walk (above), and a second with more search results than GitHub answers for one query (1,000):
-`window-truncated`, and the search moves past that second. **A read answers one gap**, on the page where it restarts:
+cannot walk (above), a second with more search results than GitHub answers for one query (1,000), and a search result
+alone over 32 MB (above): `window-truncated`, and the search moves past that second or that result. **A read answers one gap**, on the page where it restarts:
 until the read ends, the cursor carries that it was answered and no later page answers another; reading again at the
 same cursor answers the same gap. A loss a read finds after its gap is carried in the cursor, past the read's end, and
 the next read's first page answers it (`{ reason: "expired", since }`), so no loss is silent. A complete read moves the notifications' position up to the cut, so an inbox read at least every
@@ -937,8 +975,8 @@ passed through unchanged.
 | `SOURCE_UNKNOWN` | `events_list` or `probe` names a source the plugin does not have. | Leave source out, or pass github. |
 | `CURSOR_INVALID` | The cursor was not issued by GitHub's `events_list` for this account and its signed-in user, or was changed. | Call events_list without a cursor, with since, to start again. |
 | `ACCOUNT_MISMATCH` | `events_list` or `probe` names another account than the signed-in login, or a cursor issued for another account. | Pass the account the cursor was issued for, or sign in to GitHub as that account; probe names the signed-in login. |
-| `TOO_LARGE` | A search or notifications answer for `events_list` is over 32 MB. | Nothing in `events_list` changes it: the answer is over the bytes it reads whole. |
-| `UNAVAILABLE` | A search, notifications or `GET /user` read for `events_list` or `probe` failed, or the sign-in names no login. | Call it again with the same cursor; if it keeps failing, run /github-status. |
+| `TOO_LARGE` | A notifications answer for `events_list` is over 32 MB. A search answer over it is read in smaller pages instead. | Nothing in `events_list` changes it: the answer is over the bytes it reads whole. |
+| `UNAVAILABLE` | A search, notifications or `GET /user` read for `events_list` or `probe` failed or took more than 60 seconds, or the sign-in names no login. | Call it again with the same cursor; if it keeps failing, run /github-status. |
 
 A script's calls through the tools RPC, `github.platform.tools`, have more codes for sessions, permissions and the
 server's state; see [Scripting](scripting.md#errors).

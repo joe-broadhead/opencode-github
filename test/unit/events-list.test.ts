@@ -30,6 +30,7 @@ import {
   listEvents,
   loginOf,
   notificationItem,
+  orderKey,
   probeEvents,
   probeMethod,
   runEvents,
@@ -77,15 +78,13 @@ const NOTIFICATIONS = [
   { id: "n2", reason: "subscribed", updated_at: "2026-10-06T10:00:00Z", subject: { title: "v1.2.0", type: "Release" }, repository: { full_name: "octo/app", html_url: "https://github.com/octo/app" } },
 ]
 
-/** The events from SINCE at NOW, oldest first; ties by stream, then by the plugin's id. */
+/** The events from SINCE at NOW, oldest first; ties by stream, then by the plugin's order key, a hash of the id. */
 const EXPECTED = [
   "octo/app@a1",
   "octo/app#1@2026-10-01T09:00:00.000Z",
   "octo/app#2@2026-10-02T10:00:00.000Z",
   "octo/lib@b2",
-  "octo/app#8@2026-10-05T08:00:00.000Z",
-  "octo/app#9@2026-10-05T08:00:00.000Z",
-  "octo/lib#7@2026-10-05T08:00:00.000Z",
+  ...["octo/app#8", "octo/app#9", "octo/lib#7"].sort((a, b) => (orderKey(a) < orderKey(b) ? -1 : 1)).map((id) => `${id}@2026-10-05T08:00:00.000Z`),
   "notification:n2@2026-10-06T10:00:00.000Z",
   ...Array.from({ length: 4 }, (_, index) => `octo/lib#${20 + index}@2026-10-2${index}T12:00:00.000Z`),
 ]
@@ -206,8 +205,10 @@ describe("events_list", () => {
     await assertEventsListConformance(list(), { ...FINAL, source: SOURCE, owner: OWNER, since: SINCE, expected: EXPECTED, pageSize: 2 })
   })
 
-  it("keeps it with the source named and GitHub's pages of two, where ties cross a page", async () => {
-    await assertEventsListConformance(list(github({ perPage: 2 })), { ...FINAL, source: SOURCE, sourceInput: true, since: SINCE, expected: EXPECTED, pageSize: 3 })
+  // GitHub answering three results a page, fewer than asked: a search pages by time, reading each page's last second
+  // again, so ties cross a page and one call still lists everything within its six requests a stream.
+  it("keeps it with the source named and GitHub's pages of three, where ties cross a page", async () => {
+    await assertEventsListConformance(list(github({ perPage: 3 })), { ...FINAL, source: SOURCE, sourceInput: true, since: SINCE, expected: EXPECTED, pageSize: 3 })
   })
 
   it("keeps it where the sign-in may not read notifications, and leaves them out", async () => {
@@ -232,14 +233,15 @@ describe("events_list", () => {
     expect(result.events.find((event) => event.external_id.startsWith("octo/lib#7@"))!.text).toHaveLength(EVENT_LIMITS.text)
   })
 
-  it("asks GitHub's searches oldest first, from whole seconds, and reads notifications only as participating", async () => {
+  it("asks GitHub's searches oldest first, from whole seconds up to the read's cut, and reads notifications only as participating", async () => {
     const fake = github()
     await list(fake)({ since: "2026-10-01T09:00:00.500Z" })
+    // The cut is NOW less SETTLE_MS, 11:55:00: nothing newer is this read's.
     expect(fake.calls.filter((call) => call.path === "/search/issues").map((call) => call.query)).toEqual([
-      { q: `is:issue involves:${LOGIN} updated:>=2026-10-01T09:00:00Z`, sort: "updated", order: "asc", per_page: 100, page: 1 },
-      { q: `is:pull-request involves:${LOGIN} updated:>=2026-10-01T09:00:00Z`, sort: "updated", order: "asc", per_page: 100, page: 1 },
+      { q: `is:issue involves:${LOGIN} updated:2026-10-01T09:00:00Z..2026-11-08T11:55:00Z`, sort: "updated", order: "asc", per_page: 100, page: 1 },
+      { q: `is:pull-request involves:${LOGIN} updated:2026-10-01T09:00:00Z..2026-11-08T11:55:00Z`, sort: "updated", order: "asc", per_page: 100, page: 1 },
     ])
-    expect(fake.calls.find((call) => call.path === "/search/commits")!.query).toMatchObject({ q: `author:${LOGIN} committer-date:>=2026-10-01T09:00:00Z`, sort: "committer-date", order: "asc" })
+    expect(fake.calls.find((call) => call.path === "/search/commits")!.query).toMatchObject({ q: `author:${LOGIN} committer-date:2026-10-01T09:00:00Z..2026-11-08T11:55:00Z`, sort: "committer-date", order: "asc" })
     expect(fake.calls.find((call) => call.path === "/notifications")!.query).toMatchObject({ all: true, participating: true, since: "2026-10-01T09:00:00Z" })
   })
 
@@ -294,16 +296,32 @@ describe("events_list", () => {
     expect(fake.calls).toEqual([])
   })
 
-  it("refuses a cursor an earlier release issued, for the same sign-in too, with CURSOR_INVALID and a next step to start again", async () => {
+  it("reads a cursor of 0.0.2 for this sign-in, and refuses only a cursor no release wrote, or another sign-in's", async () => {
     const owner = createHash("sha256").update(OWNER.id).digest("hex").slice(0, 16)
-    // Contract 1's cursor, as 0.0.2 wrote it: account default and the owner's hash.
-    const legacy = encodeCursor(SOURCE, { a: "default", o: owner, p: { i: [Date.parse(SINCE), ""], c: [Date.parse(SINCE), ""], n: [Date.parse(SINCE), ""] } })
-    const fake = github()
-    const refused = await listEvents(fake.get, fake.identity, { account: LOGIN, cursor: legacy }, NOW).catch((error: unknown) => error)
-    expect(refused).toBeInstanceOf(GitHubPluginError)
-    expect((refused as GitHubPluginError).code).toBe("CURSOR_INVALID")
-    expect((refused as GitHubPluginError).nextStep).toBe("Call events_list without a cursor, with since, to start again.")
-    expect(fake.calls).toEqual([])
+    const positions = { i: [Date.parse(SINCE), ""], c: [Date.parse(SINCE), ""], n: [Date.parse(SINCE), ""] }
+    // Contract 1's cursor, as 0.0.2 wrote it: account default and the owner's hash. It lists what came after.
+    const legacy = encodeCursor(SOURCE, { a: "default", o: owner, p: positions })
+    const read = (await listEvents(github().get, github().identity, { account: "default", cursor: legacy, limit: PAGE.max }, NOW)) as EventsListResult
+    expect(read.events.map((event) => event.external_id)).toEqual(EXPECTED)
+    const refused = async (cursor: string) => {
+      const fake = github()
+      const error = await listEvents(fake.get, fake.identity, { account: LOGIN, cursor }, NOW).catch((caught: unknown) => caught)
+      expect(error).toBeInstanceOf(GitHubPluginError)
+      expect((error as GitHubPluginError).code).toBe("CURSOR_INVALID")
+      expect((error as GitHubPluginError).nextStep).toBe("Call events_list without a cursor, with since, to start again.")
+      expect(fake.calls).toEqual([])
+    }
+    // Another sign-in's 0.0.2 cursor, and one that names an account 0.0.2 never wrote.
+    await refused(encodeCursor(SOURCE, { a: "default", o: "0".repeat(16), p: positions }))
+    await refused(encodeCursor(SOURCE, { a: LOGIN, o: owner, p: positions }))
+    const bound = (state: Record<string, unknown>) => encodeBoundCursor({ plugin: NAMESPACE, source: SOURCE, account: LOGIN }, { a: LOGIN, o: owner, ...state })
+    const streams = { i: [Date.parse(SINCE), ""], p: [Date.parse(SINCE), ""], c: [Date.parse(SINCE), ""], n: [Date.parse(SINCE), ""] }
+    // 0.0.5's shape is read; with a read's cut but no lookback, no release wrote it.
+    expect(((await listEvents(github().get, github().identity, { account: LOGIN, cursor: bound({ p: streams }), limit: PAGE.max }, NOW)) as EventsListResult).events.map((event) => event.external_id)).toEqual(EXPECTED)
+    await refused(bound({ p: streams, u: NOW }))
+    // Format 1 always holds its lookback, and there is no format 2.
+    await refused(bound({ k: 1, p: [["0", ""], ["0", ""], ["0", ""], ["0", ""]] }))
+    await refused(bound({ k: 2, p: [["0", ""], ["0", ""], ["0", ""], ["0", ""]], l: ["0", []] }))
   })
 
   it("refuses an event whose title or text holds a secret for good, and moves the cursor past it", async () => {
@@ -322,16 +340,9 @@ describe("events_list", () => {
     expect(next.refused ?? []).toEqual([])
   })
 
-  it("stops with UNAVAILABLE on a failed search, and with TOO_LARGE, naming 32 MB, on an answer over the read limit", async () => {
+  it("stops with UNAVAILABLE on a failed search", async () => {
     const failing = async () => ({ ok: false, status: 422, data: {}, truncated: false, trust: { githubContent: "untrusted" } }) as ApiOutput
     expect(await code(listEvents(failing, github().identity, { since: SINCE }, NOW))).toBe("UNAVAILABLE")
-    // An answer over the 32 MB events_list reads whole is named as such: never cut, and never the "try again later"
-    // that UNAVAILABLE means.
-    const cut = async (path: string) => (path === "/notifications" ? ok([]) : { ok: true, status: 200, data: "{", truncated: true, trust: { githubContent: "untrusted" } }) as ApiOutput
-    const refused = (await listEvents(cut, github().identity, { since: SINCE }, NOW).catch((error: unknown) => error)) as GitHubPluginError
-    expect(refused).toBeInstanceOf(GitHubPluginError)
-    expect(refused.code).toBe("TOO_LARGE")
-    expect(refused.detail).toContain("32 MB")
   })
 })
 
@@ -402,8 +413,9 @@ describe("a crowded second at a page of 100", () => {
     expect(new Set(seen).size).toBe(1780)
     expect(seen.filter((id) => id.startsWith("octo/big#"))).toHaveLength(1380)
     expect(seen.filter((id) => id.startsWith("octo/big@"))).toHaveLength(400)
-    // master's paging exactly: the same eleven calls, so the second read is never starved of the budget.
-    expect(counts).toHaveLength(11)
+    // No more calls than master's eleven, so the second read is never starved of the budget: a second listed in part is
+    // read first by the next call.
+    expect(counts.length).toBeLessThanOrEqual(11)
   })
 })
 
@@ -444,14 +456,22 @@ describe("GitHub's own search answers, read whole", () => {
     expect(result.more).toBe(false)
   })
 
-  it("names the 32 MB limit for an answer over it, and never UNAVAILABLE", async () => {
-    // 100 results of 340,000 characters is about 34 MB: more than events_list reads whole, and named as such.
-    const fake = github({ issues: many(100, 340_000), commits: [], inbox: [] })
-    const refused = (await listEvents(fake.get, fake.identity, { since: SINCE }, NOW).catch((error: unknown) => error)) as GitHubPluginError
-    expect(refused).toBeInstanceOf(GitHubPluginError)
-    expect(refused.code).toBe("TOO_LARGE")
-    expect(refused.detail).toContain("/search/issues")
-    expect(refused.detail).toContain("32 MB")
+  it("reads an answer over 32 MB again in pages of 10, and lists every result once, with no gap", async () => {
+    // 100 results of 340,000 characters is about 34 MB: more than events_list reads whole, so the same point is read
+    // again in pages of 10, about 3.4 MB each.
+    const all = many(100, 340_000)
+    const fake = github({ issues: all, commits: [], inbox: [] })
+    const seen: string[] = []
+    let cursor: string | undefined
+    for (let call = 0; call < 40; call++) {
+      const page = (await list(fake)(cursor === undefined ? { since: SINCE, limit: PAGE.max } : { account: LOGIN, cursor, limit: PAGE.max })) as EventsListResult
+      expect(page.gap).toBeUndefined()
+      seen.push(...page.events.map((event) => event.external_id))
+      if (!page.more) break
+      cursor = page.cursor
+    }
+    expect(seen).toEqual(listed(all))
+    expect(fake.calls.filter((call) => call.path === "/search/issues").some((call) => call.query.per_page === 10)).toBe(true)
   })
 })
 
@@ -465,7 +485,11 @@ describe("history GitHub no longer keeps", () => {
     while (pages.at(-1)!.more) pages.push(await page(fake, now, { account: LOGIN, cursor: pages.at(-1)!.cursor, limit: input["limit"] }))
     return pages
   }
-  const positionN = (cursor: string) => ((JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as { p: Record<string, [number, string]> }).p["n"] as [number, string])[0]
+  /** The notifications' position in a cursor: the fourth of its positions, a time in base 36 (`~` and milliseconds inside a second). */
+  const positionN = (cursor: string) => {
+    const time = (JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as { p: [string, string][] }).p[3]![0]
+    return time.startsWith("~") ? Number.parseInt(time.slice(1), 36) : Number.parseInt(time, 36) * 1000
+  }
 
   it("keeps notifications three months: 89 days, the shortest", () => {
     expect(NOTIFICATION_RETENTION_MS).toBe(89 * DAY)

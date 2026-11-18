@@ -454,8 +454,8 @@ Error codes:
 | `SOURCE_UNKNOWN` | `events_list` or `probe` names a source the plugin does not have. Leave source out, or pass github. |
 | `CURSOR_INVALID` | The cursor was not issued by GitHub's `events_list` for this account and its signed-in user, or was changed. Call events_list without a cursor, with since, to start again. |
 | `ACCOUNT_MISMATCH` | `events_list` or `probe` names another account than the signed-in login, or a cursor issued for another account. Pass the account the cursor was issued for, or sign in to GitHub as that account; probe names the signed-in login. |
-| `TOO_LARGE` | A search or notifications answer for `events_list` is over 32 MB. | Nothing in `events_list` changes it: the answer is over the bytes it reads whole. |
-| `UNAVAILABLE` | A search, notifications or `GET /user` read for `events_list` or `probe` failed, or the sign-in names no login. Call it again with the same cursor; if it keeps failing, run /github-status. |
+| `TOO_LARGE` | A notifications answer for `events_list` is over 32 MB; a search answer over it is read in smaller pages instead. Nothing in `events_list` changes it: the answer is over the bytes it reads whole. |
+| `UNAVAILABLE` | A search, notifications or `GET /user` read for `events_list` or `probe` failed or took more than 60 seconds, or the sign-in names no login. Call it again with the same cursor; if it keeps failing, run /github-status. |
 
 Each row's own next step is in the message, and [the error codes](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/configuration.md#errors) give the same set with when each one happens.
 
@@ -499,9 +499,14 @@ still stores its token.
 - **GitHub's rate limits and error text are GitHub's.** Errors from OpenCode and GitHub pass through unchanged.
 - **`events_list` reads GitHub's search, which has its own limits.** GitHub allows 30 search requests a minute for a
   signed-in user, and at most 1,000 results for one query ([REST API endpoints for search](https://docs.github.com/en/rest/search/search#rate-limit));
-  one `events_list` call makes three searches (issues, pull requests, commits) and at most 30 search requests (6 pages of 100 each, and one second read whole when it holds every result read), beside GitHub's REST limit of 5,000 requests an hour for a user
+  one `events_list` call makes three searches (issues, pull requests, commits) and at most 30 search requests (6 each, for pages of 100 paged by time, and one second read whole when a page lies in it), each with 60 seconds to answer, beside GitHub's REST limit of 5,000 requests an hour for a user
   ([rate limits for the REST API](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)).
   A call over the limit fails with GitHub's answer as `UNAVAILABLE`: call again later with the same cursor.
+- **`events_list` misses commits that reach the default branch late, with no gap.** GitHub's commit search covers only
+  default branches and exposes no time a commit reached one. A commit whose committer date is earlier than the time it
+  reached the default branch (typically from a pull request merged later, or a cherry-pick) is never listed once the
+  commits stream has passed that date. The pull-request stream still lists the merge of a pull request the user is
+  involved in. `events_list` does not re-scan: a lossless re-scan needs per-commit state the cursor cannot hold.
 - **Notifications need a classic sign-in.** A fine-grained token or a GitHub App cannot read `/notifications`
   ([REST API endpoints for notifications](https://docs.github.com/en/rest/activity/notifications#list-notifications-for-the-authenticated-user)),
   so `events_list` leaves them out for those sign-ins.
@@ -510,10 +515,14 @@ still stores its token.
   does not render.
 - **GitHub keeps notifications for three months.** A read whose notifications start before that, or that finds more
   than one call reads, answers `gap` once (`expired` from a cursor, `window-truncated` from `since`) and reads on from
-  inside the window; so does a second with more than 1,000 search results, which the search moves past. A read answers
+  inside the window; so does a second with more than 1,000 search results, which the search moves past, and a search
+  result alone over 32 MB, which is left out (two or more in a row are left out together). A read answers
   one gap; a loss it finds after that is answered by the next read. A notification
   GitHub delivers more than 6 hours late is not listed. If GitHub orders a second's search results differently from one
-  page to the next, a result can be missed while that second is read. A notification marked Done before `events_list` reads it may not be listed, and nothing tells the
+  page to the next, a result can be missed while a second of more than 100 results is read. A second one call cannot
+  read whole is read first by the next call, and walked across calls in GitHub's order if even that is not enough, so at
+  most one call in a row lists nothing because of it, and a second of n results takes at most 1 + n/20 calls; a walked
+  second that loses a result meanwhile is passed with a `window-truncated` gap. A notification marked Done before `events_list` reads it may not be listed, and nothing tells the
   plugin it was there. The conformance kit runs on GitHub answers that are invented, modelled on GitHub's REST docs,
   and not live-verified.
 - Updates are not automatic for a Git install, and `opencode plugin update` and `opencode plugin check` do not work on one: to move to a newer release, remove the old entry and add the new tag.
