@@ -232,8 +232,8 @@ describe("events_list", () => {
     const fake = github()
     await list(fake)({ since: "2026-10-01T09:00:00.500Z" })
     expect(fake.calls.filter((call) => call.path === "/search/issues").map((call) => call.query)).toEqual([
-      { q: `is:issue involves:${LOGIN} updated:>=2026-10-01T09:00:00Z`, sort: "updated", order: "asc", per_page: 50, page: 1 },
-      { q: `is:pull-request involves:${LOGIN} updated:>=2026-10-01T09:00:00Z`, sort: "updated", order: "asc", per_page: 50, page: 1 },
+      { q: `is:issue involves:${LOGIN} updated:>=2026-10-01T09:00:00Z`, sort: "updated", order: "asc", per_page: 100, page: 1 },
+      { q: `is:pull-request involves:${LOGIN} updated:>=2026-10-01T09:00:00Z`, sort: "updated", order: "asc", per_page: 100, page: 1 },
     ])
     expect(fake.calls.find((call) => call.path === "/search/commits")!.query).toMatchObject({ q: `author:${LOGIN} committer-date:>=2026-10-01T09:00:00Z`, sort: "committer-date", order: "asc" })
     expect(fake.calls.find((call) => call.path === "/notifications")!.query).toMatchObject({ all: true, participating: true, since: "2026-10-01T09:00:00Z" })
@@ -318,16 +318,49 @@ describe("events_list", () => {
     expect(next.refused ?? []).toEqual([])
   })
 
-  it("stops with UNAVAILABLE on a failed search, and with TOO_LARGE, naming 16 MB, on an answer over the read limit", async () => {
+  it("stops with UNAVAILABLE on a failed search, and with TOO_LARGE, naming 32 MB, on an answer over the read limit", async () => {
     const failing = async () => ({ ok: false, status: 422, data: {}, truncated: false, trust: { githubContent: "untrusted" } }) as ApiOutput
     expect(await code(listEvents(failing, github().identity, { since: SINCE }, NOW))).toBe("UNAVAILABLE")
-    // GitHub's own limits keep a page of 50 search results under 16 MB, so this names the limit rather than cutting or
-    // skipping: the answer is not one events_list reads whole at any page size.
+    // An answer over the 32 MB events_list reads whole is named as such: never cut, and never the "try again later"
+    // that UNAVAILABLE means.
     const cut = async (path: string) => (path === "/notifications" ? ok([]) : { ok: true, status: 200, data: "{", truncated: true, trust: { githubContent: "untrusted" } }) as ApiOutput
     const refused = (await listEvents(cut, github().identity, { since: SINCE }, NOW).catch((error: unknown) => error)) as GitHubPluginError
     expect(refused).toBeInstanceOf(GitHubPluginError)
     expect(refused.code).toBe("TOO_LARGE")
-    expect(refused.detail).toContain("16 MB")
+    expect(refused.detail).toContain("32 MB")
+  })
+})
+
+describe("a crowded second at a page of 100", () => {
+  it("lists 980 issues, 400 pull requests and 400 commits in one second once each, at limit 200", async () => {
+    // The pull requests and commits are spread over the minute before the crowded second, so their searches page in
+    // full every call, as the reviewer's case had them.
+    const T = "2026-11-02T00:00:00Z"
+    const before = Date.parse("2026-11-01T23:00:00Z")
+    const at = (k: number) => new Date(before + k * 1000).toISOString().replace(".000Z", "Z")
+    const issues = [
+      ...Array.from({ length: 980 }, (_, k) => issue("octo/big", 1000 + k, T)),
+      ...Array.from({ length: 400 }, (_, k) => issue("octo/big", 5000 + k, at(k), { pull_request: { merged_at: null }, html_url: `https://github.com/octo/big/pull/${5000 + k}` })),
+    ]
+    const commits = Array.from({ length: 400 }, (_, k) => ({ sha: `r${String(k).padStart(5, "0")}`, html_url: `https://github.com/octo/big/commit/r${k}`, repository: { full_name: "octo/big" }, author: { login: LOGIN }, commit: { message: "c", author: { name: "O", email: "o@example.test", date: at(k) }, committer: { date: at(k) } } }))
+    const fake = github({ issues, commits, inbox: [] })
+    const seen: string[] = []
+    const counts: number[] = []
+    let cursor: string | undefined
+    for (let call = 0; call < 40; call++) {
+      const page = (await list(fake)(cursor === undefined ? { since: "2026-10-31T00:00:00Z", limit: 200 } : { account: LOGIN, cursor, limit: 200 })) as EventsListResult
+      seen.push(...page.events.map((event) => event.external_id))
+      counts.push(page.events.length)
+      if (!page.more) break
+      cursor = page.cursor
+    }
+    // The pull-request and commit searches run first, and a second read whole at a page of 100 leaves the budget for it.
+    expect(seen).toHaveLength(1780)
+    expect(new Set(seen).size).toBe(1780)
+    expect(seen.filter((id) => id.startsWith("octo/big#"))).toHaveLength(1380)
+    expect(seen.filter((id) => id.startsWith("octo/big@"))).toHaveLength(400)
+    // master's paging exactly: the same eleven calls, so the second read is never starved of the budget.
+    expect(counts).toHaveLength(11)
   })
 })
 
@@ -336,14 +369,14 @@ describe("GitHub's own search answers, read whole", () => {
   const many = (count: number, body: number, first = 1) => Array.from({ length: count }, (_, k) => issue("octo/big", first + k, new Date(BASE + k * 1000).toISOString().replace(".000Z", "Z"), { body: "x".repeat(body) }))
   const listed = (all: ReturnType<typeof issue>[]) => all.map((item) => `octo/big#${item.number}@${new Date(Date.parse(item.updated_at)).toISOString()}`)
 
-  it("reads a 1.2 MB page of 50 results whole, and lists every result once", async () => {
-    const all = many(50, 24_000)
+  it("reads a 2.5 MB page of 100 results whole, and lists every result once", async () => {
+    const all = many(100, 25_000)
     const fake = github({ issues: all, commits: [], inbox: [] })
     const result = (await list(fake)({ since: SINCE, limit: PAGE.max })) as EventsListResult
-    // 50 results of 24,000 characters is about 1.2 MB: over the 100,000-byte cap an answer shown to an agent gets.
+    // 100 results of 25,000 characters is about 2.5 MB: over the 100,000-byte cap an answer shown to an agent gets.
     expect(result.events.map((event) => event.external_id)).toEqual(listed(all))
     expect(result.more).toBe(false)
-    expect(fake.calls.filter((call) => call.path === "/search/issues").at(-1)!.query).toMatchObject({ per_page: 50 })
+    expect(fake.calls.filter((call) => call.path === "/search/issues").at(-1)!.query).toMatchObject({ per_page: 100 })
   })
 
   it("reads one result whose body is GitHub's 65,536-character limit, and keeps the event within the contract's", async () => {
@@ -368,14 +401,14 @@ describe("GitHub's own search answers, read whole", () => {
     expect(result.more).toBe(false)
   })
 
-  it("names the 16 MB limit for an answer over it, and never UNAVAILABLE", async () => {
-    // 50 results of 340,000 characters is about 17 MB: more than events_list reads whole, and named as such.
-    const fake = github({ issues: many(50, 340_000), commits: [], inbox: [] })
+  it("names the 32 MB limit for an answer over it, and never UNAVAILABLE", async () => {
+    // 100 results of 340,000 characters is about 34 MB: more than events_list reads whole, and named as such.
+    const fake = github({ issues: many(100, 340_000), commits: [], inbox: [] })
     const refused = (await listEvents(fake.get, fake.identity, { since: SINCE }, NOW).catch((error: unknown) => error)) as GitHubPluginError
     expect(refused).toBeInstanceOf(GitHubPluginError)
     expect(refused.code).toBe("TOO_LARGE")
     expect(refused.detail).toContain("/search/issues")
-    expect(refused.detail).toContain("16 MB")
+    expect(refused.detail).toContain("32 MB")
   })
 })
 

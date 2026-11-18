@@ -937,7 +937,7 @@ passed through unchanged.
 | `SOURCE_UNKNOWN` | `events_list` or `probe` names a source the plugin does not have. | Leave source out, or pass github. |
 | `CURSOR_INVALID` | The cursor was not issued by GitHub's `events_list` for this account and its signed-in user, or was changed. | Call events_list without a cursor, with since, to start again. |
 | `ACCOUNT_MISMATCH` | `events_list` or `probe` names another account than the signed-in login, or a cursor issued for another account. | Pass the account the cursor was issued for, or sign in to GitHub as that account; probe names the signed-in login. |
-| `TOO_LARGE` | A search answer for `events_list` is over 16 MB, or a notifications page is over 100,000 bytes. GitHub's own limits make the first impossible, and notifications are not read at a smaller page. | Read notifications with GitHub's own tools; a later call does not list that page either. |
+| `TOO_LARGE` | A search answer for `events_list` is over 32 MB, or a notifications page is over 100,000 bytes. GitHub's own limits make the first impossible, and notifications are not read at a smaller page. | Read notifications with GitHub's own tools; a later call does not list that page either. |
 | `UNAVAILABLE` | A search, notifications or `GET /user` read for `events_list` or `probe` failed, or the sign-in names no login. | Call it again with the same cursor; if it keeps failing, run /github-status. |
 
 A script's calls through the tools RPC, `github.platform.tools`, have more codes for sessions, permissions and the

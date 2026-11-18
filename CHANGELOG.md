@@ -6,13 +6,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
-- **`events_list` reads GitHub's search answers whole, up to 16 MB a page of 50, instead of the 100 KB cap meant for
-  answers shown to an agent.** A page of search results was cut to the 100,000 bytes `github_api` shows an agent, and
-  a cut page failed the listing with `UNAVAILABLE`, whose next step asked for a smaller `limit`: that asked for the
-  same page and failed the same way. GitHub's own limits (a body of 65,536 characters) keep one search result at most
-  about 270 KB, so a page of 50 is at most about 13.5 MB. An answer over 16 MB, which those limits make impossible,
-  answers `TOO_LARGE` naming the limit, never `UNAVAILABLE` and never a skip. Events keep the contract's own size
-  limits, so a page sent to a consumer stays bounded whatever GitHub answered. `github_api` still cuts at 100,000 bytes.
+- **`events_list`'s search reads take GitHub's answers whole, up to 32 MB a page of 100, instead of the 100 KB cap meant
+  for answers shown to an agent; an answer over 32 MB answers `TOO_LARGE`.** A page of search results used to be cut to
+  the 100,000 bytes `github_api` shows an agent, and a cut page failed the listing with `UNAVAILABLE`, whose next step
+  asked for a smaller `limit`: that asked for the same page and failed the same way. `github_api`, `probe` and
+  notifications keep the 100,000-byte cap. Events keep the contract's own size limits, so a page sent to a consumer stays
+  bounded whatever GitHub answered.
 
 ## [0.0.6] - 2026-11-17
 

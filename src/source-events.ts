@@ -91,26 +91,23 @@ const LOGIN = /^[A-Za-z0-9-]{1,39}$/
 export const SETTLE_MS = 5 * 60_000
 /** Results per notifications page: GitHub's most. */
 const PER_PAGE = 50
-/**
- * Results per search page. GitHub's own limits make one result at most about 270 KB (a body of 65,536 characters), so
- * a page of 50 holds about 13.5 MB at worst: under SEARCH_MAX_BYTES.
- */
-export const SEARCH_PER_PAGE = 50
+/** Results per search page: GitHub's most. */
+export const SEARCH_PER_PAGE = 100
 /**
  * The most bytes one search answer may hold. `events_list` reads GitHub's own answer, not the 100,000-byte cut
- * `github_api` shows an agent, so a page of SEARCH_PER_PAGE results arrives whole; one over this is not a page size
- * GitHub can produce, and is refused by name rather than cut.
+ * `github_api` shows an agent, so a page of SEARCH_PER_PAGE results arrives whole: 100 issues of at most about 270 KB
+ * each (GitHub's 65,536-character body) is about 27 MB. An answer over this is refused by name, never cut and never
+ * skipped.
  */
-export const SEARCH_MAX_BYTES = 16 * 1024 * 1024
+export const SEARCH_MAX_BYTES = 32 * 1024 * 1024
 /** The most pages one search reads from its position in one call. */
 const SEARCH_PAGES = 6
 /** GitHub answers at most this many results for one search query, whatever its total_count says. */
 export const SEARCH_CAP = 1000
 /**
  * The most search requests one call makes, across its three searches (issues, pull requests, commits): GitHub allows
- * 30 a minute for a signed-in user. A search that finds one crowded second stops at its first full page (`search`), so
- * its three searches make 3 and one second read whole makes 20 (SEARCH_CAP / SEARCH_PER_PAGE); three searches of
- * SEARCH_PAGES with no crowded second make 18.
+ * 30 a minute for a signed-in user. Three reads of SEARCH_PAGES make at most 18, which leaves room for one second read
+ * whole (SEARCH_CAP / SEARCH_PER_PAGE = 10 requests).
  */
 export const SEARCH_BUDGET = 30
 /** The most notifications one call reads (10 pages of 50); a backlog over it is walked oldest first across calls. */
@@ -318,7 +315,7 @@ async function list(get: Get, path: string, query: Record<string, string | numbe
 async function searchPage(get: Get, spec: Search, range: string, page: number): Promise<Answer> {
   const answer = (await list(get, spec.path, { q: spec.query(range), sort: spec.sort, order: "asc", per_page: SEARCH_PER_PAGE, page }, searchItems, [], SEARCH_MAX_BYTES))!
   if (answer.truncated) {
-    fail("TOO_LARGE", `GitHub's answer to ${spec.path} is over ${SEARCH_MAX_BYTES / (1024 * 1024)} MB, the most events_list reads whole.`, "Nothing in events_list changes it: GitHub's own limits keep one result under this, so this is not a page size to change.")
+    fail("TOO_LARGE", `GitHub's answer to ${spec.path} is over ${SEARCH_MAX_BYTES / (1024 * 1024)} MB, the most events_list reads whole.`, "Nothing in events_list changes it: the answer is over the bytes events_list reads whole.")
   }
   return answer
 }
@@ -395,10 +392,6 @@ async function search(get: Get, spec: Search, from: Key, need: number, budget: B
     const ended = answer.items.length === 0 || (answer.total !== undefined ? fetched >= Math.min(answer.total, SEARCH_CAP) : answer.items.length < SEARCH_PER_PAGE)
     if (ended) return { items: items.sort(compare), complete: true, last, start: from }
     if (items.length > need && items.some((item) => item.t < last)) break
-    // A full page whose results all share one second is a crowded second: only that second, read whole
-    // (`searchSecond`), can move the stream on, and the rest of this read's pages can only find more of it. Reading it
-    // now keeps the call's budget for that read. A short page would have ended the read above.
-    if (answer.items.length === SEARCH_PER_PAGE && items.length > 0 && items.every((item) => item.t === last)) return { ...hold, stuck: last }
   }
   if (!read) return hold
   // Every item found shares the last second read (or none is new): only that second, read whole, moves the stream on.
