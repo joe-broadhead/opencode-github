@@ -502,6 +502,11 @@ still stores its token.
   one `events_list` call makes three searches (issues, pull requests, commits) and at most 30 search requests (6 each, for pages of 100 paged by time, and one second read whole when a page lies in it), each with 60 seconds to answer, beside GitHub's REST limit of 5,000 requests an hour for a user
   ([rate limits for the REST API](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)).
   A call over the limit fails with GitHub's answer as `UNAVAILABLE`: call again later with the same cursor.
+- **`events_list` misses commits that reach the default branch late, with no gap.** GitHub's commit search covers only
+  default branches and exposes no time a commit reached one. A commit whose committer date is earlier than the time it
+  reached the default branch (typically from a pull request merged later, or a cherry-pick) is never listed once the
+  commits stream has passed that date. The pull-request stream still lists the merge of a pull request the user is
+  involved in. `events_list` does not re-scan: a lossless re-scan needs per-commit state the cursor cannot hold.
 - **Notifications need a classic sign-in.** A fine-grained token or a GitHub App cannot read `/notifications`
   ([REST API endpoints for notifications](https://docs.github.com/en/rest/activity/notifications#list-notifications-for-the-authenticated-user)),
   so `events_list` leaves them out for those sign-ins.

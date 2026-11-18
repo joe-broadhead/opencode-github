@@ -27,6 +27,10 @@ All notable changes to this project are documented here. The format follows [Kee
   ordered by it), times are seconds in base 36, and positions are a list: the longest cursor is 799 characters, a walk
   in each search included. **Every cursor a release issued is still read and continued**, with nothing lost or listed
   twice: 0.0.0's to 0.0.2's (refused since 0.0.3), 0.0.3's to 0.0.5's, and 0.0.6's and 0.0.7's. Only a cursor no release could have written is `CURSOR_INVALID`.
+- **A known limit, now stated:** a commit that reaches a default branch after the commits stream has passed its
+  committer date (typically from a pull request merged later, or a cherry-pick) is never listed, with no gap, as in
+  every earlier release. The merge of a pull request the person is involved in is still listed. See the `events_list`
+  docs and the README's Known limits.
 - **Each of `events_list`'s and `probe`'s requests has 60 seconds**, its answer read whole included: past that it stops
   and the call answers `UNAVAILABLE`, with the cursor unchanged. The caller's own abort still stops it at once.
 

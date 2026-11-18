@@ -472,3 +472,52 @@ describe("a crowded second holding results over 32 MB, while other searches page
     expect(mostIdle).toBeLessThanOrEqual(1)
   })
 })
+
+// A known limit, stated in the events_list docs and the README (review of #35, round 3, L1, probe MERGED): GitHub's commit
+// search covers only default branches and exposes no time a commit reached one, so a commit whose committer date is
+// earlier than the time it reached the default branch is never listed once the commits stream has passed that date, with
+// no gap. The merge of a pull request the person is involved in is still listed. This pins it: a change that lists such a
+// commit, or stops listing the merge, fails here, and its docs change with it.
+describe("a commit that reaches the default branch after the commits stream passed its date (a known limit)", () => {
+  const MONDAY = "2026-11-02T09:00:00Z"
+  const TUESDAY = "2026-11-03T09:00:00Z"
+  const commitAt = (sha: string, date: string) => ({ sha, html_url: `https://github.com/octo/app/commit/${sha}`, repository: { full_name: "octo/app" }, author: { login: LOGIN }, commit: { message: `c ${sha}`, author: { name: "O", email: "o@example.test", date }, committer: { date } } })
+  /** The default branch's commits, and the person's pull requests, as GitHub's search answers them now. */
+  const branch = { commits: [commitAt("tuesday", TUESDAY)], pulls: [issue(7, MONDAY, { html_url: "https://github.com/octo/app/pull/7", pull_request: { merged_at: null } } as never)] }
+  const get = async (path: string, query: Record<string, string | number | boolean>): Promise<ApiOutput> => {
+    if (path === "/notifications") return ok([])
+    const q = String(query.q)
+    const name = path === "/search/commits" ? "committer-date" : "updated"
+    const match = new RegExp(`${name}:(\\S+)\\.\\.(\\S+)`).exec(q)!
+    const within = (at: string) => Date.parse(at) >= Date.parse(match[1]!) && Date.parse(at) <= Date.parse(match[2]!)
+    const all =
+      path === "/search/commits"
+        ? branch.commits.filter((c) => within(c.commit.committer.date)).sort((a, b) => Date.parse(a.commit.committer.date) - Date.parse(b.commit.committer.date))
+        : q.includes("is:pull-request")
+          ? branch.pulls.filter((p) => within(p.updated_at))
+          : []
+    return ok({ total_count: all.length, incomplete_results: false, items: all })
+  }
+
+  it("lists the pull request's merge, and never the commit it brought in with an earlier date, with no gap", async () => {
+    const WEDNESDAY = Date.parse("2026-11-04T12:00:00Z")
+    const first = (await listEvents(get, async () => LOGIN, { since: "2026-11-01", limit: 100 }, WEDNESDAY)) as EventsListResult
+    expect(first.events.map((event) => event.external_id)).toEqual(["octo/app#7@2026-11-02T09:00:00.000Z", "octo/app@tuesday"])
+    // Thursday, pull request #7 is merged with a merge commit: Monday's commit reaches the default branch, dated Monday.
+    branch.commits.push(commitAt("monday", MONDAY), commitAt("merge", "2026-11-05T10:00:00Z"))
+    branch.pulls = [issue(7, "2026-11-05T10:00:00Z", { html_url: "https://github.com/octo/app/pull/7", state: "closed", pull_request: { merged_at: "2026-11-05T10:00:00Z" } } as never)]
+    const listed: string[] = []
+    const gaps: unknown[] = []
+    let cursor = first.cursor
+    for (const at of ["2026-11-05T12:00:00Z", "2026-11-06T12:00:00Z"]) {
+      const page = (await listEvents(get, async () => LOGIN, { account: LOGIN, cursor, limit: 100 }, Date.parse(at))) as EventsListResult
+      listed.push(...page.events.map((event) => event.external_id))
+      if (page.gap) gaps.push(page.gap)
+      cursor = page.cursor
+    }
+    // In one second, commits come before pull requests.
+    expect(listed).toEqual(["octo/app@merge", "octo/app#7@2026-11-05T10:00:00.000Z"])
+    expect(listed).not.toContain("octo/app@monday")
+    expect(gaps).toEqual([])
+  })
+})

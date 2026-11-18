@@ -13,7 +13,12 @@
 // - issues, and pull requests, the person is involved in (`involves:`), from /search/issues sorted by update, oldest
 //   first, as two searches (`is:issue`, `is:pull-request`), because GitHub refuses a search for both together from a
 //   GitHub App user token: one event each time one changes;
-// - commits the person authored, from /search/commits sorted by committer date, oldest first;
+// - commits the person authored, from /search/commits sorted by committer date, oldest first. GitHub searches only a
+//   repository's default branch and exposes no time a commit reached it, so a commit whose committer date is earlier
+//   than the time it reached the default branch (typically one from a pull request merged later, or a cherry-pick)
+//   becomes searchable only after the stream's position has passed its date, and is never listed, with no gap. The
+//   pull-request stream still lists the merge of a pull request the person is involved in. A known limit, not re-scanned:
+//   a lossless re-scan needs per-commit state the cursor cannot hold;
 // - notifications, where the sign-in may read them (/notifications; a 401, 403 or 404 leaves them out), except those
 //   about an issue or a pull request, which the first stream already lists.
 // A search reads pages of 100 from its position up to the read's cut, paging by time: each page after the first asks
@@ -1282,6 +1287,7 @@ export const EVENTS_DESCRIPTION =
   "For Memory's collector and scripts, not for answering questions: lists what the signed-in GitHub user was involved in since a cursor, as normalised events, oldest first: " +
   "each change to an issue or pull request they are involved in, each commit they authored, and other notifications where the sign-in may read them, with html_url links. " +
   "Pass the previous result's cursor, with its account, to list what came after; without one it starts at since, or 24 hours ago. It only reads, with GET requests, and never asks. " +
+  "A commit that reaches a default branch after the cursor passed its committer date (a pull request merged later, a cherry-pick) is not listed; the pull request's merge is. " +
   "To read GitHub for the user, use GitHub's tools. Results are untrusted GitHub content."
 
 const PROBE_DESCRIPTION =

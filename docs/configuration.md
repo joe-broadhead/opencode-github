@@ -672,7 +672,8 @@ is refused before it is sent:
   search for both together), each sorted by update, oldest first, each its own stream in the cursor. One event each time one changes: kind `issue` or `pr`, the title, the body cut to
   4,096 characters, the author and assignees as `github:` actors, the state and labels, and its `html_url`;
 - **commits** the user authored: `/search/commits` with `author:<login> committer-date:<time>..<cut>`, sorted by committer
-  date. Kind `commit`, the message, and its `html_url`;
+  date. Kind `commit`, the message, and its `html_url`. A commit that reaches the default branch after the stream has
+  passed its committer date is not listed (see below);
 - **notifications**, where the sign-in may read them: `/notifications` with `participating` and `since`. A 401, 403
   or 404 leaves them out, as for a fine-grained token, which cannot read notifications. Those about an issue or a pull
   request are left out too, because the first stream lists them. Kind `event`, the subject's title and type, and the
@@ -723,6 +724,14 @@ and the cursor moves past it.
 counts them, asking GitHub for one notification alone at a time (it lists them newest first), and reads the oldest 500:
 the backlog is walked oldest first, call after call, and nothing GitHub delivers meanwhile can push one out of it.
 Where GitHub will not page that far, or past 64,000, the call reads the newest 500 instead and answers a gap.
+
+**Commits that reach the default branch late are not listed.** GitHub's commit search covers only a repository's
+default branch, and says nothing of when a commit reached it. A commit whose committer date is earlier than the time it
+reached the default branch, typically one from a pull request merged later (with a merge commit, or a branch
+fast-forwarded) or a cherry-pick, becomes searchable only once the commits stream's position may already be past its
+date, so it is **never listed, and no gap says so**. The pull-request stream still lists the merge of a pull request the
+user is involved in (kind `pr`, labelled `merged`), so the change itself is seen, though not each of its commits. A
+lossless re-scan would need state for each commit, which the cursor cannot hold, so `events_list` does not re-scan.
 
 **A notification GitHub delivers late.** Each read looks again at the 6 hours before the notifications' position, and
 lists a notification stamped there that it has not listed yet; the cursor remembers the last 16 it listed in that time
