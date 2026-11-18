@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.7] - 2026-11-18
+
+### Fixed
+
+- **A search page GitHub cuts is read again at half the size.** A page over the 100,000 bytes `github_api` reads whole is
+  dropped whole and asked for again at half the page size, down to one item (100, 50, 25, 12, 6, 3, 1), and the stream
+  pages on at the size that read whole, so nothing is skipped and nothing is listed twice. Before, a cut page failed the
+  listing with `UNAVAILABLE`, whose next step asked for a smaller `limit`: that asked for the same page and failed the
+  same way. The cursor is a position, never a page number, so a step down does not move it; the page is asked for by the
+  offset its whole pages cover. One result alone over the cap answers `TOO_LARGE`, naming it, and never `UNAVAILABLE`;
+  a notifications page over the cap answers `TOO_LARGE` too.
+
 ## [0.0.6] - 2026-11-17
 
 ### Changed
