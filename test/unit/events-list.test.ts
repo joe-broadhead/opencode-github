@@ -181,20 +181,21 @@ describe("GitHub's answers as events", () => {
   it("makes an issue or a pull request change one event, with its html_url, state, labels and people", () => {
     const pr = issueItem(ISSUES[1], LOGIN)!
     expect(pr.event).toMatchObject({
-      kind: "pr",
+      kind: "event",
       external_id: "octo/app#2@2026-10-02T10:00:00.000Z",
       thread: "github:octo/app#2",
       title: "octo/app#2: Item 2",
       url: "https://github.com/octo/app/pull/2",
-      labels: ["merged", "needs-review"],
+      labels: ["pr", "merged", "needs-review"],
       actors: [{ role: "author", id: "github:someone-else" }, { role: "assignee", id: `github:${LOGIN}` }],
     })
-    expect(issueItem(ISSUES[0], LOGIN)!.event.kind).toBe("issue")
+    // The one declared kind, with what it was kept in the labels.
+    expect(issueItem(ISSUES[0], LOGIN)!.event).toMatchObject({ kind: "event", labels: ["issue", "open", "needs-review"] })
     expect(issueItem({ number: 1 }, LOGIN)).toBeUndefined()
   })
 
   it("makes a commit one event at its committer date, with a mailto: author when GitHub links no login", () => {
-    expect(commitItem(COMMITS[0], LOGIN)!.event).toMatchObject({ kind: "commit", occurred_at: "2026-10-01T09:00:00.000Z", title: "octo/app: Fix the parser", actors: [{ role: "author", id: `github:${LOGIN}` }] })
+    expect(commitItem(COMMITS[0], LOGIN)!.event).toMatchObject({ kind: "event", labels: ["commit"], occurred_at: "2026-10-01T09:00:00.000Z", title: "octo/app: Fix the parser", actors: [{ role: "author", id: `github:${LOGIN}` }] })
     expect(commitItem(COMMITS[1], LOGIN)!.event.actors).toEqual([{ role: "author", id: "mailto:octo@example.test", name: "Octo Person" }])
   })
 
@@ -216,6 +217,32 @@ describe("events_list", () => {
 
   it("keeps the events_list contract over a synthetic GitHub", async () => {
     await assertEventsListConformance(list(), { ...FINAL, source: SOURCE, owner: OWNER, since: SINCE, expected: EXPECTED, pageSize: 2 })
+  })
+
+  // A consumer confirms one kind from the declaration (`sources.items[].reads`) and refuses every event of another, so
+  // every event a page emits must be that one kind, for every item declared to read events.
+  it("emits only the kind its declaration reads, for every declared event source", async () => {
+    const items = (JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { sources: { items: { id: string; kind: string; reads?: string; input?: Record<string, unknown> }[] } }).sources.items
+    let checked = 0
+    for (const item of items) {
+      if (item.kind !== "events") {
+        expect(item.reads, `${item.id} is not an events source, so it declares no kind to read`).toBeUndefined()
+        continue
+      }
+      checked++
+      const result = (await list()({ ...item.input, since: SINCE, limit: PAGE.max })) as EventsListResult
+      const kinds = [...new Set(result.events.map((event) => event.kind))]
+      expect(result.events.length, `${item.id} listed no events to check`).toBeGreaterThan(0)
+      expect(kinds.filter((kind) => kind !== item.reads), `${item.id} reads ${item.reads}, but its events are ${kinds.join(", ")}`).toEqual([])
+    }
+    expect(checked).toBe(1)
+  })
+
+  // The conformance kit's own check for the same rule: a fixture naming `kinds` refuses an event of another kind.
+  it("keeps the conformance kit's kinds check, every event the kind its declaration reads", async () => {
+    const items = (JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { sources: { items: { id: string; kind: string; reads?: string }[] } }).sources.items
+    const activity = items.find((item) => item.id === "github.activity")!
+    await assertEventsListConformance(list(), { ...FINAL, source: SOURCE, owner: OWNER, since: SINCE, expected: EXPECTED, pageSize: 2, kinds: [activity.reads!] })
   })
 
   // GitHub answering three results a page, fewer than asked: a search pages by time, reading each page's last second
@@ -261,9 +288,11 @@ describe("events_list", () => {
   it("lists issues and pull requests from two searches, one is:issue and one is:pull-request, as a GitHub App token needs", async () => {
     const fake = github()
     const result = (await list(fake)({ since: SINCE, limit: PAGE.max })) as EventsListResult
-    const kinds = new Set(result.events.map((event) => event.kind))
-    expect(kinds).toEqual(new Set(["issue", "pr", "commit", "event"]))
-    expect(result.events.find((event) => event.kind === "pr")!.external_id).toBe("octo/app#2@2026-10-02T10:00:00.000Z")
+    // The one kind the source declares, which a consumer confirms; what each event was stays in its labels.
+    expect(new Set(result.events.map((event) => event.kind))).toEqual(new Set(["event"]))
+    expect(result.events.find((event) => event.external_id === "octo/app#2@2026-10-02T10:00:00.000Z")!.labels).toContain("pr")
+    expect(result.events.find((event) => event.external_id === "octo/app#1@2026-10-01T09:00:00.000Z")!.labels).toContain("issue")
+    expect(result.events.find((event) => event.external_id === "octo/app@a1")!.labels).toContain("commit")
     const searches = fake.calls.filter((call) => call.path === "/search/issues").map((call) => String(call.query.q))
     expect(searches.every((q) => /^is:(issue|pull-request) /.test(q))).toBe(true)
     // The fake refuses a search without is:, as GitHub does for a GitHub App user token, and none was sent.

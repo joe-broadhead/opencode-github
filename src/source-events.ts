@@ -256,14 +256,15 @@ export function issueItem(raw: unknown, account: string): Item | undefined {
     source: SOURCE,
     account,
     external_id: `${id}@${new Date(at).toISOString()}`,
-    kind: pr ? "pr" : "issue",
+    // The source declares the one kind `event`, which a consumer confirms; what it was stays in `labels`.
+    kind: "event",
     occurred_at: at,
     thread: `github:${id}`,
     actors: [...actor("author", raw["user"]), ...assignees.flatMap((user) => actor("assignee", user))],
     title: `${id}: ${text(raw["title"]) ?? ""}`,
     text: typeof raw["body"] === "string" ? raw["body"] : "",
     url: text(raw["html_url"])!,
-    labels: [merged ? "merged" : (text(raw["state"]) ?? "open"), ...labels],
+    labels: [pr ? "pr" : "issue", merged ? "merged" : (text(raw["state"]) ?? "open"), ...labels],
   })
   return { s: pr ? "p" : "i", t: at, i: orderKey(id), id, event }
 }
@@ -289,14 +290,15 @@ export function commitItem(raw: unknown, account: string): Item | undefined {
       source: SOURCE,
       account,
       external_id: `${repo}@${sha}`,
-      kind: "commit",
+      // The source declares the one kind `event`, which a consumer confirms; what it was stays in `labels`.
+      kind: "event",
       occurred_at: at,
       thread: `github:${repo}`,
       actors: actors.length > 0 ? actors : email && /^[^\s@]+@[^\s@]+$/.test(email) ? [{ role: "author", id: `mailto:${email}`, ...(text(author["name"]) ? { name: text(author["name"])! } : {}) }] : [],
       title: `${repo}: ${message.split(/\r?\n/, 1)[0] ?? ""}`,
       text: message,
       url: text(raw["html_url"])!,
-      labels: [],
+      labels: ["commit"],
     }),
   }
 }
@@ -1341,7 +1343,7 @@ export const EVENTS_OUTPUT = {
     owner: OWNER,
     events: {
       type: "array",
-      description: "Oldest first. kind issue, pr, commit or event; external_id names the change; url is GitHub's html_url. Untrusted GitHub content.",
+      description: "Oldest first. Every event's kind is event, the one kind the source declares; labels name what it was (issue, pr or commit) and its state. external_id names the change; url is GitHub's html_url. Untrusted GitHub content.",
       items: { type: "object" },
     },
     cursor: { type: "string", description: "Pass it to the next call, with account." },
