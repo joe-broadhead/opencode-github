@@ -6,7 +6,7 @@ Set options in the plugin's entry in `opencode.json`:
 {
   "plugins": [
     {
-      "package": "github:joe-broadhead/opencode-github#v0.0.8",
+      "package": "github:joe-broadhead/opencode-github#v0.0.9",
       "options": {
         "toolsets": ["context", "repos", "issues", "pull_requests"],
         "access": "ask-changes",
@@ -22,7 +22,7 @@ Every option is optional. An unknown option or a wrong value
 stops the plugin from loading with an error that names the option, for example:
 
 ```text
-OPTIONS_INVALID: Invalid plugin option "toolset": this option does not exist. Next step: Fix the options for github:joe-broadhead/opencode-github#v0.0.8 in opencode.json.
+OPTIONS_INVALID: Invalid plugin option "toolset": this option does not exist. Next step: Fix the options for github:joe-broadhead/opencode-github#v0.0.9 in opencode.json.
 ```
 
 ## Options
@@ -628,7 +628,7 @@ see [Scripting](scripting.md#api).
 ## Events list
 
 `github_events_list` (`tools.github.events_list` in Code Mode, and the tools RPC method `events_list`) is GitHub's
-source under the shared source contract, `@we-the-rebel-alliance/source-contract` v0.2.0 (see [Sources](#sources)). It
+source under the shared source contract, `@we-the-rebel-alliance/source-contract` v0.3.0 (see [Sources](#sources)). It
 lists what the signed-in user was involved in since a cursor, as normalised events, oldest first. It only reads, never
 asks and calls no model, so Memory's collector can run it unattended.
 
@@ -758,10 +758,27 @@ is signed in, `{ source: "github", account, owner, trust }`, with the same accou
 it reads. It makes one `GET /user`, asserted as `github_probe` on `GET /user`, to confirm the token still belongs to that
 login, and refuses another account with `ACCOUNT_MISMATCH`.
 
+**`github.notifications`, the list snapshot.** The tools RPC method `events_list` called with `{ "source": "github",
+"list": "notifications" }` answers the contract's `list` output for a consumer that renders one: `data` is `{ items,
+editable: false }`, the latest 50 notifications GitHub's inbox holds, newest first, read or unread, once each, each
+`{ id, text, note? }` with the subject's title as `text` and the repository and the reason as `note`. The model tool
+`github_events_list` does **not** take `list` and never answers a list: a list snapshot is for a consumer, not an agent.
+It is one `GET /notifications` with `all` and `per_page` 50, through the same client as the activity feed and not a
+second one, and asserts `github_events_list` on `GET /notifications` only. A notification about an issue or a pull
+request is listed, unlike the activity feed, which leaves it to its issue stream; a title that holds a secret is left
+out, screened whole before it is cut; a sign-in that may not read notifications (a 401, 403 or 404) answers an empty
+list. An answer over 32 MB answers `TOO_LARGE`, as the activity feed's notifications do, and a `list` this plugin does
+not have, or another `source`, answers `SOURCE_UNKNOWN`. The answer stays inside the source's 64 KB (`maxBytes`): whole
+items are dropped from its end when 50 cannot fit, and `shortened: true` says so. A consumer may reuse it for 15
+minutes (`maxAgeSec`).
+
 ## Sources
 
-`package.json` declares the plugin's one source in its top-level `sources` key, under source-contract version 1, so a
-consumer (Memory, jelly, Artifacts) reads it from the installed package:
+`package.json` declares the plugin's sources in its top-level `sources` key, under source-contract version 1, so a
+consumer (Memory, jelly, Artifacts) reads them from the installed package. `github.activity` is the events feed.
+`github.notifications` is a list snapshot of the latest notifications, read through the tools RPC method `events_list`
+with `{ "source": "github", "list": "notifications" }`, and its grant is `github_events_list` on `GET /notifications`
+only. `github.activity` is:
 
 | Key | Value |
 | --- | --- |
@@ -844,7 +861,7 @@ To use your own OAuth App, register it under **GitHub Settings → Developer set
 tick **Enable Device Flow**, do not generate a client secret, and set its client ID:
 
 ```json
-{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.8", "options": { "clientId": "<your OAuth App client ID>" } }] }
+{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.9", "options": { "clientId": "<your OAuth App client ID>" } }] }
 ```
 
 `scopes` changes what device sign-in asks for, for example `["public_repo"]` for public repositories only. Scopes
@@ -880,7 +897,7 @@ tokens** on. Then:
   account, and links the install page.
 
 ```json
-{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.8", "options": { "clientId": "<the GitHub App's client ID>", "appSlug": "<its URL name>" } }] }
+{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.9", "options": { "clientId": "<the GitHub App's client ID>", "appSlug": "<its URL name>" } }] }
 ```
 
 ## `host` (GitHub Enterprise Server)
@@ -897,7 +914,7 @@ GitHub's hosted MCP server does not support GitHub Enterprise Server. With `host
 - the status names the server and says that only `github_api` works.
 
 ```json
-{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.8", "options": { "host": "github.example.com", "clientId": "<the server's OAuth App client ID>" } }] }
+{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.9", "options": { "host": "github.example.com", "clientId": "<the server's OAuth App client ID>" } }] }
 ```
 
 For GitHub's MCP tools on the server, run GitHub's `github-mcp-server` yourself as a local MCP server with
@@ -933,7 +950,7 @@ passed through unchanged.
 
 | Code | When | Next step |
 | --- | --- | --- |
-| `OPTIONS_INVALID` | An option is unknown or has a wrong value. The message names the option. | Fix the options for github:joe-broadhead/opencode-github#v0.0.8 in opencode.json. |
+| `OPTIONS_INVALID` | An option is unknown or has a wrong value. The message names the option. | Fix the options for github:joe-broadhead/opencode-github#v0.0.9 in opencode.json. |
 | `HOST_UNTESTED` | OpenCode is outside `>=2.2.3 <2.4.0` and `allowUntestedHost` is not set. | Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true. |
 | `SKILLS_INVALID` | A skill file shipped with the plugin is missing or malformed. | Reinstall the plugin. |
 | `STATUS_UNAVAILABLE` | OpenCode did not report the `github` server's state. | Try again in a few seconds; if it persists, restart OpenCode. |
@@ -971,11 +988,11 @@ passed through unchanged.
 | `API_REDIRECT_INSECURE` | GitHub redirected to a non-HTTPS address. | Try again later. |
 | `API_REDIRECTED` | GitHub redirected a change, which is never followed. The message names the new path. | Call github_api again with path <the new path>, so the change is checked for that path. |
 | `API_REDIRECT_OFF_HOST` | GitHub redirected a read outside its API. | For job logs, call get_job_logs with return_content: true; for other files, pass download: { path }, which follows GitHub's storage redirects without the token. A script gets the get_job_logs method instead, and with `host` the step names only download. |
-| `INPUT_INVALID` | The `events_list` or `probe` input breaks the source contract, or a listing with a cursor names no account. | Pass only since, cursor, limit (1 to 500), account and source, as the tool's schema describes; pass account with a cursor. |
-| `SOURCE_UNKNOWN` | `events_list` or `probe` names a source the plugin does not have. | Leave source out, or pass github. |
+| `INPUT_INVALID` | The `events_list` or `probe` input breaks the source contract, or a listing with a cursor names no account. | Pass only since, cursor, limit (1 to 500), list, account and source, as the tool's schema describes; pass account with a cursor. |
+| `SOURCE_UNKNOWN` | `events_list` or `probe` names a source, or a `list`, the plugin does not have. | Leave source out, or pass github; pass list `notifications` with it. |
 | `CURSOR_INVALID` | The cursor was not issued by GitHub's `events_list` for this account and its signed-in user, or was changed. | Call events_list without a cursor, with since, to start again. |
 | `ACCOUNT_MISMATCH` | `events_list` or `probe` names another account than the signed-in login, or a cursor issued for another account. | Pass the account the cursor was issued for, or sign in to GitHub as that account; probe names the signed-in login. |
-| `TOO_LARGE` | A notifications answer for `events_list` is over 32 MB. A search answer over it is read in smaller pages instead. | Nothing in `events_list` changes it: the answer is over the bytes it reads whole. |
+| `TOO_LARGE` | A notifications answer for `events_list` or its `notifications` list is over 32 MB. A search answer over it is read in smaller pages instead. | Nothing in `events_list` changes it: the answer is over the bytes it reads whole. |
 | `UNAVAILABLE` | A search, notifications or `GET /user` read for `events_list` or `probe` failed or took more than 60 seconds, or the sign-in names no login. | Call it again with the same cursor; if it keeps failing, run /github-status. |
 
 A script's calls through the tools RPC, `github.platform.tools`, have more codes for sessions, permissions and the

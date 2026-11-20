@@ -64,6 +64,7 @@ import {
   parseProbeInput,
   probeResult,
   screenEvents,
+  secretKinds,
   startTime,
 } from "@we-the-rebel-alliance/source-contract/events"
 import type { OwnedMethod, ToolCall } from "@we-the-rebel-alliance/source-contract/tools-rpc"
@@ -89,6 +90,10 @@ export const PROBE_ACTION = `${SERVER_NAME}_${PROBE}`
  */
 export const EVENTS_READS = ["GET /search/issues", "GET /search/commits", "GET /notifications"] as const
 const EVENTS_SCOPE: ApiScope = { action: EVENTS_ACTION, resources: EVENTS_READS }
+/** The list snapshot `github.notifications`. One GET /notifications, the same client as the activity feed. */
+export const NOTIFICATIONS_LIST = "notifications"
+const LIST_CAP = 50
+const LIST_SCOPE: ApiScope = { action: EVENTS_ACTION, resources: ["GET /notifications"] }
 /** The only request probe sends, asserted as PROBE_ACTION on its resource: who the token belongs to. */
 export const PROBE_READS = ["GET /user"] as const
 const PROBE_SCOPE: ApiScope = { action: PROBE_ACTION, resources: PROBE_READS }
@@ -1314,6 +1319,18 @@ export const EVENTS_INPUT = {
   },
 } as const
 
+/**
+ * The tools RPC method's input: the model tool's, plus the list snapshot's name. No model sees `list`: the tool's schema
+ * is EVENTS_INPUT, and a list answer is not an events page, so only a consumer that binds the snapshot asks for it.
+ */
+export const EVENTS_METHOD_INPUT = {
+  ...EVENTS_INPUT,
+  properties: {
+    ...EVENTS_INPUT.properties,
+    list: { type: "string", enum: [NOTIFICATIONS_LIST], description: "A list snapshot instead of events: notifications, the latest ones the sign-in may read. Pass source github." },
+  },
+} as const
+
 export const EVENTS_OUTPUT = {
   type: "object",
   additionalProperties: false,
@@ -1348,6 +1365,50 @@ export const EVENTS_OUTPUT = {
   },
 } as const
 
+/**
+ * The list snapshot's answer, as the contract's snapshot envelope and its registry's `list` output. It is the tools RPC
+ * method's second output: the host validates every method answer against the method's declared output, so an events-only
+ * schema would refuse it `rpc.invalid_output`. `shortened` says whole items were dropped to stay in `maxBytes`.
+ */
+export const LIST_ANSWER = {
+  type: "object",
+  additionalProperties: false,
+  required: ["source", "account", "data", "asOf", "trust"],
+  properties: {
+    source: { type: "string", const: SOURCE },
+    account: { type: "string", description: "The signed-in GitHub login, lowercase." },
+    data: {
+      type: "object",
+      additionalProperties: false,
+      required: ["items", "editable"],
+      properties: {
+        items: {
+          type: "array",
+          maxItems: LIST_CAP,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["id", "text"],
+            properties: {
+              id: { type: "string", minLength: 1, maxLength: 128 },
+              text: { type: "string", maxLength: 200 },
+              done: { type: "boolean" },
+              note: { type: "string", maxLength: 200 },
+            },
+          },
+        },
+        editable: { type: "boolean", const: false },
+      },
+    },
+    asOf: { type: "string", description: "When the list was read, UTC ISO." },
+    trust: { type: "string", const: "untrusted" },
+    shortened: { type: "boolean", description: "True when whole items were dropped from the end to stay within maxBytes." },
+  },
+} as const
+
+/** The tools RPC method's output: an events page, or the list snapshot's answer, whichever the input asked for. */
+export const EVENTS_METHOD_OUTPUT = { anyOf: [EVENTS_OUTPUT, LIST_ANSWER] } as const
+
 const PROBE_INPUT = {
   type: "object",
   additionalProperties: false,
@@ -1380,6 +1441,71 @@ export interface EventsDeps {
   readonly now?: () => number
   /** READ_DEADLINE_MS unless a test sets a shorter one. */
   readonly deadlineMs?: number
+}
+
+/** True when the call asks for the notifications list snapshot, including a list value this plugin does not have. */
+export const isNotificationsList = (input: unknown): boolean => record(input) && "list" in input
+
+/** The most bytes the list answer may hold: the source's declared `maxBytes`. */
+export const LIST_MAX_BYTES = 65_536
+
+/** A string's UTF-8 bytes, as JSON carries it. */
+const jsonBytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length
+
+/**
+ * The latest notifications as the contract's `list` output, for a consumer that binds `github.notifications` and does
+ * not know GitHub. One `GET /notifications` through the same client as `events_list`, not a second one, read whole up
+ * to the same EVENTS_MAX_BYTES the activity feed's notifications read takes: the source's declared `maxBytes` bounds
+ * what this answer holds, not what GitHub answers. Every notification is listed, read or unread, as GitHub's inbox
+ * holds them, not only threads the person participates in, newest first and once each. A title that holds a secret is
+ * left out, screened whole before it is cut. The answer stays inside LIST_MAX_BYTES by dropping whole items from its
+ * end, which it says with `shortened: true`: it never cuts an item's bytes.
+ */
+export async function listNotifications(get: Get, identity: Identity, input: unknown, now: number) {
+  const data = record(input) ? input : {}
+  if (data["list"] !== NOTIFICATIONS_LIST) {
+    fail("SOURCE_UNKNOWN", `A list read names "${NOTIFICATIONS_LIST}", not "${text(data["list"]) ?? ""}".`, `Pass "list" as "${NOTIFICATIONS_LIST}".`)
+  }
+  if (data["source"] !== undefined && data["source"] !== SOURCE) {
+    fail("SOURCE_UNKNOWN", `This plugin has no list for "${text(data["source"]) ?? ""}".`, `Pass source "${SOURCE}" with list "${NOTIFICATIONS_LIST}".`)
+  }
+  const asked = text(data["account"])?.toLowerCase()
+  const login = await signedIn(identity, EVENTS_TOOL_NAME)
+  const account = accountOf(login)
+  if (asked !== undefined && asked !== account) {
+    fail("ACCOUNT_MISMATCH", `GitHub is signed in to another account than "${text(data["account"])}".`, `Sign in to GitHub as that account (/connect, GitHub), or read as "${account}", the signed-in login.`)
+  }
+  const page = await list(get, "/notifications", { all: true, per_page: LIST_CAP }, (body) => body, [401, 403, 404, 422], EVENTS_MAX_BYTES)
+  if (page?.truncated === true) {
+    fail("TOO_LARGE", "GitHub's answer to /notifications is over 32 MB, the most the list reads whole.", "Nothing in the list read changes it: the answer is over the bytes it reads whole.")
+  }
+  const seen = new Set<string>()
+  const found: { at: number; item: { id: string; text: string; note?: string } }[] = []
+  for (const raw of page?.items ?? []) {
+    if (!record(raw)) continue
+    const id = text(raw["id"])?.slice(0, 128)
+    const subject = record(raw["subject"]) ? raw["subject"] : {}
+    const title = text(subject["title"]) ?? text(subject["type"])
+    const at = time(raw["updated_at"])
+    if (id === undefined || title === undefined || at === undefined || seen.has(id)) continue
+    // The whole title, whitespace collapsed and control characters dropped, is screened before any of it is cut.
+    const full = title.replace(/\s+/g, " ").replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
+    if (full === "" || secretKinds(full).length > 0) continue
+    seen.add(id)
+    const repository = record(raw["repository"]) ? raw["repository"] : {}
+    const note = [text(repository["full_name"]), text(raw["reason"])?.replaceAll("_", " ")].filter((part) => part !== undefined).join(", ").replace(/[\u0000-\u001f\u007f-\u009f]/g, "").slice(0, 200)
+    found.push({ at, item: { id, text: full.slice(0, 200), ...(note === "" ? {} : { note }) } })
+  }
+  // Newest first, then the cap: GitHub lists notifications by update already, and this holds across pages.
+  const items = found.sort((a, b) => b.at - a.at).slice(0, LIST_CAP).map((row) => row.item)
+  const answer = { source: SOURCE, account, data: { items, editable: false as const }, asOf: new Date(now).toISOString(), trust: "untrusted" as const }
+  // Whole items, from the end, never an item's bytes: a pathological page cannot answer TOO_LARGE from the consumer.
+  let shortened = false
+  while (items.length > 0 && jsonBytes({ ...answer, shortened }) > LIST_MAX_BYTES) {
+    items.pop()
+    shortened = true
+  }
+  return shortened ? { ...answer, shortened } : answer
 }
 
 /** Asserts a method's own action for the caller, as the calling tool, before anything else. */
@@ -1432,6 +1558,13 @@ export async function runEvents(deps: EventsDeps, input: unknown, call: Call): P
   return listEvents(getter(deps, call, EVENTS_SCOPE, "Call events_list again with the same cursor; if GitHub keeps answering slowly, run /github-status."), deps.identity, input, (deps.now ?? Date.now)(), deps.host)
 }
 
+/** `events_list` for either path: the notifications list, or the activity feed. The list asserts the same action, on `GET /notifications` only. */
+export async function runSource(deps: EventsDeps, input: unknown, call: Call): Promise<EventsListResult | Awaited<ReturnType<typeof listNotifications>>> {
+  if (!isNotificationsList(input)) return runEvents(deps, input, call)
+  await assertAction(deps, EVENTS_ACTION, call)
+  return listNotifications(getter(deps, call, LIST_SCOPE, "Call events_list again; if GitHub keeps answering slowly, run /github-status."), deps.identity, input, (deps.now ?? Date.now)())
+}
+
 /** probe's one run: asserts github_probe for the caller, then its one GET /user under PROBE_SCOPE. */
 export async function runProbe(deps: EventsDeps, input: unknown, call: Call): Promise<ProbeResult> {
   await assertAction(deps, PROBE_ACTION, call)
@@ -1478,9 +1611,9 @@ export function eventsMethod(deps: EventsDeps): OwnedMethod {
     name: EVENTS_TOOL_NAME,
     action: EVENTS_ACTION,
     description: EVENTS_DESCRIPTION,
-    input: EVENTS_INPUT,
-    output: EVENTS_OUTPUT,
-    run: (input: unknown, call: ToolCall) => runEvents(deps, input, call),
+    input: EVENTS_METHOD_INPUT,
+    output: EVENTS_METHOD_OUTPUT,
+    run: (input: unknown, call: ToolCall) => runSource(deps, input, call),
   }
 }
 

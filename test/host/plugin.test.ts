@@ -511,6 +511,25 @@ describe(`the tools RPC on OpenCode ${SDK_VERSION}`, () => {
     expect(JSON.stringify(result)).not.toContain(FIXTURE_PAT)
   })
 
+  // The list snapshot rides this method with a second, declared output: the host validates every method answer, so an
+  // events-only schema refused it `rpc.invalid_output` before there was one.
+  test("a script reads the notifications list through the tools RPC, and the answer is the list's own shape", async () => {
+    const sessionID = await session(host)
+    const before = host.fake.requests.length
+    const listed = await script(host, "events_list", { sessionID, input: { source: "github", list: "notifications" } })
+    expect(listed).toMatchObject({
+      value: {
+        source: "github",
+        account: expect.stringMatching(/^[a-z0-9-]+$/),
+        data: { items: [{ id: "1", text: "A notification", note: "octo/hello, subscribed" }], editable: false },
+        trust: "untrusted",
+      },
+    })
+    expect(listed.value.shortened).toBeUndefined()
+    expect(listed.value.events).toBeUndefined()
+    expect(host.fake.requests.slice(before).map((request) => `${request.method} ${request.path}`)).toEqual(["GET /notifications"])
+  })
+
   test("api reads GitHub's REST and GraphQL API with the same sign-in, and refuses a write before any request", async () => {
     const sessionID = await session(host, "build", [allow("github_api")])
     const description = await script(host, "describe", {})

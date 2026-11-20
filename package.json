@@ -1,6 +1,6 @@
 {
   "name": "@joe-broadhead/opencode-github",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "private": true,
   "description": "Unofficial OpenCode plugin for GitHub",
   "keywords": [
@@ -70,7 +70,7 @@
     "@opentui/solid": "0.8.0",
     "@types/bun": "1.4.4",
     "@types/node": "24.19.2",
-    "@we-the-rebel-alliance/source-contract": "github:we-the-rebel-alliance/source-contract#v0.2.0",
+    "@we-the-rebel-alliance/source-contract": "github:we-the-rebel-alliance/source-contract#v0.3.0",
     "babel-preset-solid": "1.9.16",
     "esbuild": "0.28.2",
     "solid-js": "1.9.18",
@@ -150,6 +150,37 @@
           "class": "free"
         },
         "maxBytes": 900000,
+        "urlHosts": [
+          "github.com"
+        ]
+      },
+      {
+        "id": "github.notifications",
+        "kind": "snapshot",
+        "tool": "events_list",
+        "input": {
+          "source": "github",
+          "list": "notifications"
+        },
+        "output": "list",
+        "accounts": {
+          "named": false
+        },
+        "permission": {
+          "tool": "github_events_list",
+          "rules": [
+            {
+              "action": "github_events_list",
+              "resource": "GET /notifications"
+            }
+          ]
+        },
+        "private": true,
+        "cost": {
+          "class": "free"
+        },
+        "maxAgeSec": 900,
+        "maxBytes": 65536,
         "urlHosts": [
           "github.com"
         ]

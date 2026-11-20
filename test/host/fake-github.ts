@@ -125,6 +125,13 @@ export function startFakeGitHub(tools: readonly FakeTool[] = FAKE_TOOLS): FakeGi
       if (path === "/user" && request.method === "GET") {
         return login ? Response.json({ login, id: 1 }) : Response.json({ message: "Bad credentials" }, { status: 401 })
       }
+      // The notifications list's one read: the latest notification, newest first, as GitHub's inbox answers.
+      if (path === "/notifications" && request.method === "GET") {
+        if (!login) return Response.json({ message: "Bad credentials" }, { status: 401 })
+        return Response.json([
+          { id: "1", reason: "subscribed", updated_at: "2026-11-08T10:00:00Z", subject: { title: "A notification", type: "Release" }, repository: { full_name: "octo/hello", html_url: "https://github.com/octo/hello" } },
+        ])
+      }
       // GitHub's REST API for github_api: any repository path answers, writes with 201.
       if (path.startsWith("/repos/")) {
         if (!login) return Response.json({ message: "Bad credentials" }, { status: 401 })
