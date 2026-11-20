@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Every event `github.activity` lists is the one kind its declaration reads, `event`.** `events_list` emitted
+  `issue`, `pr` or `commit`, while `sources.items[0].reads` declares `event`; a consumer confirms exactly the declared
+  kind and refused every other event at ingest, so a first read stored nothing and moved its cursor past the events.
+  The three emitters now make every event kind `event`, and keep what it was in the event's `labels`: `issue` or `pr`
+  first, then the state and GitHub's labels, and `commit` for a commit. A notification's kind was already `event`.
+  `github.activity`'s declaration, and so its descriptor hash, is unchanged: only the events it lists change. A unit
+  test reads every declared item's `reads` and asserts every event it lists is that kind, and the conformance kit's
+  `kinds` check runs on the same declaration.
+
 ## [0.0.9] - 2026-11-20
 
 ### Added

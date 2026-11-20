@@ -669,15 +669,19 @@ is refused before it is sent:
 
 - **issues and pull requests** the user is involved in: `/search/issues` twice, with `is:issue involves:<login>
   updated:<time>..<cut>` and with `is:pull-request involves:<login> updated:<time>..<cut>` (GitHub refuses a GitHub App token's
-  search for both together), each sorted by update, oldest first, each its own stream in the cursor. One event each time one changes: kind `issue` or `pr`, the title, the body cut to
+  search for both together), each sorted by update, oldest first, each its own stream in the cursor. One event each time one changes: its kind is the one the source declares, `event`, with `issue` or `pr` in `labels` alongside the state and labels, the title, the body cut to
   4,096 characters, the author and assignees as `github:` actors, the state and labels, and its `html_url`;
 - **commits** the user authored: `/search/commits` with `author:<login> committer-date:<time>..<cut>`, sorted by committer
-  date. Kind `commit`, the message, and its `html_url`. A commit that reaches the default branch after the stream has
+  date. Its kind is `event`, with `commit` in `labels`, the message, and its `html_url`. A commit that reaches the default branch after the stream has
   passed its committer date is not listed (see below);
 - **notifications**, where the sign-in may read them: `/notifications` with `participating` and `since`. A 401, 403
   or 404 leaves them out, as for a fine-grained token, which cannot read notifications. Those about an issue or a pull
   request are left out too, because the first stream lists them. Kind `event`, the subject's title and type, and the
   repository's link.
+
+Every event's kind is `event`, the one kind `github.activity` declares in `reads`: a consumer confirms that kind from the
+declaration and refuses every event of another, so what an event was stays in its `labels` (`issue`, `pr` or `commit`,
+then its state and GitHub's labels). A notification's labels are its subject's type and the reason.
 
 The cursor holds a position in each stream. The result merges them by time, and lists only what no stream can still put
 before it. An event is listed once it is 5 minutes old, because GitHub's search lags a little behind a change. **A read
@@ -730,7 +734,7 @@ default branch, and says nothing of when a commit reached it. A commit whose com
 reached the default branch, typically one from a pull request merged later (with a merge commit, or a branch
 fast-forwarded) or a cherry-pick, becomes searchable only once the commits stream's position may already be past its
 date, so it is **never listed, and no gap says so**. The pull-request stream still lists the merge of a pull request the
-user is involved in (kind `pr`, labelled `merged`), so the change itself is seen, though not each of its commits. A
+user is involved in (kind `event`, labelled `pr` and `merged`), so the change itself is seen, though not each of its commits. A
 lossless re-scan would need state for each commit, which the cursor cannot hold, so `events_list` does not re-scan.
 
 **A notification GitHub delivers late.** Each read looks again at the 6 hours before the notifications' position, and
@@ -783,7 +787,7 @@ only. `github.activity` is:
 | Key | Value |
 | --- | --- |
 | `id` | `github.activity` |
-| `kind`, `reads` | `events`, `event` (its events are kinds `issue`, `pr`, `commit` and `event`) |
+| `kind`, `reads` | `events`, `event`: every event's kind is `event`, the one kind a consumer confirms; its `labels` name what it was (`issue`, `pr` or `commit`) and its state |
 | `tool`, `input` | `events_list`, `{ "source": "github" }` |
 | `accounts.named` | `false`: one sign-in |
 | `permission.events` | `github_events_list` |
