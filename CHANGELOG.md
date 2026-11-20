@@ -6,11 +6,14 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
-- `github.notifications`, a list snapshot of the latest notifications the sign-in may read: `events_list` with `list`
-  `notifications` answers the contract's `list` output, the latest 50 GitHub's inbox holds, newest first, read or
-  unread, each with the subject's title and, as its note, the repository and the reason. It is one `GET /notifications`
-  through the same client as `github.activity`, not a second one, read whole up to 32 MB as the activity feed's
-  notifications are; a title that holds a secret is left out. The contract pin is unchanged.
+- `github.notifications`, a list snapshot of the latest notifications the sign-in may read, for a consumer and not an
+  agent: the tools RPC method `events_list` with `list` `notifications` answers the contract's `list` output, the latest
+  50 GitHub's inbox holds, newest first, read or unread, once each, with the subject's title as the text and the
+  repository and reason as the note. It is one `GET /notifications` through the same client as `github.activity`, not a
+  second one, read whole up to 32 MB as the activity feed's notifications are. A title that holds a secret is screened
+  whole and left out before anything is cut. The answer stays inside the source's 64 KB by dropping whole items, marked
+  `shortened: true`. The tools RPC method declares both answers, the events page and the list, so the host accepts the
+  list; `github_events_list`, the model's tool, keeps its events-only input and output, so a model sees no change.
 
 ### Changed
 

@@ -758,24 +758,27 @@ is signed in, `{ source: "github", account, owner, trust }`, with the same accou
 it reads. It makes one `GET /user`, asserted as `github_probe` on `GET /user`, to confirm the token still belongs to that
 login, and refuses another account with `ACCOUNT_MISMATCH`.
 
-**`github.notifications`, the list snapshot.** The same `events_list` read with `{ "source": "github", "list":
-"notifications" }` answers the contract's `list` output for a consumer that renders one: `data` is `{ items, editable:
-false }`, the latest 50 notifications GitHub's inbox holds, newest first, read or unread, each `{ id, text, note? }`
-with the subject's title as `text` and the repository and the reason as `note`. It is one `GET /notifications` with
-`all` and `per_page` 50, through the same client as the activity feed and not a second one, and asserts
-`github_events_list` on `GET /notifications` only. A notification about an issue or a pull request is listed, unlike
-the activity feed, which leaves it to its issue stream; a title that holds a secret is left out; a sign-in that may not
-read notifications (a 401, 403 or 404) answers an empty list. An answer over 32 MB answers `TOO_LARGE`, as the activity
-feed's notifications do, and a `list` this plugin does not have, or another `source`, answers `SOURCE_UNKNOWN`. The
-answer is at most the source's 64 KB (`maxBytes`), and a consumer may reuse it for 15 minutes (`maxAgeSec`).
+**`github.notifications`, the list snapshot.** The tools RPC method `events_list` called with `{ "source": "github",
+"list": "notifications" }` answers the contract's `list` output for a consumer that renders one: `data` is `{ items,
+editable: false }`, the latest 50 notifications GitHub's inbox holds, newest first, read or unread, once each, each
+`{ id, text, note? }` with the subject's title as `text` and the repository and the reason as `note`. The model tool
+`github_events_list` does **not** take `list` and never answers a list: a list snapshot is for a consumer, not an agent.
+It is one `GET /notifications` with `all` and `per_page` 50, through the same client as the activity feed and not a
+second one, and asserts `github_events_list` on `GET /notifications` only. A notification about an issue or a pull
+request is listed, unlike the activity feed, which leaves it to its issue stream; a title that holds a secret is left
+out, screened whole before it is cut; a sign-in that may not read notifications (a 401, 403 or 404) answers an empty
+list. An answer over 32 MB answers `TOO_LARGE`, as the activity feed's notifications do, and a `list` this plugin does
+not have, or another `source`, answers `SOURCE_UNKNOWN`. The answer stays inside the source's 64 KB (`maxBytes`): whole
+items are dropped from its end when 50 cannot fit, and `shortened: true` says so. A consumer may reuse it for 15
+minutes (`maxAgeSec`).
 
 ## Sources
 
 `package.json` declares the plugin's sources in its top-level `sources` key, under source-contract version 1, so a
 consumer (Memory, jelly, Artifacts) reads them from the installed package. `github.activity` is the events feed.
-`github.notifications` is a list snapshot of the latest notifications, the same `events_list` read with
-`{ "source": "github", "list": "notifications" }`, and its grant is `github_events_list` on `GET /notifications` only.
-`github.activity` is:
+`github.notifications` is a list snapshot of the latest notifications, read through the tools RPC method `events_list`
+with `{ "source": "github", "list": "notifications" }`, and its grant is `github_events_list` on `GET /notifications`
+only. `github.activity` is:
 
 | Key | Value |
 | --- | --- |

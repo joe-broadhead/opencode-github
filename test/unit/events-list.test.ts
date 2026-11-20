@@ -17,6 +17,8 @@ import { type Rule, defaultRules, effectOf } from "../../src/permissions.js"
 import {
   EVENTS_ACTION,
   EVENTS_INPUT,
+  EVENTS_METHOD_OUTPUT,
+  EVENTS_OUTPUT,
   EVENTS_READS,
   NAMESPACE,
   NOTIFICATIONS_LIST,
@@ -37,6 +39,7 @@ import {
   orderKey,
   probeEvents,
   probeMethod,
+  registerEventsTool,
   runEvents,
   runProbe,
   runSource,
@@ -655,6 +658,54 @@ describe("the notifications list", () => {
     expect(fake.calls).toEqual([])
   })
 
+  it("screens the whole title before it cuts, so a secret straddling the cut is still left out", async () => {
+    // 195 characters, then a secret that starts at 196: cut first, the answer would hold " password=hu".
+    const title = "x".repeat(195) + " password=hunter2 and more"
+    const fake = github({ inbox: [{ id: "1", reason: "subscribed", updated_at: "2026-11-08T10:00:00Z", subject: { title, type: "Issue" }, repository: { full_name: "octo/app" } }] as typeof NOTIFICATIONS })
+    const result = await listNotifications(fake.get, fake.identity, { list: NOTIFICATIONS_LIST }, NOW)
+    expect(result.data.items).toEqual([])
+    // The same title without the secret is cut to 200, and screened whole.
+    const long = github({ inbox: [{ id: "2", reason: "subscribed", updated_at: "2026-11-08T10:00:00Z", subject: { title: "y".repeat(240), type: "Issue" }, repository: { full_name: "octo/app" } }] as typeof NOTIFICATIONS })
+    const cut = await listNotifications(long.get, long.identity, { list: NOTIFICATIONS_LIST }, NOW)
+    expect(cut.data.items[0]!.text).toBe("y".repeat(200))
+  })
+
+  it("sorts newest first and lists one notification once, whatever order GitHub answers in", async () => {
+    const shuffled = [
+      { id: "1", reason: "subscribed", updated_at: "2026-11-08T09:00:00Z", subject: { title: "Older", type: "Issue" }, repository: {} },
+      { id: "2", reason: "subscribed", updated_at: "2026-11-08T11:00:00Z", subject: { title: "Newest", type: "Issue" }, repository: {} },
+      { id: "1", reason: "subscribed", updated_at: "2026-11-08T09:00:00Z", subject: { title: "Older again", type: "Issue" }, repository: {} },
+      { id: "3", reason: "subscribed", updated_at: "2026-11-08T10:00:00Z", subject: { title: "Middle", type: "Issue" }, repository: {} },
+    ]
+    const fake = github({ inbox: shuffled as typeof NOTIFICATIONS })
+    const result = await listNotifications(fake.get, fake.identity, { list: NOTIFICATIONS_LIST }, NOW)
+    expect(result.data.items.map((item) => item.text)).toEqual(["Newest", "Middle", "Older"])
+  })
+
+  it("stays inside the source's 64 KB by dropping whole items, and says it shortened the list", async () => {
+    // 50 maximal items of three-byte characters: the id at 128 characters, the text at 200 and the note at 200, so 50
+    // of them cannot fit 64 KB.
+    const huge = Array.from({ length: 50 }, (_, index) => ({
+      id: `9${index}${"字".repeat(128)}`,
+      reason: "subscribed",
+      updated_at: "2026-11-08T10:00:00Z",
+      subject: { title: "字".repeat(200), type: "Issue" },
+      repository: { full_name: "字".repeat(200) },
+    }))
+    const fake = github({ inbox: huge as typeof NOTIFICATIONS })
+    const result = (await listNotifications(fake.get, fake.identity, { list: NOTIFICATIONS_LIST }, NOW)) as { shortened?: boolean; data: { items: { text: string }[] } }
+    expect(result.shortened).toBe(true)
+    expect(result.data.items.length).toBeGreaterThan(0)
+    expect(result.data.items.length).toBeLessThan(50)
+    // Whole items, never cut bytes: every text is still 200 characters.
+    for (const item of result.data.items) expect([...item.text]).toHaveLength(200)
+    expect(new TextEncoder().encode(JSON.stringify(result)).length).toBeLessThanOrEqual(65_536)
+    expect(checkOutput("list", result.data, undefined).ok).toBe(true)
+    // A normal page is not marked.
+    const normal = (await listNotifications(github({ inbox: INBOX as typeof NOTIFICATIONS }).get, fake.identity, { list: NOTIFICATIONS_LIST }, NOW)) as { shortened?: boolean }
+    expect(normal.shortened).toBeUndefined()
+  })
+
   it("is what events_list does with a list, and nothing else changes", () => {
     expect(isNotificationsList({ list: NOTIFICATIONS_LIST })).toBe(true)
     expect(isNotificationsList({ list: "bookmarks" })).toBe(true)
@@ -700,10 +751,32 @@ describe("the tool and the tools RPC methods", () => {
     expect(fake.calls.map((entry) => entry.path)).toEqual(["/user"])
   })
 
+  it("registers the model tool with the events schema alone: no list input, no list answer", async () => {
+    const { deps: d } = deps()
+    const added: Record<string, unknown>[] = []
+    const ctx = {
+      permission: (d as { ctx: unknown }).ctx,
+      tool: {
+        transform: async (edit: (editor: { add: (tool: Record<string, unknown>) => void }) => void) => {
+          await edit({ add: (tool) => void added.push(tool) })
+          return { dispose: async () => {} }
+        },
+      },
+    }
+    await registerEventsTool(ctx as never, d)
+    expect(added[0]).toMatchObject({ name: "events_list", input: EVENTS_INPUT, output: EVENTS_OUTPUT })
+    expect("list" in ((added[0]!.input as { properties: Record<string, unknown> }).properties)).toBe(false)
+  })
+
   it("are owned methods with their schemas, and allowed by the default rules at every access", async () => {
     const { deps: d } = deps()
     const method = eventsMethod(d)
-    expect(method).toMatchObject({ name: "events_list", action: "github_events_list", class: "read", input: EVENTS_INPUT })
+    expect(method).toMatchObject({ name: "events_list", action: "github_events_list", class: "read", output: EVENTS_METHOD_OUTPUT })
+    // `list` is the tools RPC method's alone: a model's tool schema is the events one.
+    const rpcInput = method.input as { properties: Record<string, unknown> }
+    expect(rpcInput.properties["list"]).toMatchObject({ enum: [NOTIFICATIONS_LIST] })
+    expect("list" in EVENTS_INPUT.properties).toBe(false)
+    expect(EVENTS_METHOD_OUTPUT.anyOf[0]).toBe(EVENTS_OUTPUT)
     expect(probeMethod(d)).toMatchObject({ name: "probe", action: "github_probe", class: "read" })
     for (const access of ["all", "ask-changes", "read-only"] as const) {
       expect(effectOf(defaultRules(access), "github_events_list", "*")).toBe("allow")

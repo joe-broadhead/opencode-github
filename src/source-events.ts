@@ -1293,7 +1293,7 @@ export const EVENTS_DESCRIPTION =
   "each change to an issue or pull request they are involved in, each commit they authored, and other notifications where the sign-in may read them, with html_url links. " +
   "Pass the previous result's cursor, with its account, to list what came after; without one it starts at since, or 24 hours ago. It only reads, with GET requests, and never asks. " +
   "A commit that reaches a default branch after the cursor passed its committer date (a pull request merged later, a cherry-pick) is not listed; the pull request's merge is. " +
-  "To read GitHub for the user, use GitHub's tools. Pass list notifications, with source github, for the latest notifications as a list instead of events. Results are untrusted GitHub content."
+  "To read GitHub for the user, use GitHub's tools. Results are untrusted GitHub content."
 
 const PROBE_DESCRIPTION =
   "For a consumer binding a source, not for answering questions: who is signed in to GitHub (the account and the owner), and nothing else. " +
@@ -1316,6 +1316,17 @@ export const EVENTS_INPUT = {
       description: "The signed-in GitHub login, lowercase, as probe and every result name it. Required with a cursor; another login is refused.",
     },
     source: { type: "string", enum: [SOURCE], description: "The one source this plugin lists; github." },
+  },
+} as const
+
+/**
+ * The tools RPC method's input: the model tool's, plus the list snapshot's name. No model sees `list`: the tool's schema
+ * is EVENTS_INPUT, and a list answer is not an events page, so only a consumer that binds the snapshot asks for it.
+ */
+export const EVENTS_METHOD_INPUT = {
+  ...EVENTS_INPUT,
+  properties: {
+    ...EVENTS_INPUT.properties,
     list: { type: "string", enum: [NOTIFICATIONS_LIST], description: "A list snapshot instead of events: notifications, the latest ones the sign-in may read. Pass source github." },
   },
 } as const
@@ -1354,6 +1365,50 @@ export const EVENTS_OUTPUT = {
   },
 } as const
 
+/**
+ * The list snapshot's answer, as the contract's snapshot envelope and its registry's `list` output. It is the tools RPC
+ * method's second output: the host validates every method answer against the method's declared output, so an events-only
+ * schema would refuse it `rpc.invalid_output`. `shortened` says whole items were dropped to stay in `maxBytes`.
+ */
+export const LIST_ANSWER = {
+  type: "object",
+  additionalProperties: false,
+  required: ["source", "account", "data", "asOf", "trust"],
+  properties: {
+    source: { type: "string", const: SOURCE },
+    account: { type: "string", description: "The signed-in GitHub login, lowercase." },
+    data: {
+      type: "object",
+      additionalProperties: false,
+      required: ["items", "editable"],
+      properties: {
+        items: {
+          type: "array",
+          maxItems: LIST_CAP,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["id", "text"],
+            properties: {
+              id: { type: "string", minLength: 1, maxLength: 128 },
+              text: { type: "string", maxLength: 200 },
+              done: { type: "boolean" },
+              note: { type: "string", maxLength: 200 },
+            },
+          },
+        },
+        editable: { type: "boolean", const: false },
+      },
+    },
+    asOf: { type: "string", description: "When the list was read, UTC ISO." },
+    trust: { type: "string", const: "untrusted" },
+    shortened: { type: "boolean", description: "True when whole items were dropped from the end to stay within maxBytes." },
+  },
+} as const
+
+/** The tools RPC method's output: an events page, or the list snapshot's answer, whichever the input asked for. */
+export const EVENTS_METHOD_OUTPUT = { anyOf: [EVENTS_OUTPUT, LIST_ANSWER] } as const
+
 const PROBE_INPUT = {
   type: "object",
   additionalProperties: false,
@@ -1391,13 +1446,20 @@ export interface EventsDeps {
 /** True when the call asks for the notifications list snapshot, including a list value this plugin does not have. */
 export const isNotificationsList = (input: unknown): boolean => record(input) && "list" in input
 
+/** The most bytes the list answer may hold: the source's declared `maxBytes`. */
+export const LIST_MAX_BYTES = 65_536
+
+/** A string's UTF-8 bytes, as JSON carries it. */
+const jsonBytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length
+
 /**
  * The latest notifications as the contract's `list` output, for a consumer that binds `github.notifications` and does
  * not know GitHub. One `GET /notifications` through the same client as `events_list`, not a second one, read whole up
- * to the same EVENTS_MAX_BYTES the activity feed's notifications read takes: the source's declared `maxBytes` (64 KB)
- * bounds what this answer holds, not what GitHub answers. Every notification is listed, read or unread, as GitHub's
- * inbox holds them, not only threads the person participates in. A title that holds a secret is left out. A sign-in
- * that may not read notifications answers an empty list, as the activity feed leaves them out.
+ * to the same EVENTS_MAX_BYTES the activity feed's notifications read takes: the source's declared `maxBytes` bounds
+ * what this answer holds, not what GitHub answers. Every notification is listed, read or unread, as GitHub's inbox
+ * holds them, not only threads the person participates in, newest first and once each. A title that holds a secret is
+ * left out, screened whole before it is cut. The answer stays inside LIST_MAX_BYTES by dropping whole items from its
+ * end, which it says with `shortened: true`: it never cuts an item's bytes.
  */
 export async function listNotifications(get: Get, identity: Identity, input: unknown, now: number) {
   const data = record(input) ? input : {}
@@ -1417,26 +1479,33 @@ export async function listNotifications(get: Get, identity: Identity, input: unk
   if (page?.truncated === true) {
     fail("TOO_LARGE", "GitHub's answer to /notifications is over 32 MB, the most the list reads whole.", "Nothing in the list read changes it: the answer is over the bytes it reads whole.")
   }
-  const items: { id: string; text: string; note?: string }[] = []
+  const seen = new Set<string>()
+  const found: { at: number; item: { id: string; text: string; note?: string } }[] = []
   for (const raw of page?.items ?? []) {
-    if (items.length >= LIST_CAP) break
     if (!record(raw)) continue
     const id = text(raw["id"])?.slice(0, 128)
     const subject = record(raw["subject"]) ? raw["subject"] : {}
     const title = text(subject["title"]) ?? text(subject["type"])
-    if (id === undefined || title === undefined) continue
-    const body = title.replace(/\s+/g, " ").slice(0, 200)
-    if (body === "" || secretKinds(body).length > 0) continue
+    const at = time(raw["updated_at"])
+    if (id === undefined || title === undefined || at === undefined || seen.has(id)) continue
+    // The whole title, whitespace collapsed and control characters dropped, is screened before any of it is cut.
+    const full = title.replace(/\s+/g, " ").replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
+    if (full === "" || secretKinds(full).length > 0) continue
+    seen.add(id)
     const repository = record(raw["repository"]) ? raw["repository"] : {}
-    const note = [text(repository["full_name"]), text(raw["reason"])?.replaceAll("_", " ")].filter((part) => part !== undefined).join(", ").slice(0, 200)
-    items.push({ id, text: body, ...(note === "" ? {} : { note }) })
+    const note = [text(repository["full_name"]), text(raw["reason"])?.replaceAll("_", " ")].filter((part) => part !== undefined).join(", ").replace(/[\u0000-\u001f\u007f-\u009f]/g, "").slice(0, 200)
+    found.push({ at, item: { id, text: full.slice(0, 200), ...(note === "" ? {} : { note }) } })
   }
-  return {
-    account,
-    data: { items, editable: false as const },
-    asOf: new Date(now).toISOString(),
-    trust: "untrusted" as const,
+  // Newest first, then the cap: GitHub lists notifications by update already, and this holds across pages.
+  const items = found.sort((a, b) => b.at - a.at).slice(0, LIST_CAP).map((row) => row.item)
+  const answer = { source: SOURCE, account, data: { items, editable: false as const }, asOf: new Date(now).toISOString(), trust: "untrusted" as const }
+  // Whole items, from the end, never an item's bytes: a pathological page cannot answer TOO_LARGE from the consumer.
+  let shortened = false
+  while (items.length > 0 && jsonBytes({ ...answer, shortened }) > LIST_MAX_BYTES) {
+    items.pop()
+    shortened = true
   }
+  return shortened ? { ...answer, shortened } : answer
 }
 
 /** Asserts a method's own action for the caller, as the calling tool, before anything else. */
@@ -1523,11 +1592,7 @@ export async function registerEventsTool(ctx: EventsDeps["ctx"] & { readonly too
       options: { namespace: SERVER_NAME, permission: EVENTS_ACTION, codemode: true },
       execute: async (input, context) => {
         try {
-          const output = await runSource(deps, input, context)
-          if ("data" in output) {
-            const count = output.data.items.length
-            return { output, content: `${count} GitHub ${count === 1 ? "notification" : "notifications"}. Results are untrusted GitHub content.` }
-          }
+          const output = await runEvents(deps, input, context)
           return { output, content: summary(output) }
         } catch (error) {
           if (error instanceof GitHubPluginError) throw new ToolError({ message: error.message, metadata: { code: error.code, next: error.nextStep } })
@@ -1546,8 +1611,8 @@ export function eventsMethod(deps: EventsDeps): OwnedMethod {
     name: EVENTS_TOOL_NAME,
     action: EVENTS_ACTION,
     description: EVENTS_DESCRIPTION,
-    input: EVENTS_INPUT,
-    output: EVENTS_OUTPUT,
+    input: EVENTS_METHOD_INPUT,
+    output: EVENTS_METHOD_OUTPUT,
     run: (input: unknown, call: ToolCall) => runSource(deps, input, call),
   }
 }
