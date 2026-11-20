@@ -628,7 +628,7 @@ see [Scripting](scripting.md#api).
 ## Events list
 
 `github_events_list` (`tools.github.events_list` in Code Mode, and the tools RPC method `events_list`) is GitHub's
-source under the shared source contract, `@we-the-rebel-alliance/source-contract` v0.2.0 (see [Sources](#sources)). It
+source under the shared source contract, `@we-the-rebel-alliance/source-contract` v0.3.0 (see [Sources](#sources)). It
 lists what the signed-in user was involved in since a cursor, as normalised events, oldest first. It only reads, never
 asks and calls no model, so Memory's collector can run it unattended.
 

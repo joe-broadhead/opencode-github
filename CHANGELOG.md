@@ -14,6 +14,7 @@ All notable changes to this project are documented here. The format follows [Kee
   whole and left out before anything is cut. The answer stays inside the source's 64 KB by dropping whole items, marked
   `shortened: true`. The tools RPC method declares both answers, the events page and the list, so the host accepts the
   list; `github_events_list`, the model's tool, keeps its events-only input and output, so a model sees no change.
+- **For jelly:** `sources` gains `github.notifications`, so Jelly asks for consent again; `github.activity` is unchanged.
 
 ### Changed
 

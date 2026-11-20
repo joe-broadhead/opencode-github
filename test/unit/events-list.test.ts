@@ -99,7 +99,7 @@ const EXPECTED = [
 
 const ok = (data: unknown): ApiOutput => ({ ok: true, status: 200, data, truncated: false, trust: { githubContent: "untrusted" } })
 
-function github(options: { perPage?: number; notifications?: "ok" | "forbidden" | "gone"; login?: string; inbox?: typeof NOTIFICATIONS; incomplete?: number; issues?: typeof ISSUES; commits?: typeof COMMITS; cutNotifications?: boolean } = {}) {
+function github(options: { perPage?: number; notifications?: "ok" | "forbidden" | "gone"; login?: string; inbox?: typeof NOTIFICATIONS; incomplete?: number; issues?: typeof ISSUES; commits?: typeof COMMITS; cutNotifications?: boolean; unordered?: boolean } = {}) {
   const calls: { path: string; query: Record<string, unknown> }[] = []
   /** How many issue searches GitHub still answers as timed out, with incomplete_results. */
   let incomplete = options.incomplete ?? 0
@@ -152,8 +152,11 @@ function github(options: { perPage?: number; notifications?: "ok" | "forbidden" 
       const since = query.since === undefined ? Number.NEGATIVE_INFINITY : Date.parse(String(query.since))
       // before is exclusive; since inclusive.
       const before = query.before === undefined ? Number.POSITIVE_INFINITY : Date.parse(String(query.before))
-      const all = (options.inbox ?? NOTIFICATIONS).filter((item) => Date.parse(item.updated_at) >= since && Date.parse(item.updated_at) < before).sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
-      const listed = all.slice((page - 1) * Number(query.per_page), page * Number(query.per_page))
+      // GitHub lists notifications newest first; `unordered` answers the inbox in its own order, whatever it is.
+      const all = (options.inbox ?? NOTIFICATIONS).filter((item) => Date.parse(item.updated_at) >= since && Date.parse(item.updated_at) < before).sort((a, b) => options.unordered === true ? 0 : Date.parse(b.updated_at) - Date.parse(a.updated_at))
+      // `unordered` answers the whole inbox in its own order, however many per_page asks for: the list must sort and
+      // then cap it itself.
+      const listed = options.unordered === true ? all : all.slice((page - 1) * Number(query.per_page), page * Number(query.per_page))
       // A bare list over the limit is cut to a string, as capInline cuts one: no items, and truncated.
       if (options.cutNotifications === true) return { ...ok(JSON.stringify(listed).slice(0, 100)), truncated: true } as ApiOutput
       if (Buffer.byteLength(JSON.stringify(listed)) > (maxBytes ?? 100_000)) return { ...ok(JSON.stringify(listed).slice(0, maxBytes ?? 100_000)), truncated: true } as ApiOutput
@@ -612,6 +615,25 @@ describe("the notifications list", () => {
     expect(fake.calls[0]!.query).toEqual({ all: true, per_page: 50 })
     // The output is the contract's list: ids, texts of at most 200, no other key.
     expect(checkOutput("list", result.data, undefined).ok).toBe(true)
+  })
+
+  it("sorts newest first before the 50 cap, so the newest 50 are listed whatever order GitHub answers in", async () => {
+    // 60 notifications, oldest first in the answer: the newest 50 are listed, and the 10 oldest are not.
+    const base = Date.parse("2026-11-08T12:00:00Z")
+    const oldestFirst = Array.from({ length: 60 }, (_, index) => ({
+      id: `8${index}`,
+      reason: "subscribed",
+      updated_at: new Date(base - (59 - index) * 60_000).toISOString(),
+      subject: { title: `Notification ${index}`, type: "Release" },
+      repository: { full_name: "octo/app" },
+    }))
+    const fake = github({ inbox: oldestFirst as typeof NOTIFICATIONS, unordered: true })
+    const result = await listNotifications(fake.get, fake.identity, { list: NOTIFICATIONS_LIST }, NOW)
+    expect(result.data.items).toHaveLength(50)
+    // The newest first, and the ten oldest are the ones left out.
+    expect(result.data.items[0]!.id).toBe("859")
+    expect(result.data.items.at(-1)!.id).toBe("810")
+    expect(result.data.items.some((item) => item.id === "89")).toBe(false)
   })
 
   it("returns no more than the list's 50 items", async () => {
