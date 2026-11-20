@@ -157,6 +157,20 @@ async function cases(): Promise<PageCase[]> {
 
 const reports: ConformanceReport[] = []
 
+/**
+ * v0.3 checks this source carries nothing for. The kit marks each not applicable on its own; an empty reason would be
+ * no reason, so each states why. `one-author` and `event-within-max-bytes` do apply: every event here names one author
+ * at most, and a page carries events.
+ */
+const ABSENT = {
+  "actor-kind": "the fixture names no machine actor, so actor-kind does not apply",
+  "commitment-key": "no page carries a commitment, so commitment-key does not apply",
+  facts: "no page carries a fact, so facts does not apply",
+  hints: "the source declares no hint file, so hints does not apply",
+  "parts-stable": "no page carries a part, so parts-stable does not apply",
+  routines: "the source declares no routine file, so routines does not apply",
+}
+
 describe("the source contract's conformance kit", () => {
   test("the declaration validates, as a consumer reads it from the installed package", () => {
     const installed = readInstalledDescriptor(root, { version: pkg.version })
@@ -185,8 +199,22 @@ describe("the source contract's conformance kit", () => {
     })
     reports.push(report)
     expect(report.problems).toEqual([])
-    // Every check ran or is not applicable: the report is complete.
+    // Every check ran or is not applicable: the report is complete. The v0.3 checks in ABSENT do not apply; each
+    // reason is non-empty, which is what the kit accepts for a stated skip.
     expect(report.checks.filter((check) => !check.ran && !check.notApplicable).map((check) => check.name)).toEqual([])
+    for (const [name, reason] of Object.entries(ABSENT)) {
+      expect(reason.trim()).not.toBe("")
+      expect(report.checks.find((check) => check.name === name)).toMatchObject({ ran: false, notApplicable: true, problems: [] })
+    }
+    // The checks v0.3 added that a page here does carry: one author at most, and the event within the source's bytes.
+    expect(report.checks.filter((check) => check.name === "one-author" || check.name === "event-within-max-bytes").map((check) => [check.name, check.ran]).sort()).toEqual([
+      ["event-within-max-bytes", true],
+      ["one-author", true],
+    ])
+    // The source's stated reason is the only one in the report; the rest of the skips are the kit's own.
+    expect(Object.fromEntries(report.checks.filter((check) => check.reason !== undefined).map((check) => [check.name, check.reason]))).toEqual({
+      "failed-holds-cursor": ATOMIC,
+    })
     // failed[] cannot happen, for the reason this source gives; the gap checks run on the expired cursor and the old since.
     expect(report.checks.find((check) => check.name === "failed-holds-cursor")).toMatchObject({ notApplicable: true, reason: ATOMIC })
     expect(report.checks.filter((check) => check.name === "gap-and-cursor-expired" || check.name === "gap-once-per-read").map((check) => [check.name, check.ran])).toEqual([

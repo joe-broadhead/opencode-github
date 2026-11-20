@@ -12,6 +12,15 @@ All notable changes to this project are documented here. The format follows [Kee
   through the same client as `github.activity`, not a second one, read whole up to 32 MB as the activity feed's
   notifications are; a title that holds a secret is left out. The contract pin is unchanged.
 
+### Changed
+
+- The source contract is `@we-the-rebel-alliance/source-contract` v0.3.0, pinned as
+  `github:we-the-rebel-alliance/source-contract#v0.3.0` (commit `2fd55cd`) and bundled into `dist/index.js`, still with
+  no runtime dependency. `github.activity` and `github.notifications` declare and send none of v0.3.0's new keys
+  (`facts`, `hints`, `routines`, actor `kind`, `sections`/`parts`), which a consumer still on v0.2.0 refuses; their
+  declarations and pages are unchanged, and a pin alone sends nothing. The conformance report's new checks are not
+  applicable, each with the reason its test states.
+
 ## [0.0.8] - 2026-11-18
 
 ### Changed
