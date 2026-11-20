@@ -12,12 +12,14 @@ import { DEFAULT_TOOLSETS, GITHUB_COM } from "../../src/config.js"
 import { GitHubPluginError } from "../../src/errors.js"
 import { encodeBoundCursor, encodeCursor } from "@we-the-rebel-alliance/source-contract/cursor"
 import { EVENT_LIMITS, PAGE, assertEventsListConformance, resultProblems, type EventsListResult } from "@we-the-rebel-alliance/source-contract/events"
+import { checkOutput } from "@we-the-rebel-alliance/source-contract/registry"
 import { type Rule, defaultRules, effectOf } from "../../src/permissions.js"
 import {
   EVENTS_ACTION,
   EVENTS_INPUT,
   EVENTS_READS,
   NAMESPACE,
+  NOTIFICATIONS_LIST,
   NOTIFICATION_RETENTION_MS,
   PAGE_BYTES,
   PROBE_ACTION,
@@ -26,8 +28,10 @@ import {
   SOURCE,
   commitItem,
   eventsMethod,
+  isNotificationsList,
   issueItem,
   listEvents,
+  listNotifications,
   loginOf,
   notificationItem,
   orderKey,
@@ -35,6 +39,7 @@ import {
   probeMethod,
   runEvents,
   runProbe,
+  runSource,
 } from "../../src/source-events.js"
 
 const NOW = Date.parse("2026-11-08T12:00:00Z")
@@ -91,7 +96,7 @@ const EXPECTED = [
 
 const ok = (data: unknown): ApiOutput => ({ ok: true, status: 200, data, truncated: false, trust: { githubContent: "untrusted" } })
 
-function github(options: { perPage?: number; notifications?: "ok" | "forbidden"; login?: string; inbox?: typeof NOTIFICATIONS; incomplete?: number; issues?: typeof ISSUES; commits?: typeof COMMITS } = {}) {
+function github(options: { perPage?: number; notifications?: "ok" | "forbidden" | "gone"; login?: string; inbox?: typeof NOTIFICATIONS; incomplete?: number; issues?: typeof ISSUES; commits?: typeof COMMITS; cutNotifications?: boolean } = {}) {
   const calls: { path: string; query: Record<string, unknown> }[] = []
   /** How many issue searches GitHub still answers as timed out, with incomplete_results. */
   let incomplete = options.incomplete ?? 0
@@ -140,12 +145,14 @@ function github(options: { perPage?: number; notifications?: "ok" | "forbidden";
     }
     if (path === "/notifications") {
       if (options.notifications === "forbidden") return { ok: false, status: 403, data: { message: "Resource not accessible" }, truncated: false, trust: { githubContent: "untrusted" } } as ApiOutput
+      if (options.notifications === "gone") return { ok: false, status: 404, data: { message: "Not Found" }, truncated: false, trust: { githubContent: "untrusted" } } as ApiOutput
       const since = query.since === undefined ? Number.NEGATIVE_INFINITY : Date.parse(String(query.since))
       // before is exclusive; since inclusive.
       const before = query.before === undefined ? Number.POSITIVE_INFINITY : Date.parse(String(query.before))
       const all = (options.inbox ?? NOTIFICATIONS).filter((item) => Date.parse(item.updated_at) >= since && Date.parse(item.updated_at) < before).sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
       const listed = all.slice((page - 1) * Number(query.per_page), page * Number(query.per_page))
       // A bare list over the limit is cut to a string, as capInline cuts one: no items, and truncated.
+      if (options.cutNotifications === true) return { ...ok(JSON.stringify(listed).slice(0, 100)), truncated: true } as ApiOutput
       if (Buffer.byteLength(JSON.stringify(listed)) > (maxBytes ?? 100_000)) return { ...ok(JSON.stringify(listed).slice(0, maxBytes ?? 100_000)), truncated: true } as ApiOutput
       return ok(listed)
     }
@@ -380,9 +387,8 @@ describe("GitHub's notification answers, read whole", () => {
   it("gives every events_list read path the 32 MB limit, so none is left on the agent's cap", () => {
     const source = readFileSync(new URL("../../src/source-events.ts", import.meta.url), "utf8")
     const reads = source.split("\n").filter((line) => line.includes("list(get,"))
-    const events = reads.filter((line) => line.includes("EVENTS_MAX_BYTES"))
-    expect(events).toHaveLength(2)
-    expect(reads.some((line) => line.includes("65_536"))).toBe(true)
+    expect(reads).toHaveLength(3)
+    expect(reads.every((line) => line.includes("EVENTS_MAX_BYTES"))).toBe(true)
   })
 })
 
@@ -576,6 +582,87 @@ describe("probe", () => {
   })
 })
 
+describe("the notifications list", () => {
+  /** Newest first, as GitHub's inbox answers: read and unread, and an issue notification the events feed leaves to its issue stream. */
+  const INBOX = [
+    { id: "9001", reason: "review_requested", updated_at: "2026-11-08T11:00:00Z", subject: { title: "Add the parser", type: "PullRequest" }, repository: { full_name: "octo/app", html_url: "https://github.com/octo/app" } },
+    { id: "9002", reason: "subscribed", updated_at: "2026-11-08T10:00:00Z", subject: { title: "v2.0.0", type: "Release" }, repository: { full_name: "octo/lib", html_url: "https://github.com/octo/lib" } },
+    { id: "9003", reason: "mention", updated_at: "2026-11-08T09:00:00Z", subject: { title: "Deploy broke: password=hunter2 in the URL", type: "Issue" }, repository: { full_name: "octo/app", html_url: "https://github.com/octo/app" } },
+    { id: "9004", reason: "team_mention", updated_at: "2026-11-08T08:00:00Z", subject: { type: "Discussion" }, repository: { full_name: "octo/app", html_url: "https://github.com/octo/app" } },
+    { id: "9005", updated_at: "2026-11-08T07:00:00Z", subject: { title: "A title with no reason", type: "CheckSuite" }, repository: { full_name: "octo/app", html_url: "https://github.com/octo/app" } },
+  ]
+
+  it("lists the latest notifications as the contract's list output, newest first", async () => {
+    const fake = github({ inbox: INBOX as typeof NOTIFICATIONS })
+    const result = await listNotifications(fake.get, fake.identity, { source: SOURCE, list: NOTIFICATIONS_LIST, account: LOGIN }, NOW)
+    expect(result).toMatchObject({ account: LOGIN, asOf: new Date(NOW).toISOString(), trust: "untrusted", data: { editable: false } })
+    // The secret is left out; an issue notification and a read one are listed, unlike the activity feed's; a subject
+    // with no title falls back to its type.
+    expect(result.data.items).toEqual([
+      { id: "9001", text: "Add the parser", note: "octo/app, review requested" },
+      { id: "9002", text: "v2.0.0", note: "octo/lib, subscribed" },
+      { id: "9004", text: "Discussion", note: "octo/app, team mention" },
+      { id: "9005", text: "A title with no reason", note: "octo/app" },
+    ])
+    // One GET, GitHub's inbox as it is: every notification, read or unread, and not only threads the person joins.
+    expect(fake.calls.map((call) => call.path)).toEqual(["/notifications"])
+    expect(fake.calls[0]!.query).toEqual({ all: true, per_page: 50 })
+    // The output is the contract's list: ids, texts of at most 200, no other key.
+    expect(checkOutput("list", result.data, undefined).ok).toBe(true)
+  })
+
+  it("returns no more than the list's 50 items", async () => {
+    const many = Array.from({ length: 80 }, (_, index) => ({ id: `7${index}`, reason: "subscribed", updated_at: `2026-11-08T${String(index % 12).padStart(2, "0")}:00:00Z`, subject: { title: `Notification ${index}`, type: "Release" }, repository: { full_name: "octo/app" } }))
+    const fake = github({ inbox: many as typeof NOTIFICATIONS })
+    const result = await listNotifications(fake.get, fake.identity, { list: NOTIFICATIONS_LIST }, NOW)
+    expect(result.data.items).toHaveLength(50)
+    // Asked for 50, GitHub answers at most that; the cap holds even if it answers more.
+    expect(fake.calls[0]!.query["per_page"]).toBe(50)
+  })
+
+  it("matches the family: a title with a secret is left out, and so is a notification it cannot render", async () => {
+    const weird = [
+      { id: "1", reason: "subscribed", updated_at: "2026-11-08T10:00:00Z", subject: { title: "ghp_" + "a".repeat(36), type: "Release" }, repository: {} },
+      { reason: "subscribed", updated_at: "2026-11-08T09:00:00Z", subject: { title: "No id", type: "Release" } },
+      { id: "3", subject: { title: "No time", type: "Release" } },
+      "not an object",
+      { id: "4", reason: "subscribed", updated_at: "2026-11-08T08:00:00Z", subject: {} },
+    ]
+    const fake = github({ inbox: weird as typeof NOTIFICATIONS })
+    const result = await listNotifications(fake.get, fake.identity, { list: NOTIFICATIONS_LIST }, NOW)
+    expect(result.data.items).toEqual([])
+  })
+
+  it("answers an empty list where the sign-in may not read notifications", async () => {
+    for (const notifications of ["forbidden", "gone"] as const) {
+      const fake = github({ notifications })
+      const result = await listNotifications(fake.get, fake.identity, { list: NOTIFICATIONS_LIST }, NOW)
+      expect(result.data.items).toEqual([])
+    }
+  })
+
+  it("answers TOO_LARGE for an answer over the 32 MB it reads whole, as the activity feed's notifications do", async () => {
+    const fake = github({ cutNotifications: true })
+    expect(await code(listNotifications(fake.get, fake.identity, { list: NOTIFICATIONS_LIST }, NOW))).toBe("TOO_LARGE")
+  })
+
+  it("refuses a list it does not have, another source, and another account, before GitHub is called", async () => {
+    const fake = github()
+    expect(await code(listNotifications(fake.get, fake.identity, { list: "bookmarks" }, NOW))).toBe("SOURCE_UNKNOWN")
+    expect(await code(listNotifications(fake.get, fake.identity, { source: "gitlab", list: NOTIFICATIONS_LIST }, NOW))).toBe("SOURCE_UNKNOWN")
+    expect(await code(listNotifications(fake.get, fake.identity, { list: NOTIFICATIONS_LIST, account: "someone-else" }, NOW))).toBe("ACCOUNT_MISMATCH")
+    expect(await code(listNotifications(fake.get, async () => undefined, { list: NOTIFICATIONS_LIST }, NOW))).toBe("AUTH_REQUIRED")
+    expect(fake.calls).toEqual([])
+  })
+
+  it("is what events_list does with a list, and nothing else changes", () => {
+    expect(isNotificationsList({ list: NOTIFICATIONS_LIST })).toBe(true)
+    expect(isNotificationsList({ list: "bookmarks" })).toBe(true)
+    expect(isNotificationsList({ since: SINCE })).toBe(false)
+    expect(isNotificationsList(undefined)).toBe(false)
+  })
+})
+
 describe("the tool and the tools RPC methods", () => {
   function deps() {
     const fake = github()
@@ -684,7 +771,7 @@ describe("events_list's inner reads", () => {
       },
     })
     const deps = { ctx: { permission: ctx.permission }, api, identity: () => api.identity(), now: () => NOW }
-    return { run: () => runEvents(deps as never, { since: SINCE }, call), probe: () => runProbe(deps as never, {}, call), api, fetched, asserted }
+    return { run: () => runEvents(deps as never, { since: SINCE }, call), probe: () => runProbe(deps as never, {}, call), list: () => runSource(deps as never, { source: SOURCE, list: NOTIFICATIONS_LIST, account: LOGIN }, call), api, fetched, asserted }
   }
 
   it("asserts github_events_list, then github_events_list on each GET /path before it is sent", async () => {
@@ -702,6 +789,22 @@ describe("events_list's inner reads", () => {
     expect(result).toMatchObject({ source: "github", owner: OWNER, events: [] })
     expect(fetched).toEqual(SENT)
     expect(asserted.every((entry) => entry.startsWith(`${EVENTS_ACTION} `))).toBe(true)
+  })
+
+  it("reads the notifications list under the same allow, with one GET /notifications and no search", async () => {
+    const { list, fetched, asserted } = await wired([], JELLY)
+    const result = await list()
+    expect(result).toMatchObject({ account: LOGIN, data: { items: [], editable: false }, trust: "untrusted" })
+    expect(fetched).toEqual(["/notifications"])
+    expect(asserted).toEqual([`${EVENTS_ACTION} *`, `${EVENTS_ACTION} GET /notifications`])
+  })
+
+  it("does not reach the notifications list from a rule that asks for or denies GET /notifications", async () => {
+    for (const effect of ["ask", "deny"] as const) {
+      const { list, fetched } = await wired([{ action: EVENTS_ACTION, resource: "GET /notifications", effect }], JELLY)
+      await expect(list()).rejects.toThrow(/PERMISSION_DENIED/)
+      expect(fetched).toEqual([])
+    }
   })
 
   it("is not decided by github_api rules: a session deny on github_api does not stop it", async () => {

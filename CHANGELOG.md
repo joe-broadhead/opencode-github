@@ -6,9 +6,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
-- `github.notifications`, a list snapshot of the latest notifications the sign-in may read. It is `events_list` with
-  `list` `notifications`, one `GET /notifications` through the same client as `github.activity`, not a second one.
-  The contract pin is unchanged.
+- `github.notifications`, a list snapshot of the latest notifications the sign-in may read: `events_list` with `list`
+  `notifications` answers the contract's `list` output, the latest 50 GitHub's inbox holds, newest first, read or
+  unread, each with the subject's title and, as its note, the repository and the reason. It is one `GET /notifications`
+  through the same client as `github.activity`, not a second one, read whole up to 32 MB as the activity feed's
+  notifications are; a title that holds a secret is left out. The contract pin is unchanged.
 
 ## [0.0.8] - 2026-11-18
 

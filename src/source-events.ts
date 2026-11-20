@@ -1393,9 +1393,11 @@ export const isNotificationsList = (input: unknown): boolean => record(input) &&
 
 /**
  * The latest notifications as the contract's `list` output, for a consumer that binds `github.notifications` and does
- * not know GitHub. One `GET /notifications` through the same client as `events_list`, not a second one. A title that
- * holds a secret is left out. A sign-in that may not read notifications answers an empty list, as the activity feed
- * leaves them out.
+ * not know GitHub. One `GET /notifications` through the same client as `events_list`, not a second one, read whole up
+ * to the same EVENTS_MAX_BYTES the activity feed's notifications read takes: the source's declared `maxBytes` (64 KB)
+ * bounds what this answer holds, not what GitHub answers. Every notification is listed, read or unread, as GitHub's
+ * inbox holds them, not only threads the person participates in. A title that holds a secret is left out. A sign-in
+ * that may not read notifications answers an empty list, as the activity feed leaves them out.
  */
 export async function listNotifications(get: Get, identity: Identity, input: unknown, now: number) {
   const data = record(input) ? input : {}
@@ -1411,9 +1413,9 @@ export async function listNotifications(get: Get, identity: Identity, input: unk
   if (asked !== undefined && asked !== account) {
     fail("ACCOUNT_MISMATCH", `GitHub is signed in to another account than "${text(data["account"])}".`, `Sign in to GitHub as that account (/connect, GitHub), or read as "${account}", the signed-in login.`)
   }
-  const page = await list(get, "/notifications", { all: true, participating: true, per_page: LIST_CAP }, (body) => body, [401, 403, 404], 65_536)
+  const page = await list(get, "/notifications", { all: true, per_page: LIST_CAP }, (body) => body, [401, 403, 404, 422], EVENTS_MAX_BYTES)
   if (page?.truncated === true) {
-    fail("TOO_LARGE", "GitHub's answer to /notifications is over 64 KB, the most a list reads whole.", "Nothing in the list read changes it: the answer is over the bytes it reads whole.")
+    fail("TOO_LARGE", "GitHub's answer to /notifications is over 32 MB, the most the list reads whole.", "Nothing in the list read changes it: the answer is over the bytes it reads whole.")
   }
   const items: { id: string; text: string; note?: string }[] = []
   for (const raw of page?.items ?? []) {

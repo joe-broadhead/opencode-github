@@ -758,6 +758,17 @@ is signed in, `{ source: "github", account, owner, trust }`, with the same accou
 it reads. It makes one `GET /user`, asserted as `github_probe` on `GET /user`, to confirm the token still belongs to that
 login, and refuses another account with `ACCOUNT_MISMATCH`.
 
+**`github.notifications`, the list snapshot.** The same `events_list` read with `{ "source": "github", "list":
+"notifications" }` answers the contract's `list` output for a consumer that renders one: `data` is `{ items, editable:
+false }`, the latest 50 notifications GitHub's inbox holds, newest first, read or unread, each `{ id, text, note? }`
+with the subject's title as `text` and the repository and the reason as `note`. It is one `GET /notifications` with
+`all` and `per_page` 50, through the same client as the activity feed and not a second one, and asserts
+`github_events_list` on `GET /notifications` only. A notification about an issue or a pull request is listed, unlike
+the activity feed, which leaves it to its issue stream; a title that holds a secret is left out; a sign-in that may not
+read notifications (a 401, 403 or 404) answers an empty list. An answer over 32 MB answers `TOO_LARGE`, as the activity
+feed's notifications do, and a `list` this plugin does not have, or another `source`, answers `SOURCE_UNKNOWN`. The
+answer is at most the source's 64 KB (`maxBytes`), and a consumer may reuse it for 15 minutes (`maxAgeSec`).
+
 ## Sources
 
 `package.json` declares the plugin's sources in its top-level `sources` key, under source-contract version 1, so a
@@ -974,11 +985,11 @@ passed through unchanged.
 | `API_REDIRECT_INSECURE` | GitHub redirected to a non-HTTPS address. | Try again later. |
 | `API_REDIRECTED` | GitHub redirected a change, which is never followed. The message names the new path. | Call github_api again with path <the new path>, so the change is checked for that path. |
 | `API_REDIRECT_OFF_HOST` | GitHub redirected a read outside its API. | For job logs, call get_job_logs with return_content: true; for other files, pass download: { path }, which follows GitHub's storage redirects without the token. A script gets the get_job_logs method instead, and with `host` the step names only download. |
-| `INPUT_INVALID` | The `events_list` or `probe` input breaks the source contract, or a listing with a cursor names no account. | Pass only since, cursor, limit (1 to 500), account and source, as the tool's schema describes; pass account with a cursor. |
-| `SOURCE_UNKNOWN` | `events_list` or `probe` names a source the plugin does not have. | Leave source out, or pass github. |
+| `INPUT_INVALID` | The `events_list` or `probe` input breaks the source contract, or a listing with a cursor names no account. | Pass only since, cursor, limit (1 to 500), list, account and source, as the tool's schema describes; pass account with a cursor. |
+| `SOURCE_UNKNOWN` | `events_list` or `probe` names a source, or a `list`, the plugin does not have. | Leave source out, or pass github; pass list `notifications` with it. |
 | `CURSOR_INVALID` | The cursor was not issued by GitHub's `events_list` for this account and its signed-in user, or was changed. | Call events_list without a cursor, with since, to start again. |
 | `ACCOUNT_MISMATCH` | `events_list` or `probe` names another account than the signed-in login, or a cursor issued for another account. | Pass the account the cursor was issued for, or sign in to GitHub as that account; probe names the signed-in login. |
-| `TOO_LARGE` | A notifications answer for `events_list` is over 32 MB. A search answer over it is read in smaller pages instead. | Nothing in `events_list` changes it: the answer is over the bytes it reads whole. |
+| `TOO_LARGE` | A notifications answer for `events_list` or its `notifications` list is over 32 MB. A search answer over it is read in smaller pages instead. | Nothing in `events_list` changes it: the answer is over the bytes it reads whole. |
 | `UNAVAILABLE` | A search, notifications or `GET /user` read for `events_list` or `probe` failed or took more than 60 seconds, or the sign-in names no login. | Call it again with the same cursor; if it keeps failing, run /github-status. |
 
 A script's calls through the tools RPC, `github.platform.tools`, have more codes for sessions, permissions and the
