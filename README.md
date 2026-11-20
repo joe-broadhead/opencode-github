@@ -105,7 +105,8 @@ Each skill reports findings and changes nothing on GitHub unless you ask.
 answering questions: what you were involved in since a cursor (changes to issues and pull requests, your commits, and
 other notifications where the sign-in may read them), as normalised events, oldest first. It only reads, with GET
 requests, and never asks. It is the plugin's source `github.activity` under the shared source contract, which
-`package.json` declares, with the tools RPC method `probe`, which names who is signed in. See [Events list](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/configuration.md#events-list).
+`package.json` declares, with the tools RPC method `probe`, which names who is signed in. The same read with `list`
+`notifications` is the list snapshot `github.notifications`. See [Events list](https://github.com/joe-broadhead/opencode-github/blob/HEAD/docs/configuration.md#events-list).
 
 **Scripts.** A script or a cron job can call GitHub's tools and `github_api` with no model, through `opencode api`.
 It runs as a session and its agent, and every call resolves the rule for its action, the agent's and then the

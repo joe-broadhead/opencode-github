@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `github.notifications`, a list snapshot of the latest notifications the sign-in may read. It is `events_list` with
+  `list` `notifications`, one `GET /notifications` through the same client as `github.activity`, not a second one.
+  The contract pin is unchanged.
+
 ## [0.0.8] - 2026-11-18
 
 ### Changed

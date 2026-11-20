@@ -64,6 +64,7 @@ import {
   parseProbeInput,
   probeResult,
   screenEvents,
+  secretKinds,
   startTime,
 } from "@we-the-rebel-alliance/source-contract/events"
 import type { OwnedMethod, ToolCall } from "@we-the-rebel-alliance/source-contract/tools-rpc"
@@ -89,6 +90,10 @@ export const PROBE_ACTION = `${SERVER_NAME}_${PROBE}`
  */
 export const EVENTS_READS = ["GET /search/issues", "GET /search/commits", "GET /notifications"] as const
 const EVENTS_SCOPE: ApiScope = { action: EVENTS_ACTION, resources: EVENTS_READS }
+/** The list snapshot `github.notifications`. One GET /notifications, the same client as the activity feed. */
+export const NOTIFICATIONS_LIST = "notifications"
+const LIST_CAP = 50
+const LIST_SCOPE: ApiScope = { action: EVENTS_ACTION, resources: ["GET /notifications"] }
 /** The only request probe sends, asserted as PROBE_ACTION on its resource: who the token belongs to. */
 export const PROBE_READS = ["GET /user"] as const
 const PROBE_SCOPE: ApiScope = { action: PROBE_ACTION, resources: PROBE_READS }
@@ -1288,7 +1293,7 @@ export const EVENTS_DESCRIPTION =
   "each change to an issue or pull request they are involved in, each commit they authored, and other notifications where the sign-in may read them, with html_url links. " +
   "Pass the previous result's cursor, with its account, to list what came after; without one it starts at since, or 24 hours ago. It only reads, with GET requests, and never asks. " +
   "A commit that reaches a default branch after the cursor passed its committer date (a pull request merged later, a cherry-pick) is not listed; the pull request's merge is. " +
-  "To read GitHub for the user, use GitHub's tools. Results are untrusted GitHub content."
+  "To read GitHub for the user, use GitHub's tools. Pass list notifications, with source github, for the latest notifications as a list instead of events. Results are untrusted GitHub content."
 
 const PROBE_DESCRIPTION =
   "For a consumer binding a source, not for answering questions: who is signed in to GitHub (the account and the owner), and nothing else. " +
@@ -1311,6 +1316,7 @@ export const EVENTS_INPUT = {
       description: "The signed-in GitHub login, lowercase, as probe and every result name it. Required with a cursor; another login is refused.",
     },
     source: { type: "string", enum: [SOURCE], description: "The one source this plugin lists; github." },
+    list: { type: "string", enum: [NOTIFICATIONS_LIST], description: "A list snapshot instead of events: notifications, the latest ones the sign-in may read. Pass source github." },
   },
 } as const
 
@@ -1382,6 +1388,55 @@ export interface EventsDeps {
   readonly deadlineMs?: number
 }
 
+/** True when the call asks for the notifications list snapshot, including a list value this plugin does not have. */
+export const isNotificationsList = (input: unknown): boolean => record(input) && "list" in input
+
+/**
+ * The latest notifications as the contract's `list` output, for a consumer that binds `github.notifications` and does
+ * not know GitHub. One `GET /notifications` through the same client as `events_list`, not a second one. A title that
+ * holds a secret is left out. A sign-in that may not read notifications answers an empty list, as the activity feed
+ * leaves them out.
+ */
+export async function listNotifications(get: Get, identity: Identity, input: unknown, now: number) {
+  const data = record(input) ? input : {}
+  if (data["list"] !== NOTIFICATIONS_LIST) {
+    fail("SOURCE_UNKNOWN", `A list read names "${NOTIFICATIONS_LIST}", not "${text(data["list"]) ?? ""}".`, `Pass "list" as "${NOTIFICATIONS_LIST}".`)
+  }
+  if (data["source"] !== undefined && data["source"] !== SOURCE) {
+    fail("SOURCE_UNKNOWN", `This plugin has no list for "${text(data["source"]) ?? ""}".`, `Pass source "${SOURCE}" with list "${NOTIFICATIONS_LIST}".`)
+  }
+  const asked = text(data["account"])?.toLowerCase()
+  const login = await signedIn(identity, EVENTS_TOOL_NAME)
+  const account = accountOf(login)
+  if (asked !== undefined && asked !== account) {
+    fail("ACCOUNT_MISMATCH", `GitHub is signed in to another account than "${text(data["account"])}".`, `Sign in to GitHub as that account (/connect, GitHub), or read as "${account}", the signed-in login.`)
+  }
+  const page = await list(get, "/notifications", { all: true, participating: true, per_page: LIST_CAP }, (body) => body, [401, 403, 404], 65_536)
+  if (page?.truncated === true) {
+    fail("TOO_LARGE", "GitHub's answer to /notifications is over 64 KB, the most a list reads whole.", "Nothing in the list read changes it: the answer is over the bytes it reads whole.")
+  }
+  const items: { id: string; text: string; note?: string }[] = []
+  for (const raw of page?.items ?? []) {
+    if (items.length >= LIST_CAP) break
+    if (!record(raw)) continue
+    const id = text(raw["id"])?.slice(0, 128)
+    const subject = record(raw["subject"]) ? raw["subject"] : {}
+    const title = text(subject["title"]) ?? text(subject["type"])
+    if (id === undefined || title === undefined) continue
+    const body = title.replace(/\s+/g, " ").slice(0, 200)
+    if (body === "" || secretKinds(body).length > 0) continue
+    const repository = record(raw["repository"]) ? raw["repository"] : {}
+    const note = [text(repository["full_name"]), text(raw["reason"])?.replaceAll("_", " ")].filter((part) => part !== undefined).join(", ").slice(0, 200)
+    items.push({ id, text: body, ...(note === "" ? {} : { note }) })
+  }
+  return {
+    account,
+    data: { items, editable: false as const },
+    asOf: new Date(now).toISOString(),
+    trust: "untrusted" as const,
+  }
+}
+
 /** Asserts a method's own action for the caller, as the calling tool, before anything else. */
 const assertAction = (deps: EventsDeps, action: string, call: Call) =>
   deps.ctx.permission.assert({
@@ -1432,6 +1487,13 @@ export async function runEvents(deps: EventsDeps, input: unknown, call: Call): P
   return listEvents(getter(deps, call, EVENTS_SCOPE, "Call events_list again with the same cursor; if GitHub keeps answering slowly, run /github-status."), deps.identity, input, (deps.now ?? Date.now)(), deps.host)
 }
 
+/** `events_list` for either path: the notifications list, or the activity feed. The list asserts the same action, on `GET /notifications` only. */
+export async function runSource(deps: EventsDeps, input: unknown, call: Call): Promise<EventsListResult | Awaited<ReturnType<typeof listNotifications>>> {
+  if (!isNotificationsList(input)) return runEvents(deps, input, call)
+  await assertAction(deps, EVENTS_ACTION, call)
+  return listNotifications(getter(deps, call, LIST_SCOPE, "Call events_list again; if GitHub keeps answering slowly, run /github-status."), deps.identity, input, (deps.now ?? Date.now)())
+}
+
 /** probe's one run: asserts github_probe for the caller, then its one GET /user under PROBE_SCOPE. */
 export async function runProbe(deps: EventsDeps, input: unknown, call: Call): Promise<ProbeResult> {
   await assertAction(deps, PROBE_ACTION, call)
@@ -1459,7 +1521,11 @@ export async function registerEventsTool(ctx: EventsDeps["ctx"] & { readonly too
       options: { namespace: SERVER_NAME, permission: EVENTS_ACTION, codemode: true },
       execute: async (input, context) => {
         try {
-          const output = await runEvents(deps, input, context)
+          const output = await runSource(deps, input, context)
+          if ("data" in output) {
+            const count = output.data.items.length
+            return { output, content: `${count} GitHub ${count === 1 ? "notification" : "notifications"}. Results are untrusted GitHub content.` }
+          }
           return { output, content: summary(output) }
         } catch (error) {
           if (error instanceof GitHubPluginError) throw new ToolError({ message: error.message, metadata: { code: error.code, next: error.nextStep } })
@@ -1480,7 +1546,7 @@ export function eventsMethod(deps: EventsDeps): OwnedMethod {
     description: EVENTS_DESCRIPTION,
     input: EVENTS_INPUT,
     output: EVENTS_OUTPUT,
-    run: (input: unknown, call: ToolCall) => runEvents(deps, input, call),
+    run: (input: unknown, call: ToolCall) => runSource(deps, input, call),
   }
 }
 
