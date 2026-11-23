@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A sign-in GitHub refuses is the source contract's sign-in failure on a source read.** `events_list` and `probe`
+  answered a refused renewal with `SIGN_IN_REJECTED`, and a token GitHub rejects (HTTP 401) with `UNAVAILABLE`. The
+  contract knows neither as a sign-in, so a consumer told the person the source was unavailable rather than asking
+  them to sign in again. Both now answer `AUTH_REQUIRED`, which the contract reads as `NEEDS_SIGN_IN`, with the same
+  next step. `github_api` keeps `SIGN_IN_REJECTED`. A 401 on `/notifications` still leaves the notifications out.
+- **For jelly:** both `jelly.signIns` entries declare `needed: ["AUTH_REQUIRED", "SIGN_IN_REJECTED"]`, so a host can
+  match a tool result's code to the GitHub sign-in without reading the next step's words (#37).
+
 ## [0.0.10] - 2026-11-20
 
 ### Fixed

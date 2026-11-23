@@ -963,7 +963,7 @@ passed through unchanged.
 | `SIGN_IN_CODE_UNKNOWN` | GitHub did not recognise the device code. | Start the sign-in again. |
 | `SIGN_IN_FAILED` | GitHub ended the device sign-in with another error, named in the message. | Start the sign-in again. |
 | `SIGN_IN_UNREACHABLE` | github.com could not be reached. | Check your network, then start the sign-in again. |
-| `SIGN_IN_REJECTED` | GitHub refused to renew a GitHub App sign-in: its refresh token was revoked, already used, or is older than six months. | Run /connect and choose GitHub to sign in again. |
+| `SIGN_IN_REJECTED` | GitHub refused to renew a GitHub App sign-in: its refresh token was revoked, already used, or is older than six months. `events_list` and `probe` answer `AUTH_REQUIRED` instead, the source contract's sign-in code. | Run /connect and choose GitHub to sign in again. |
 | `SIGN_IN_UNAVAILABLE` | OpenCode could not load the saved sign-in for `github_api`. | Try again; if it keeps failing, run /connect and choose GitHub to sign in again. |
 | `REFRESH_UNREACHABLE` | github.com could not be reached to renew a GitHub App sign-in. | Check your network, then try again. |
 | `REFRESH_FAILED` | GitHub could not renew a GitHub App sign-in right now. | Try again later. |
@@ -978,7 +978,7 @@ passed through unchanged.
 | `TOKEN_CHECK_UNREACHABLE` | api.github.com could not be reached. | Check your network, then try again. |
 | `TOKEN_CHECK_FAILED` | GitHub could not check the token, or returned no account name. | Try again later. |
 | `READ_ONLY` | A `github_api` call would change GitHub, and `access` is `"read-only"` (or the deprecated `readOnly: true`). | Tell the user that this needs the plugin option `access: "all"`, which they set in opencode.json; each change then runs without asking, unless they keep `ask-changes`. |
-| `AUTH_REQUIRED` | `github_api`, `events_list` or `probe` has no GitHub sign-in to use. | Run /connect and choose GitHub (GitHub Enterprise with `host`). |
+| `AUTH_REQUIRED` | `github_api`, `events_list` or `probe` has no GitHub sign-in to use; or, for `events_list` and `probe`, GitHub rejected the sign-in (a 401, or a refused renewal, which `github_api` names `SIGN_IN_REJECTED`), so the source contract reads it as `NEEDS_SIGN_IN`. | Run /connect and choose GitHub (GitHub Enterprise with `host`). |
 | `PERMISSION_DENIED` | A rule asks or denies a call, and the caller is a script or `events_list`: an `ask` cannot be answered and a `deny` refuses. For `github_api` the rule must name the request's own `METHOD /path`; for `events_list`'s reads it is `github_events_list` on the same resource. | Add or narrow the rule for the session or for its agent. |
 | `API_INPUT_INVALID` | The `github_api` input does not fit, for example `download` with a method other than GET. | Fix the github_api input and call it again. |
 | `API_PATH_INVALID` | The path is not a relative API path, has a `.` or `..` segment (also percent-encoded), or percent-encodes a character it can hold as itself. | Pass a relative API path such as /repos/OWNER/REPO/pulls. |

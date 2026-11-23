@@ -220,6 +220,16 @@ const fail = (code: EventsCode, message: string, next: string): never => {
   throw new GitHubPluginError(code, message, next)
 }
 
+/**
+ * A sign-in GitHub refuses, as the source contract's sign-in failure: AUTH_REQUIRED, which it reads as NEEDS_SIGN_IN. A
+ * refused renewal is SIGN_IN_REJECTED everywhere else, a code the contract does not know, which a consumer would read as
+ * UNAVAILABLE. Every other error is itself.
+ */
+const asSignIn = (error: unknown): unknown =>
+  error instanceof GitHubPluginError && error.code === "SIGN_IN_REJECTED" ? new GitHubPluginError("AUTH_REQUIRED", error.detail, error.nextStep) : error
+/** GitHub's 401: it rejected the token, so the read needs a new sign-in, as a refused renewal does. */
+const rejected = (): never => fail("AUTH_REQUIRED", "GitHub rejected the saved sign-in.", "Run /connect and choose GitHub to sign in again.")
+
 /** The login in GET /user's answer, or a login itself. */
 export function loginOf(value: unknown): string | undefined {
   let data = value
@@ -351,6 +361,7 @@ interface Answer {
 async function list(get: Get, path: string, query: Record<string, string | number | boolean>, pick: (data: unknown) => unknown, allowed: readonly number[] = [], maxBytes?: number): Promise<Answer | undefined> {
   const output = await get(path, query, maxBytes)
   if (allowed.includes(output.status)) return undefined
+  if (output.status === 401) rejected()
   if (!output.ok) fail("UNAVAILABLE", `GitHub answered ${path} with ${output.status}.`, output.nextStep ?? "Call events_list again with the same cursor; if it keeps failing, run /github-status.")
   const items = pick(output.data)
   if (!Array.isArray(items) && !output.truncated) fail("UNAVAILABLE", `GitHub answered ${path} without a list.`, "Call events_list again with the same cursor; if it keeps failing, run /github-status.")
@@ -1019,9 +1030,11 @@ function earlier(state: Record<string, unknown>): CursorState {
   return withLookback(from, times, behind, record(lookback) ? lookback["h"] : undefined)
 }
 
-/** The signed-in login, or AUTH_REQUIRED; `method` names the caller in the message. */
+/** The signed-in login, or AUTH_REQUIRED, a refused renewal included; `method` names the caller in the message. */
 async function signedIn(identity: Identity, method: string): Promise<string> {
-  const login = await identity()
+  const login = await identity().catch((error: unknown) => {
+    throw asSignIn(error)
+  })
   if (login === undefined) return fail("AUTH_REQUIRED", `GitHub is not signed in, so ${method} has no account to read.`, "Run /connect and choose GitHub.")
   if (!LOGIN.test(login)) return fail("UNAVAILABLE", "The GitHub sign-in does not name a GitHub login.", "Run /connect and choose GitHub to sign in again.")
   return login
@@ -1283,6 +1296,7 @@ export async function probeEvents(get: Get, identity: Identity, input: unknown, 
     fail("ACCOUNT_MISMATCH", `GitHub is signed in to another account than "${parsed.value.account}".`, `Sign in to GitHub as that account (/connect, GitHub), or read as "${account}", the signed-in login.`)
   }
   const output = await get("/user", {})
+  if (output.status === 401) rejected()
   if (!output.ok) fail("UNAVAILABLE", `GitHub answered /user with ${output.status}.`, output.nextStep ?? "Run /github-status, then call probe again.")
   const confirmed = loginOf(output.data)
   if (confirmed === undefined) fail("UNAVAILABLE", "GitHub's answer to /user named no login.", "Run /github-status, then call probe again.")
@@ -1544,6 +1558,8 @@ const getter =
     })
     try {
       return await Promise.race([deps.api.run({ method: "GET", path, query }, { ...call, script: true, signal }, scope, maxBytes === undefined ? undefined : { inlineBytes: maxBytes, readBytes: maxBytes }), late])
+    } catch (error) {
+      throw asSignIn(error)
     } finally {
       clearTimeout(timer)
     }

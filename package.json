@@ -809,13 +809,21 @@
         "hostClient": {
           "id": "github",
           "option": "clientId"
-        }
+        },
+        "needed": [
+          "AUTH_REQUIRED",
+          "SIGN_IN_REJECTED"
+        ]
       },
       {
         "id": "github-enterprise",
         "label": "GitHub Enterprise",
         "integration": "github-enterprise",
-        "group": "github"
+        "group": "github",
+        "needed": [
+          "AUTH_REQUIRED",
+          "SIGN_IN_REJECTED"
+        ]
       }
     ],
     "contributes": {
