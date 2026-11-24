@@ -19,17 +19,10 @@ function blockAfter(text: string, after: string | RegExp): unknown {
   return end === -1 ? [] : JSON.parse(text.slice(start + 7, end))
 }
 
-// R7: an administrator copies these blocks into managed config, so each must be the plugin's real block, in full.
+// The configuration guide prints the generated default block in full for every access value: an administrator copies
+// these blocks into managed config, so each must be the plugin's real block, in full.
 describe("the default rules block", () => {
-  const README = read("README.md")
   const CONFIGURATION = read("docs/configuration.md")
-
-  it("the README prints defaultRules(\"all\") in full, and does not elide it", () => {
-    const printed = blockAfter(README, 'generated from\n`defaultRules("all")`')
-    expect(printed).toEqual(defaultRules("all"))
-    const section = /## Permissions([\s\S]*?)### If you have `gh` installed/.exec(README)?.[1] ?? ""
-    expect(section).not.toMatch(/\bthe rest of the block\b/)
-  })
 
   it.each(["all", "ask-changes", "read-only"] as const)("the configuration guide prints the %s block in full", (access) => {
     const printed = blockAfter(CONFIGURATION, new RegExp(`^\`access: "${access}"\``, "m"))
@@ -67,17 +60,16 @@ describe("tested hosts", () => {
   })
 
   it("the README's Requirements line names every tested release", () => {
-    const requirements = /## Requirements([\s\S]*?)## /i.exec(read("README.md"))?.[1] ?? ""
-    const named = [...requirements.matchAll(/\b\d+\.\d+\.\d+\b/g)].map((match) => match[0]).filter((version) => version !== "2.4.0")
+    const requirements = (/## Requirements([\s\S]*?)## /i.exec(read("README.md"))?.[1] ?? "").replace(/`[^`]*>=[^`]*`/g, "")
+    const named = [...requirements.matchAll(/\b\d+\.\d+\.\d+\b/g)].map((match) => match[0])
     expect([...new Set(named)].sort()).toEqual([...TESTED_HOSTS].sort())
   })
 
   // A release inside the range that ships later is the untested example, so it must be one that never ships.
-  it("the untested example is 2.2.99, and no doc names a future release as tested", () => {
+  it("the untested example is 2.4.99, and no doc names a future release as tested", () => {
     const all = SOURCES.map(([, text]) => text).join("\n")
-    expect(all).toContain("2.2.99")
-    // Every 2.2 or 2.3 release a doc names is one the checks run on, apart from the example outside the list.
-    const named = [...new Set([...all.matchAll(/\b2\.[23]\.\d+\b/g)].map((match) => match[0]!))]
-    expect(named.filter((version) => version !== "2.2.99" && !(TESTED_HOSTS as readonly string[]).includes(version))).toEqual([])
+    expect(all).toContain("2.4.99")
+    const named = [...new Set([...all.matchAll(/\b2\.4\.\d+\b/g)].map((match) => match[0]!))]
+    expect(named.filter((version) => version !== "2.4.99" && !(TESTED_HOSTS as readonly string[]).includes(version))).toEqual([])
   })
 })

@@ -125,7 +125,7 @@ export function startFakeGitHub(tools: readonly FakeTool[] = FAKE_TOOLS): FakeGi
       if (path === "/user" && request.method === "GET") {
         return login ? Response.json({ login, id: 1 }) : Response.json({ message: "Bad credentials" }, { status: 401 })
       }
-      // The notifications list's one read: the latest notification, newest first, as GitHub's inbox answers.
+      // GitHub's notifications inbox: the latest notification, newest first.
       if (path === "/notifications" && request.method === "GET") {
         if (!login) return Response.json({ message: "Bad credentials" }, { status: 401 })
         return Response.json([

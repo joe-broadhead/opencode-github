@@ -1,5 +1,5 @@
 // Fails when source, tests, scripts or the built dist/ use an API that public OpenCode
-// 2.2.3 deprecates, marks experimental or does not support, or contain a machine-local
+// 2.4.1 deprecates, marks experimental or does not support, or contain a machine-local
 // path. `--self-test` proves that every rule fires on a bad fixture and that a clean
 // fixture passes; `npm run lint` runs it first.
 //
@@ -157,7 +157,7 @@ function main() {
   const hits = scan(root)
   for (const hit of hits) console.error(`${hit.file}:${hit.line}: ${hit.rule}: ${hit.text}`)
   if (hits.length > 0) {
-    console.error(`check-forbidden: ${hits.length} forbidden use(s). Use the public OpenCode 2.2.3 API instead, and keep machine-local paths out of the repo.`)
+    console.error(`check-forbidden: ${hits.length} forbidden use(s). Use the public OpenCode 2.4.1 API instead, and keep machine-local paths out of the repo.`)
     return 1
   }
   console.log("check-forbidden: OK")

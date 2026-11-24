@@ -78,7 +78,7 @@ function checkNotice(metafiles) {
     if (!file) throw new Error(`${name} is bundled but ships no licence file`)
     return `## ${name} ${version} (${license})\n\n${readFileSync(join(dir, file), "utf8").trim()}\n`
   })
-  const notice = `opencode-github bundles this third-party code into dist/.\n\n${sections.join("\n")}`
+  const notice = `github-plugin bundles this third-party code into dist/.\n\n${sections.join("\n")}`
   const path = join(root, "NOTICE")
   if (process.argv.includes("--notice")) writeFileSync(path, notice)
   else if (!existsSync(path) || readFileSync(path, "utf8") !== notice) {

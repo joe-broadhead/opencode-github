@@ -194,13 +194,12 @@ These fields have the same names and meanings in every plugin of this family:
 | Field | Value |
 | --- | --- |
 | `version` | The plugin's version. |
-| `host` | `{ version, range, tested }`: the OpenCode release, the supported range `>=2.2.3 <2.4.0`, and whether this release is one the plugin is tested on (2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7, 2.3.0, 2.3.1 or 2.3.2). |
+| `host` | `{ version, range, tested }`: the OpenCode release, the supported range `>=2.4.1 <2.5.0`, and whether this release is one the plugin is tested on (2.4.1). |
 | `state` | `connected`, `sign_in_required`, `connecting`, `failed`, `disabled`, `not_configured` or `conflict`. |
 | `unguardedAgents` | The agents without default rules, always present; `[]` when there are none. |
 | `nextStep` | The Next step row; `Nothing to do.` when nothing is needed. |
 
-GitHub's own fields sit beside them: `account`, `access`, `deprecation` (while the old `readOnly` option is set),
-`toolsets`, `tools` (`visible`, `unknown`, `mode`),
+GitHub's own fields sit beside them: `account`, `access`, `toolsets`, `tools` (`visible`, `unknown`, `mode`),
 `permissionsBlock` (the rules to copy, while agents are listed), `unmatchedRules` (`github_api` rule resources with an
 upper-case owner or repo name, which never match), `shadowedSkills` (`{ id, path }` for each of the plugin's skills
 that a same-id skill at another path replaces), `hostWarning` (outside the range, with

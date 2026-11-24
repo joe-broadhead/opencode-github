@@ -8,8 +8,8 @@
 - macOS or Linux.
 
 ```sh
-git clone https://github.com/joe-broadhead/opencode-github.git
-cd opencode-github
+git clone https://github.com/we-the-rebel-alliance/github-plugin.git
+cd github-plugin
 npm ci --ignore-scripts
 npm run check
 ```
@@ -26,7 +26,7 @@ npm run build
 
 ```json
 {
-  "plugins": [{ "package": "/path/to/opencode-github", "options": { "toolsets": ["context", "repos", "issues"] } }]
+  "plugins": [{ "package": "/path/to/github-plugin", "options": { "toolsets": ["context", "repos", "issues"] } }]
 }
 ```
 
@@ -48,12 +48,10 @@ One command runs every local check, in this order. It must pass before every com
 | Host | `npm run test:host` | Loads the built plugin into an embedded OpenCode host from the public `@opencode/sdk` under Bun, once per tested release, with GitHub replaced by a loopback fake. |
 | Stock | `npm run test:stock` | Runs each tested stock `opencode serve` release with the built plugin and a test probe plugin (`test/stock/probe`) that points the `github` server at the loopback fake, and calls the tools RPC as a script: known reads, denies, refused asks, session rules, excluded tools, upstream errors and `api` refusals. |
 
-The tested releases are `TESTED_HOSTS` in `src/host-version.ts`: 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7, 2.3.0, 2.3.1 and 2.3.2. The host, pack and stock
-stages, and so CI, all run on that one list. The pack check and the stock test take the stock OpenCode binaries from
-`OPENCODE_BIN_2_2_3`, `OPENCODE_BIN_2_2_4`, `OPENCODE_BIN_2_2_5` and `OPENCODE_BIN_2_2_6`. When one is unset, each installs `@opencode/cli`
-at that version into a temporary folder, once per run. The host tests (`scripts/host-tests.mjs`) run 2.2.3 on the
-lockfile's SDK, and each other release on `HOST_SDK_DIR_2_2_4` or `HOST_SDK_DIR_2_2_5`, a folder whose
-`node_modules` holds that `@opencode/sdk`; when one is unset, they install it into a temporary folder, once per run.
+The tested releases are `TESTED_HOSTS` in `src/host-version.ts`: 2.4.1. The host, pack and stock stages, and so CI,
+all run on that one list. The pack check and the stock test take the stock OpenCode binary from `OPENCODE_BIN_2_4_1`;
+when it is unset, they install `@opencode/cli` at that version into a temporary folder, once per run. The host tests
+(`scripts/host-tests.mjs`) run the lockfile's SDK.
 
 The host tests, the stock test and the pack check run OpenCode in a temporary profile: `HOME`, the XDG folders, `TMPDIR` and
 `OPENCODE_TEST_HOME` all point inside a temporary folder, because Bun's `os.homedir()` ignores a changed `HOME`.
@@ -63,13 +61,12 @@ free port. Every request outside the loopback fake fails the test.
 
 ### Another OpenCode release
 
-The lockfile pins `@opencode/sdk` and `@opencode/plugin` at 2.2.3, the lowest supported release. To run the host
-tests on one other release only, install its SDK in a separate folder, outside the lockfile, and point
-`HOST_SDK_DIR` at it:
+The lockfile pins `@opencode/sdk` and `@opencode/plugin` at 2.4.1, the only supported release. To run the host tests
+on one other release only, install its SDK in a separate folder, outside the lockfile, and point `HOST_SDK_DIR` at it:
 
 ```sh
 dir=$(mktemp -d /tmp/github-sdk-XXXXXX)
-(cd "$dir" && echo '{"private":true}' > package.json && npm install --ignore-scripts --no-audit --no-fund @opencode/sdk@2.2.99)
+(cd "$dir" && echo '{"private":true}' > package.json && npm install --ignore-scripts --no-audit --no-fund @opencode/sdk@2.4.99)
 npm run build
 HOST_SDK_DIR="$dir" node scripts/host-tests.mjs
 ```
@@ -82,7 +79,7 @@ Do not add a newer release to `package.json` or the lockfile.
 
 For a manual check on a real OpenCode, use an isolated profile, never your own:
 
-- Run the CLI from npm, for example `npx -p @opencode/cli@2.2.3 opencode …`.
+- Run the CLI from npm, for example `npx -p @opencode/cli@2.4.1 opencode …`.
 - Set `HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME`, `TMPDIR` and
   `OPENCODE_TEST_HOME` to folders inside one temporary folder. `opencode debug paths` must show only that folder.
 - Plain `opencode mcp …`, `opencode auth …` and `opencode reload` talk to the shared background service. Start your
@@ -123,11 +120,11 @@ catalogued tools that are missing, and tools whose read or write classification 
 runtime, an unknown tool follows `access`: it runs at the default `"all"`, asks at `"ask-changes"` and is denied at
 `"read-only"`.
 
-The signed-in catalogue and the `jelly` declaration list different counts on purpose. The catalogue lists the tools of
-the toolsets the `toolsets` option turns on: 69 with the defaults, which are the 72 names of the default toolsets, less
-the hidden `ui_get` and the two `issue_artifact_*` tools behind a feature flag the plugin does not turn on. The
-declaration lists every known tool: the 98 GitHub tools, `github_api` and `github_events_list`, so a toolset a user
-turns on needs no change to the declaration.
+The signed-in catalogue and the `jelly` declaration (replaced in phase 4b) list different counts on purpose. The
+catalogue lists the tools of the toolsets the `toolsets` option turns on: 69 with the defaults, which are the 72 names
+of the default toolsets, less the hidden `ui_get` and the two `issue_artifact_*` tools behind a feature flag the plugin
+does not turn on. The declaration lists every known tool: the 98 GitHub tools, `github_api` and `github_events_list`,
+so a toolset a user turns on needs no change to the declaration.
 
 - Exit codes: `0` the comparison ran, with or without warnings; `2` no token, or GitHub could not be reached or
   refused the token.
@@ -149,7 +146,7 @@ the first major release, a breaking change raises the minor version.
 
 Each release supports one OpenCode line. `opencode.host` in `package.json` states it, and `HOST_RANGE`
 in `src/host-version.ts` enforces it. Both must change together, and a unit test checks that they match. Write the
-range as `>=2.2.3 <2.4.0`, never `^2.2.3`, which would accept an untested 2.4.
+range as `>=2.4.1 <2.5.0`, never `^2.4.1`, which would accept an untested 2.5.
 
 ### Releasing
 
@@ -158,9 +155,8 @@ that tag. The release is one commit on top of a `master` head that CI passed, an
 workflow makes both, in GitHub Actions: nobody builds, commits or tags a release on their own machine, and no personal
 key signs it.
 
-While changes land, their notes go under `## [Unreleased]` at the top of `CHANGELOG.md`. Each earlier GitHub release is
-a `## [x.y.z] - YYYY-MM-DD` heading below it, newest first, and the npm history stays last, under
-`## Earlier releases on npm`.
+`CHANGELOG.md` starts with one `## 0.0.0 (unreleased)` section. Phase 4b cuts `v0.0.0` and writes the release notes;
+the release kit then turns that section into a dated heading.
 
 1. On `master`, set `version` in `package.json` to the new version, and change every install spec in the README,
    `CONTRIBUTING.md` and `docs/` to `#v<version>` (`test/docs.test.ts` fails until they match). Then run
@@ -219,7 +215,7 @@ Before the approval, the workflow:
 - **verifies** on a fresh runner: the commit's identity, one parent on `master`, `package.json` exactly the parent's
   without the lifecycle scripts, only regular files in the allowed paths, no `package.json` under `dist/`, and a second,
   independent build of the parent (its own job) equal to the committed `dist/` byte for byte;
-- **installs** the release commit with `plugin add` on each stock OpenCode host (2.2.3 to 2.2.7, and 2.3.0 to 2.3.2);
+- **installs** the release commit with `plugin add` on each stock OpenCode host (2.4.1);
 - **packs** the commit before installing anything, keeps that tarball and records its sha256, then runs the pack stage
   against a copy;
 - **runs the conformance kit** on the parent, for a plugin that declares sources (above), and uploads only its report;
@@ -249,7 +245,7 @@ exact `package.json`, the allowed paths and the byte-for-byte rebuild. Never rel
 **A rejected, expired or failed run** leaves nothing behind: the `cleanup` job deletes `release/v<version>` when it points
 at the parent or at that run's commit, and never touches another branch. No tag exists before the approval, so the
 version is not burned: fix `master` and start again. If `cleanup` itself failed, the next run refuses until the branch
-is deleted: `gh api -X DELETE repos/joe-broadhead/opencode-github/git/refs/heads/release/v<version>`.
+is deleted: `gh api -X DELETE repos/we-the-rebel-alliance/github-plugin/git/refs/heads/release/v<version>`.
 
 **Resume.** If the run fails after creating the tag and before the Release is complete, start it again with the same `sha`. The plan finds the kit's tag on a release commit on that sha with no published Release, and resumes:
 it makes no new commit, checks and installs the tagged commit, stages the files, and after a new approval reuses the tag
@@ -263,8 +259,7 @@ tag, and restores the ruleset exactly as it was.
 
 **Known limit: a `v*` tag pushed by hand.** No ruleset limits who creates a `v*` tag, so anyone with write access can
 push one by hand, pointing at any commit. Such a tag has no published Release, the forward-only check ignores it, and
-Jelly installs only a published Release whose `SHA256SUMS` it verifies. But a user who installs
-`github:joe-broadhead/opencode-github#v<x>` directly gets whatever that tag points at. Only the release workflow makes
+A user who installs `github:we-the-rebel-alliance/github-plugin#v<x>` directly gets whatever that tag points at. Only the release workflow makes
 release tags; never push one by hand.
 
 The release kit is these files, the same in every plugin: `scripts/release-rules.mjs`, `scripts/release-commit.mjs`,
@@ -276,10 +271,10 @@ pins each of the scripts whole by its sha256, so a plugin whose copy differs fro
 change the kit in every plugin at once, with the new hashes. Do not re-run the older `apply-release-kit.mjs`: it writes
 back the kit that could release only `v0.0.0`.
 
-Each release has its own tag, and a Git install does not update by itself. To move to a newer release, remove the old entry with `opencode plugin remove github:joe-broadhead/opencode-github#v<old version>`, then add the new tag with `opencode plugin add github:joe-broadhead/opencode-github#v<version>`.
+Each release has its own tag, and a Git install does not update by itself. To move to a newer release, remove the old entry with `opencode plugin remove github:we-the-rebel-alliance/github-plugin`, then add the new tag with `opencode plugin add github:we-the-rebel-alliance/github-plugin`.
 
 Or add the plugin to `opencode.json` instead, with the same spec:
 
 ```json
-{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.11" }] }
+{ "plugins": [{ "package": "github:we-the-rebel-alliance/github-plugin" }] }
 ```

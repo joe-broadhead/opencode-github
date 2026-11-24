@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Only the newest release is supported, on the OpenCode releases it is tested on (`>=2.2.3 <2.4.0`).
+Only the newest release is supported, on the OpenCode releases it is tested on (`>=2.4.1 <2.5.0`, tested on 2.4.1).
 
 ## Reporting a vulnerability
 
@@ -37,8 +37,6 @@ service.
 - No client secret or app client ID ships. Device sign-in is offered only when `clientId` names an OAuth App or a
   GitHub App, and needs only its public client ID. A GitHub App's refresh token is stored with the credential by
   OpenCode, sent only to `login/oauth/access_token` to renew it, and replaced by the new one each time.
-- When you paste a token into `opencode auth login` on OpenCode 2.2.3, the terminal shows it as you type. Clear the
-  screen afterwards if others can see it.
 - To revoke access, sign out in OpenCode (`opencode auth logout GitHub <login>`, with your GitHub login), then revoke
   the app under **GitHub Settings → Applications → Authorized OAuth Apps** (or **Authorized GitHub Apps**), or delete the token under **Developer
   settings → Personal access tokens**.
