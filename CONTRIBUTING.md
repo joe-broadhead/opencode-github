@@ -155,16 +155,21 @@ that tag. The release is one commit on top of a `master` head that CI passed, an
 workflow makes both, in GitHub Actions: nobody builds, commits or tags a release on their own machine, and no personal
 key signs it.
 
+**Phase 4a cannot cut a release.** CI is one `ci` job on the gated runner, for a pull request and a push alike: it has
+no matrix. The copied release kit's planner refuses that shape (`scripts/release-rules.mjs`, "no matrix is gated by
+event"), and `scripts/changelog.mjs check` exits 1 on `## 0.0.0 (unreleased)`. Both belong to the pre-4a kit that 4b's
+plugin-kit replaces, so `release.yml` cannot plan until then. The steps below describe that kit: they are how a release
+will be cut once 4b lands.
+
 `CHANGELOG.md` starts with one `## 0.0.0 (unreleased)` section. Phase 4b cuts `v0.0.0` and writes the release notes;
 the release kit then turns that section into a dated heading.
 
 1. On `master`, set `version` in `package.json` to the new version, and change every install spec in the README,
-   `CONTRIBUTING.md` and `docs/` to `#v<version>` (`test/docs.test.ts` fails until they match). Then run
-   `node scripts/changelog.mjs release`: it turns `## [Unreleased]` into `## [<version>] - <today>`, above the earlier
-   releases, and refuses a CHANGELOG it cannot shape. Run `npm run check`.
-2. Push that commit to `master`, and wait for CI to pass on it. A pull request's CI runs the Linux runners only; the
-   push to `master` runs every runner, Apple-silicon macOS (`macos-26`) too, and the release stands on that run. An
-   Intel Mac (`macos-26-intel`) is not required.
+   `CONTRIBUTING.md` and `docs/` to `#v<version>`. Then run `node scripts/changelog.mjs release`, once 4b's kit is in
+   place: it turns `## [Unreleased]` into `## [<version>] - <today>`, above the earlier releases. The pre-4a copy
+   refuses the current `## 0.0.0 (unreleased)` heading with exit 1. Run `npm run check`.
+2. Push that commit to `master`, and wait for CI to pass on it. CI is one `ci` job on the gated runner
+   (`.github/workflows/ci.yml`), for a pull request and a push alike, and the release stands on the push run.
 3. Start the release with that commit's full sha:
    `gh workflow run release.yml --ref master -f sha=<full sha>`, or from Actions → release →
    Run workflow, on `master`.
@@ -199,9 +204,11 @@ is `true` for this version. The report becomes the Release asset `conformance-re
 plugin without `sources` has no report, and its release is unchanged.
 
 Before the approval, the workflow:
-- **plans:** refuses a run that is not on `master`, a sha that is not `master`'s head, a sha without a successful
-  `ci.yml` push run with a successful job on every runner its push matrix names (macOS included), a `ci.yml` whose
-  matrix runs macOS on a pull request or not on a push (the kit tests check it too), a version that is not `x.y.z`, a
+- **plans:** refuses a run that is not on `master`, a sha that is not `master`'s head, and this repository's `ci.yml`
+  before anything else ("no matrix is gated by event": its matrix check needs the kit's gated runner list, and CI here
+  is one `ci` job). With a kit-shaped `ci.yml`, it also refuses a sha without a successful push run with a successful
+  job on every runner its push matrix names, a `ci.yml` whose matrix runs macOS on a pull request or not on a push (the
+  kit tests check it too), a version that is not `x.y.z`, a
   `package.json` that is not `"private": true` or not in its canonical form, a CHANGELOG whose newest release is not
   this version, a plugin that declares sources with no `conformance` script, a release that does not move forward from
   the last published Release, a leftover `release/v<version>` branch, a native run that did not build this sha on
@@ -271,10 +278,10 @@ pins each of the scripts whole by its sha256, so a plugin whose copy differs fro
 change the kit in every plugin at once, with the new hashes. Do not re-run the older `apply-release-kit.mjs`: it writes
 back the kit that could release only `v0.0.0`.
 
-Each release has its own tag, and a Git install does not update by itself. To move to a newer release, remove the old entry with `opencode plugin remove github:we-the-rebel-alliance/github-plugin`, then add the new tag with `opencode plugin add github:we-the-rebel-alliance/github-plugin`.
+Each release has its own tag, and a Git install does not update by itself. To move to a newer release, remove the old entry with `opencode plugin remove github:we-the-rebel-alliance/github-plugin`, then add the new tag with `opencode plugin add github:we-the-rebel-alliance/github-plugin#v<version>`.
 
 Or add the plugin to `opencode.json` instead, with the same spec:
 
 ```json
-{ "plugins": [{ "package": "github:we-the-rebel-alliance/github-plugin" }] }
+{ "plugins": [{ "package": "github:we-the-rebel-alliance/github-plugin#v<version>" }] }
 ```

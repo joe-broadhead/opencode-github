@@ -89,17 +89,17 @@ describe("computeStatus", () => {
         fakeCtx({ server: "connected", label: "octocat", metadata: { login: "octocat", githubApp: true, installations } }).ctx,
         deps({ options: loadOptions(appSlug ? { appSlug } : {}), fetch }),
       )
-    const none = await note(0, "jelly-dev")
+    const none = await note(0, "example-app")
     expect(none.account).toBe("octocat")
     expect(none.nextStep).toBe(
-      "The GitHub App is not installed on any account this sign-in reaches, so it sees no repositories. Install it at https://github.com/apps/jelly-dev/installations/new.",
+      "The GitHub App is not installed on any account this sign-in reaches, so it sees no repositories. Install it at https://github.com/apps/example-app/installations/new.",
     )
     expect((await note(0)).nextStep).toContain("Install the GitHub App on that account or organization.")
-    expect((await note(2, "jelly-dev")).nextStep).toBe("Nothing to do.")
+    expect((await note(2, "example-app")).nextStep).toBe("Nothing to do.")
     expect(seen).toEqual(["https://api.github.com/user/installations?per_page=1", "https://api.github.com/user/installations?per_page=1"])
     // Installed after sign-in: the sign-in still records none, and the status asks GitHub again.
     live = 1
-    expect((await note(0, "jelly-dev")).nextStep).toBe("Nothing to do.")
+    expect((await note(0, "example-app")).nextStep).toBe("Nothing to do.")
   })
 
   it.each([

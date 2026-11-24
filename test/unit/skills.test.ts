@@ -16,6 +16,7 @@ describe("the shipped skills", () => {
     const skill = parseSkill(id, read(id))
     expect(skill.name).toBe(id)
     expect(skill.description.length).toBeGreaterThan(40)
+    expect(skill.description.length).toBeLessThanOrEqual(300)
     expect(skill.description).not.toContain("\n")
   })
 

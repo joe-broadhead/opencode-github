@@ -2,7 +2,7 @@
 
 Connects OpenCode to GitHub's hosted MCP server, so your agents can read and, if you allow it, change issues, pull
 requests, code and more with GitHub's own tools. `github_api` covers what those tools cannot do, and `events_list`
-feeds Memory's collector.
+feeds a consumer's collector.
 
 Unofficial; not affiliated with GitHub. GitHub is a trademark of GitHub, Inc.; this unofficial plugin is not endorsed
 by them.
@@ -16,16 +16,16 @@ by them.
 
 ## Install
 
-```sh
-opencode plugin add github:we-the-rebel-alliance/github-plugin
-opencode reload
-```
+Install from a release: `opencode plugin add github:we-the-rebel-alliance/github-plugin#v<version>`, then run
+`opencode reload`.
 
-Then run `/github-status`: it shows `Connection: sign-in required` until you sign in.
+The first release on plugin-contract is `v0.0.0` (phase 4b). Until it is cut, there is no release to install:
+the repository carries no `dist/`, and OpenCode runs no build when it installs from Git.
 
 ## Sign in
 
-Run `/connect` and choose **GitHub**, then **Add account**, or run `opencode auth login GitHub`. A fine-grained
+After installing, run `/github-status`: it shows `Connection: sign-in required` until you sign in. Run `/connect`
+and choose **GitHub**, then **Add account**, or run `opencode auth login GitHub`. A fine-grained
 personal access token is enough; organisations can set `clientId` to offer a device sign-in with their own OAuth App
 or GitHub App. The permissions a fine-grained token needs, and the full sign-in options, are in
 [Configuration](https://github.com/we-the-rebel-alliance/github-plugin/blob/master/docs/configuration.md#fine-grained-token-permissions).
@@ -50,7 +50,7 @@ Each reports findings and changes nothing on GitHub unless you ask.
 
 **Events list.** `github_events_list` is the plugin's source `github.activity` under the shared source contract: the
 changes to issues and pull requests you are involved in, your commits, and other notifications, as normalised events
-oldest first, for Memory's collector and other scripts. It only reads, with GET requests, and never asks. See
+oldest first, for a consumer's collector and other scripts. It only reads, with GET requests, and never asks. See
 [Events list](https://github.com/we-the-rebel-alliance/github-plugin/blob/master/docs/configuration.md#events-list).
 
 ## Permissions

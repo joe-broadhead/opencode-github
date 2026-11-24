@@ -123,7 +123,7 @@ describe("constants", () => {
   it("has no default client ID, so only token sign-in is offered unless clientId is set", () => {
     expect(loadOptions({}).clientId).toBeUndefined()
     expect(loadOptions({ clientId: "Ov23liExample" }).clientId).toBe("Ov23liExample")
-    expect(loadOptions({ clientId: "Iv23liExample", appSlug: "jelly-dev" }).appSlug).toBe("jelly-dev")
+    expect(loadOptions({ clientId: "Iv23liExample", appSlug: "example-app" }).appSlug).toBe("example-app")
   })
 
   it("defaults to the read-only toolsets that repo and read:org cover: 49 reads once ui_get is hidden", () => {

@@ -6,7 +6,7 @@ Set options in the plugin's entry in `opencode.json`:
 {
   "plugins": [
     {
-      "package": "github:we-the-rebel-alliance/github-plugin",
+      "package": "github:we-the-rebel-alliance/github-plugin#v<version>",
       "options": {
         "toolsets": ["context", "repos", "issues", "pull_requests"],
         "access": "ask-changes",
@@ -627,7 +627,7 @@ see [Scripting](scripting.md#api).
 `github_events_list` (`tools.github.events_list` in Code Mode, and the tools RPC method `events_list`) is GitHub's
 source under the shared source contract, `@we-the-rebel-alliance/source-contract` v0.3.0 (see [Sources](#sources)). It
 lists what the signed-in user was involved in since a cursor, as normalised events, oldest first. It only reads, never
-asks and calls no model, so Memory's collector can run it unattended.
+asks and calls no model, so a consumer's collector can run it unattended.
 
 ```
 events_list({ since?, cursor?, limit?, account?, source? })
@@ -770,7 +770,7 @@ consumer reads them from the installed package. `github.activity` is the events 
 | `permission.events` | `github_events_list` |
 | `permission.rules` | `github_events_list` on `GET /search/issues`, `GET /search/commits` and `GET /notifications`: exactly the reads it makes |
 | `private` | `true`: private repositories and your notifications |
-| `cost` | `free`: GitHub's REST API is not billed; it is rate-limited (see the README's Known limits) |
+| `cost` | `free`: GitHub's REST API is not billed; GitHub's own rate limits apply |
 | `maxBytes` | 900,000 |
 | `urlHosts` | `github.com` |
 | `sources.rpc`, `sources.probe.action` | `github.platform.tools`, `github_probe` |
@@ -814,7 +814,7 @@ server.
 
 ## Fine-grained token permissions
 
-The full list is in the README's [Sign in](https://github.com/we-the-rebel-alliance/github-plugin/blob/master/README.md#sign-in).
+The sign-in paths are in the README's [Sign in](https://github.com/we-the-rebel-alliance/github-plugin/blob/master/README.md#sign-in).
 Which default toolset needs which read permission:
 
 | Permission | Toolsets |
@@ -841,14 +841,13 @@ To use your own OAuth App, register it under **GitHub Settings → Developer set
 tick **Enable Device Flow**, do not generate a client secret, and set its client ID:
 
 ```json
-{ "plugins": [{ "package": "github:we-the-rebel-alliance/github-plugin", "options": { "clientId": "<your OAuth App client ID>" } }] }
+{ "plugins": [{ "package": "github:we-the-rebel-alliance/github-plugin#v<version>", "options": { "clientId": "<your OAuth App client ID>" } }] }
 ```
 
 `scopes` changes what device sign-in asks for, for example `["public_repo"]` for public repositories only. Scopes
 are requested at sign-in; they are not part of the app.
 
-An organisation can set `clientId` and `scopes` for everyone on a machine; see
-[Organisation rollout](../README.md#organisation-rollout).
+An organisation can set `clientId` and `scopes` in the plugin entry of the config it gives its machines, for everyone.
 
 ### A GitHub App
 
@@ -877,7 +876,7 @@ tokens** on. Then:
   account, and links the install page.
 
 ```json
-{ "plugins": [{ "package": "github:we-the-rebel-alliance/github-plugin", "options": { "clientId": "<the GitHub App's client ID>", "appSlug": "<its URL name>" } }] }
+{ "plugins": [{ "package": "github:we-the-rebel-alliance/github-plugin#v<version>", "options": { "clientId": "<the GitHub App's client ID>", "appSlug": "<its URL name>" } }] }
 ```
 
 ## `host` (GitHub Enterprise Server)
@@ -894,7 +893,7 @@ GitHub's hosted MCP server does not support GitHub Enterprise Server. With `host
 - the status names the server and says that only `github_api` works.
 
 ```json
-{ "plugins": [{ "package": "github:we-the-rebel-alliance/github-plugin", "options": { "host": "github.example.com", "clientId": "<the server's OAuth App client ID>" } }] }
+{ "plugins": [{ "package": "github:we-the-rebel-alliance/github-plugin#v<version>", "options": { "host": "github.example.com", "clientId": "<the server's OAuth App client ID>" } }] }
 ```
 
 For GitHub's MCP tools on the server, run GitHub's `github-mcp-server` yourself as a local MCP server with
@@ -966,7 +965,7 @@ passed through unchanged.
 | `API_REDIRECT_INSECURE` | GitHub redirected to a non-HTTPS address. | Try again later. |
 | `API_REDIRECTED` | GitHub redirected a change, which is never followed. The message names the new path. | Call github_api again with path <the new path>, so the change is checked for that path. |
 | `API_REDIRECT_OFF_HOST` | GitHub redirected a read outside its API. | For job logs, call get_job_logs with return_content: true; for other files, pass download: { path }, which follows GitHub's storage redirects without the token. A script gets the get_job_logs method instead, and with `host` the step names only download. |
-| `INPUT_INVALID` | The `events_list` or `probe` input breaks the source contract, or a listing with a cursor names no account. | Pass only since, cursor, limit (1 to 500), list, account and source, as the tool's schema describes; pass account with a cursor. |
+| `INPUT_INVALID` | The `events_list` or `probe` input breaks the source contract, or a listing with a cursor names no account. | Pass only since, cursor, limit (1 to 500), account and source, as the tool's schema describes; pass account with a cursor. |
 | `SOURCE_UNKNOWN` | `events_list` or `probe` names a source the plugin does not have. | Leave source out, or pass github. |
 | `CURSOR_INVALID` | The cursor was not issued by GitHub's `events_list` for this account and its signed-in user, or was changed. | Call events_list without a cursor, with since, to start again. |
 | `ACCOUNT_MISMATCH` | `events_list` or `probe` names another account than the signed-in login, or a cursor issued for another account. | Pass the account the cursor was issued for, or sign in to GitHub as that account; probe names the signed-in login. |

@@ -8,9 +8,9 @@ import { type Declaration, type DeclaredTool, declarationProblems, docProblems, 
 import { ACCESS_CHOICES, type PluginSetting, settingChoices, settingsProblems, settingValueIssue } from "../support/jelly-settings.js"
 
 /**
- * The `jelly` section of package.json, which Jelly reads without loading the plugin. Jelly's agents have no base
- * "allow everything" rule, so this plugin's own default rules never reach them; Jelly writes each declared "ask" or
- * "deny" as that tool's default instead. The shared kit checks the declaration against Jelly's plugin authors'
+ * The `jelly` section of package.json, which the host reads without loading the plugin. A consumer's agents have no
+ * base "allow everything" rule, so this plugin's own default rules never reach them; the host writes each declared
+ * "ask" or "deny" as that tool's default instead. The shared kit checks the declaration against the plugin authors'
  * standard; the tests below add what only GitHub declares.
  */
 
@@ -37,7 +37,7 @@ describe("the jelly declaration", () => {
     for (const [permission, readOnly] of known) expect(declared.get(permission), permission).toBe(readOnly)
   })
 
-  it("declares the github server's sign-in, which takes a Jelly host's OAuth App as clientId, and, as its alternative, the GitHub Enterprise one, each with the codes that mean it is needed", () => {
+  it("declares the github server's sign-in, which takes a host's OAuth App as clientId, and, as its alternative, the GitHub Enterprise one, each with the codes that mean it is needed", () => {
     expect(jelly.signIns).toEqual([
       { id: "github", label: "GitHub", server: SERVER_NAME, group: "github", hostClient: { id: "github", option: "clientId" }, needed: ["AUTH_REQUIRED", "SIGN_IN_REJECTED"] },
       { id: "github-enterprise", label: ENTERPRISE_NAME, integration: ENTERPRISE_INTEGRATION_ID, group: "github", needed: ["AUTH_REQUIRED", "SIGN_IN_REJECTED"] },
@@ -62,11 +62,11 @@ describe("the jelly declaration", () => {
     expect(loadOptions({ access: "read-only", unknownTools: "hide", lockdown: true })).toMatchObject({ access: "read-only", unknownTools: "hide", lockdown: true })
   })
 
-  it("the settings follow Jelly's rules for a declared setting", () => {
+  it("the settings follow the plugin authors' rules for a declared setting", () => {
     expect(settingsProblems(jelly.contributes.settings)).toEqual([])
   })
 
-  it("access declares Jelly's own words for its three values, and unknownTools its two", () => {
+  it("access declares the family's own words for its three values, and unknownTools its two", () => {
     const setting = (key: string) => jelly.contributes.settings.find((entry) => entry.key === key)!
     expect(setting("access").choices).toEqual(ACCESS_CHOICES)
     expect((settingChoices(setting("unknownTools")) ?? []).map((choice) => choice.value)).toEqual(["list", "hide"])

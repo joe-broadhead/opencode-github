@@ -726,15 +726,16 @@ describe("a sign-in GitHub refuses, on a source read", () => {
 })
 
 // Every inner read asserts github_events_list, the tool's own permission, on its own GET /path through github_api's
-// real spec, before any network I/O, so the grant for the tool covers exactly its reads. Jelly's agents have no base
-// `* * allow` rule, so the plugin's block (with the github_api read allows) never reaches them; Jelly writes an allow for
-// each declared read tool instead, github_events_list included, and that alone must let Memory's unattended collection
-// run. A rule that asks for or denies github_events_list, or one of its paths, stops it with nothing sent.
+// real spec, before any network I/O, so the grant for the tool covers exactly its reads. A consumer's agents have no
+// base `* * allow` rule, so the plugin's block (with the github_api read allows) never reaches them; the declaration
+// writes an allow for each declared read tool instead, github_events_list included, and that alone must let a
+// consumer's unattended collection run. A rule that asks for or denies github_events_list, or one of its paths, stops
+// it with nothing sent.
 describe("events_list's inner reads", () => {
   const call = { sessionID: "ses_1", agent: "build", messageID: "msg_1", id: "call_1" }
   const BASE: Rule[] = [{ action: "*", resource: "*", effect: "allow" }, ...defaultRules("all")]
-  /** What Jelly writes for this plugin: an allow per declared tool, with no base allow and no github_api rule. */
-  const JELLY: Rule[] = [
+  /** What the declaration writes for this plugin: an allow per declared tool, with no base allow and no github_api rule. */
+  const DECLARED: Rule[] = [
     { action: "github_get_me", resource: "*", effect: "allow" },
     { action: EVENTS_ACTION, resource: "*", effect: "allow" },
   ]
@@ -793,8 +794,8 @@ describe("events_list's inner reads", () => {
     expect(EVENTS_READS).toEqual(READS.map((path) => `GET ${path}`))
   })
 
-  it("runs end to end in an agent with no base allow and only Jelly's allow for github_events_list", async () => {
-    const { run, fetched, asserted } = await wired([], JELLY)
+  it("runs end to end in an agent with no base allow and only the declaration's allow for github_events_list", async () => {
+    const { run, fetched, asserted } = await wired([], DECLARED)
     const result = await run().catch((error: unknown) => error)
     expect(String((result as Error).message ?? "")).not.toContain("PERMISSION_DENIED")
     expect(result).toMatchObject({ source: "github", owner: OWNER, events: [] })
@@ -803,13 +804,13 @@ describe("events_list's inner reads", () => {
   })
 
   it("is not decided by github_api rules: a session deny on github_api does not stop it", async () => {
-    const { run, fetched } = await wired([{ action: "github_api", resource: "*", effect: "deny" }], JELLY)
+    const { run, fetched } = await wired([{ action: "github_api", resource: "*", effect: "deny" }], DECLARED)
     expect((await run()).owner).toEqual(OWNER)
     expect(fetched).toEqual(SENT)
   })
 
   it("stops with nothing sent when the session denies github_events_list", async () => {
-    for (const agent of [BASE, JELLY]) {
+    for (const agent of [BASE, DECLARED]) {
       const { run, fetched, asserted } = await wired([{ action: EVENTS_ACTION, resource: "*", effect: "deny" }], agent)
       await expect(run()).rejects.toThrow(`refused: ${EVENTS_ACTION} * (deny)`)
       expect(fetched).toEqual([])
@@ -822,7 +823,7 @@ describe("events_list's inner reads", () => {
     ["GET /notifications", ["/search/issues", "/search/issues", "/search/commits"]],
   ])("refuses a read the session denies (%s) before its request, and an ask too, as nobody can answer it", async (resource, sent) => {
     for (const effect of ["deny", "ask"] as const) {
-      const { run, fetched } = await wired([{ action: EVENTS_ACTION, resource, effect }], JELLY)
+      const { run, fetched } = await wired([{ action: EVENTS_ACTION, resource, effect }], DECLARED)
       await expect(run()).rejects.toThrow(new RegExp(`^PERMISSION_DENIED: GET /(search|notifications)\\S* needs a prior allow rule for ${EVENTS_ACTION}`))
       expect(fetched).toEqual(sent)
     }
@@ -860,7 +861,7 @@ describe("events_list's inner reads", () => {
           },
         },
         session: { get: async () => ({ permissions: [] }) },
-        agent: { get: async () => ({ data: { permissions: JELLY } }) },
+        agent: { get: async () => ({ data: { permissions: DECLARED } }) },
       } as never,
       {
         readOnly: false,

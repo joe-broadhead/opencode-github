@@ -71,10 +71,11 @@ const loginFor = (authorization: string | null, revoked = false) => {
   return undefined
 }
 
-export function startFakeGitHub(tools: readonly FakeTool[] = FAKE_TOOLS): FakeGitHub {
+export function startFakeGitHub(tools: readonly FakeTool[] = FAKE_TOOLS, options: { readonly modern?: boolean } = {}): FakeGitHub {
   const requests: FakeRequest[] = []
   let polls = 0
   let revoked = false
+  const modern = options.modern === true
 
   const mcp = async (request: Request, path: string): Promise<Response> => {
     const login = loginFor(request.headers.get("authorization"), revoked)
@@ -95,7 +96,7 @@ export function startFakeGitHub(tools: readonly FakeTool[] = FAKE_TOOLS): FakeGi
     if (request.method === "DELETE") return new Response(null, { status: 204 })
     if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } })
     // JSON-RPC ids can be 0; only a missing or null id makes a notification.
-    const replies = messages.filter((message) => message.id !== undefined && message.id !== null).map((message) => answer(message, tools, headers.readonly === "true", login))
+    const replies = messages.filter((message) => message.id !== undefined && message.id !== null).map((message) => answer(message, tools, headers.readonly === "true", login, modern))
     if (replies.length === 0) return new Response(null, { status: 202 })
     return Response.json(Array.isArray(body) ? replies : replies[0], { headers: { "mcp-session-id": "fake-session" } })
   }
@@ -156,9 +157,22 @@ export function startFakeGitHub(tools: readonly FakeTool[] = FAKE_TOOLS): FakeGi
   }
 }
 
-function answer(message: Message, tools: readonly FakeTool[], readOnly: boolean, login: string) {
-  const reply = (result: unknown) => ({ jsonrpc: "2.0", id: message.id, result })
+function answer(message: Message, tools: readonly FakeTool[], readOnly: boolean, login: string, modern: boolean) {
+  // The 2026-07-28 era requires `resultType` on every result; the legacy era knows no such field.
+  const reply = (result: unknown) => ({ jsonrpc: "2.0", id: message.id, result: { ...(modern ? { resultType: "complete" } : {}), ...(result as object) } })
   switch (message.method) {
+    // The modern probe, `server/discover`: its result is an InitializeResult that lists the supported versions and
+    // carries the server's identity in `_meta` (effect/src/ai/McpClient.ts:283-315;
+    // @opencode/core/dist/mcp/client.js:314,432,679-700). The plugin's own captures speak the legacy era to GitHub
+    // (scripts/capture-tools.mjs, PROTOCOL_VERSION), so the default fake answers the probe as an unknown method and the
+    // client falls back to `initialize`; `modern` serves a server that offers 2026-07-28 instead.
+    case "server/discover":
+      if (!modern) return { jsonrpc: "2.0", id: message.id, error: { code: -32601, message: `Method not found: ${message.method}` } }
+      return reply({
+        supportedVersions: ["2026-07-28"],
+        capabilities: { tools: {} },
+        _meta: { "io.modelcontextprotocol/serverInfo": { name: "fake-github", version: "0.0.0" } },
+      })
     case "initialize":
       return reply({
         protocolVersion: message.params?.protocolVersion ?? "2025-06-18",
@@ -168,6 +182,8 @@ function answer(message: Message, tools: readonly FakeTool[], readOnly: boolean,
     case "tools/list":
       // Like GitHub with X-MCP-Readonly: true, write tools are not offered.
       return reply({
+        // A modern tools/list is a CacheableResult: ttlMs and cacheScope are required there.
+        ...(modern ? { ttlMs: 0, cacheScope: "private" } : {}),
         tools: tools.filter((tool) => !readOnly || tool.readOnly).map((tool) => ({
           name: tool.name,
           description: `Fake ${tool.name}`,

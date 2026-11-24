@@ -21,7 +21,7 @@ import { TOOLS_RPC_ID } from "../../src/tools-rpc.js"
 
 const root = fileURLToPath(new URL("../..", import.meta.url))
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { name: string; version: string; sources: unknown; jelly: { tools: { name: string; readOnly: boolean }[] } }
-/** The declaration as Memory's schema parses it, which is what the kit takes (source-contract#30, item 8). */
+/** The declaration as the source contract's schema parses it, which is what the kit takes (source-contract#30, item 8). */
 const checked = SOURCES_SCHEMA.check(pkg.sources)
 if (!checked.ok) throw new Error(`the sources declaration is invalid: ${checked.problems.join("; ")}`)
 const sources: Sources = checked.value

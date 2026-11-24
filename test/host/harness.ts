@@ -85,6 +85,8 @@ export interface HostInput {
   readonly config?: (origin: string) => Record<string, unknown>
   /** The version the host reports to plugins; defaults to the SDK's. */
   readonly version?: string
+  /** The fake GitHub's MCP era: legacy (GitHub's today) unless `modern` answers `server/discover`. */
+  readonly fake?: { readonly modern?: boolean }
   /**
    * "sdk" registers the built plugin with the SDK instead (default options), so a test can
    * unload it by registering another plugin with its ID.
@@ -98,7 +100,7 @@ export async function startHost(input: HostInput = {}) {
   const base = join(ROOT, `host-${++hosts}`)
   const work = join(base, "work")
   mkdirSync(work, { recursive: true })
-  const fake = startFakeGitHub()
+  const fake = startFakeGitHub(undefined, input.fake)
   router.target = fake.origin
   const blockedBefore = router.blocked.length
   const sdk = input.load === "sdk"

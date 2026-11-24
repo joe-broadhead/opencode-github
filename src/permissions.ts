@@ -20,7 +20,7 @@ export const API_READS = ["GET *", "HEAD *", "POST /markdown", "POST /markdown/r
  * Broad first, narrow last, because the last matching rule wins. At `access: "all"` every tool the plugin registers
  * is allowed, and so is one GitHub adds later through the `github_*` pattern; `ask-changes` asks for anything that is
  * not a read, and `read-only` denies it. The reads are always allowed, and so are the plugin's own `events_list`, which
- * Memory's collector runs unattended, and the source contract's `probe` (`github_probe`, a tools RPC method that names
+ * a consumer's collector runs unattended, and the source contract's `probe` (`github_probe`, a tools RPC method that names
  * who is signed in); that is why the first rule alone decides an unknown tool. github_api asserts every
  * request on its own `METHOD /path`, so its reads are allowed by resource, and its changes fall to the first rule.
  */

@@ -385,6 +385,41 @@ describe(`a revoked sign-in on OpenCode ${SDK_VERSION}`, () => {
     await connected(host)
     expect(await until("the account's mark clears", async () => (await account())?.status === undefined)).toBe(true)
   })
+
+  // The modern era's initialization is the `server/discover` probe, not `initialize`
+  // (effect/src/ai/McpClient.ts:283-315; @opencode/core/dist/mcp/client.js:314,432,679-700). A 401 on the probe ends
+  // the attempt: it becomes NeedsAuthError, not a reason to fall back to the legacy `initialize`.
+  test("a revoked token ends at the server/discover probe, with no initialize after the 401", async () => {
+    host.fake.revoke()
+    await host.client.experimental.mcp.disconnect({ server: "github", location: host.location })
+    const before = host.fake.requests.length
+    await host.client.experimental.mcp.connect({ server: "github", location: host.location })
+    await until("github needs sign-in", async () => (await githubServer(host))?.status.status === "needs_auth")
+    const probes = host.fake.requests.slice(before).filter((request) => request.rpc !== undefined)
+    expect(probes.map((request) => request.rpc)).toEqual(["server/discover"])
+    expect(probes[0]).toMatchObject({ method: "POST", path: "/mcp/", authorized: false })
+    host.fake.restore()
+  })
+})
+
+// A server that offers the 2026-07-28 era through `server/discover`: the fake's answer is a valid modern result, so a
+// connection negotiates the modern era and never sends the legacy `initialize`.
+describe(`a server that answers server/discover on OpenCode ${SDK_VERSION}`, () => {
+  let host: Host
+  beforeAll(async () => {
+    host = await startHost({ fake: { modern: true } })
+    expect((await signInWithToken(host)).settled.status).toBe("complete")
+    await connected(host)
+  })
+  afterAll(() => host?.close())
+
+  test("connects in the modern era and sends no initialize", async () => {
+    await tool(host, "github_get_me")
+    const methods = mcpRequests(host).flatMap((request) => (request.rpc === undefined ? [] : [request.rpc]))
+    expect(methods[0]).toBe("server/discover")
+    expect(methods).not.toContain("initialize")
+    expect(methods).toContain("tools/list")
+  })
 })
 
 describe(`GitHub Enterprise Server on OpenCode ${SDK_VERSION}`, () => {
@@ -394,7 +429,7 @@ describe(`GitHub Enterprise Server on OpenCode ${SDK_VERSION}`, () => {
     // github_events_list alone. The plugin's block never reaches it, so its github_api reads ask.
     host = await startHost({
       options: { host: "ghe.example.com", access: "all" },
-      config: () => ({ agents: { collector: { description: "Collects for Memory", mode: "subagent", permissions: [{ action: "*", resource: "*", effect: "ask" }, allow("github_events_list")] } } }),
+      config: () => ({ agents: { collector: { description: "Collects GitHub events", mode: "subagent", permissions: [{ action: "*", resource: "*", effect: "ask" }, allow("github_events_list")] } } }),
     })
   })
   afterAll(() => host?.close())
@@ -454,7 +489,7 @@ describe(`GitHub Enterprise Server on OpenCode ${SDK_VERSION}`, () => {
     expect(await host.client.permission.list({ sessionID: denied })).toEqual([])
   })
 
-  // Memory's unattended collection in an agent without the base allow: its allow for github_events_list alone lets
+  // A consumer's unattended collection in an agent without the base allow: its allow for github_events_list alone lets
   // every inner read run, with no github_api rule; a deny on github_events_list stops it with nothing sent.
   test("events_list runs in an agent with no base allow and only an allow for github_events_list", async () => {
     const sessionID = await session(host, "collector")

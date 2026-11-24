@@ -118,7 +118,7 @@ export const TOOL_PREFIX = `${SERVER_NAME}_`
 /** The plugin's own github_api tool, which shares the prefix and the Code Mode namespace. */
 export const API_TOOL_NAME = "api"
 const API_TOOL = `${TOOL_PREFIX}${API_TOOL_NAME}`
-/** The plugin's own github_events_list, Memory's source of GitHub events: a read, in the same namespace. */
+/** The plugin's own github_events_list, the plugin's source of GitHub events: a read, in the same namespace. */
 export const EVENTS_TOOL_NAME = "events_list"
 /** The source contract's probe: a tools RPC method (no tool), whose permission action is `github_probe`. */
 export const PROBE_METHOD_NAME = "probe"

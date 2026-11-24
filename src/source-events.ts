@@ -1,6 +1,6 @@
 // GitHub's source under the source contract (`@we-the-rebel-alliance/source-contract`, declared in package.json's
 // `sources` as `github.activity`): events_list lists what the signed-in person did or was involved in since a cursor,
-// as normalised events, oldest first, for Memory's collector and other consumers, and probe names who is signed in.
+// as normalised events, oldest first, for a consumer's collector and other scripts, and probe names who is signed in.
 //
 // events_list only reads: GET requests through github_api's own spec, with the plugin's sign-in. Each GET asserts the
 // tool's own permission, `github_events_list`, on its `GET /path` as the caller, unattended: it runs only under a prior
@@ -1233,7 +1233,7 @@ export async function probeEvents(get: Get, identity: Identity, input: unknown, 
 }
 
 export const EVENTS_DESCRIPTION =
-  "For Memory's collector and scripts, not for answering questions: lists what the signed-in GitHub user was involved in since a cursor, as normalised events, oldest first: " +
+  "For a consumer's collector and scripts, not for answering questions: lists what the signed-in GitHub user was involved in since a cursor, as normalised events, oldest first: " +
   "each change to an issue or pull request they are involved in, each commit they authored, and other notifications where the sign-in may read them, with html_url links. " +
   "Pass the previous result's cursor, with its account, to list what came after; without one it starts at since, or 24 hours ago. It only reads, with GET requests, and never asks. " +
   "A commit that reaches a default branch after the cursor passed its committer date (a pull request merged later, a cherry-pick) is not listed; the pull request's merge is. " +

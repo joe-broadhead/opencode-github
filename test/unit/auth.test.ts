@@ -607,7 +607,7 @@ describe("GitHub App device sign-in", () => {
   it("labels the account with the login alone, since OpenCode never updates a label, and records no installation", async () => {
     const host = fakeHost()
     host.registerServer()
-    const auth = await registerAuth(host.ctx, { ...INPUT, appSlug: "jelly-dev" })
+    const auth = await registerAuth(host.ctx, { ...INPUT, appSlug: "example-app" })
     await vi.advanceTimersByTimeAsync(0)
     const { credential } = await appSignIn(host, 0)
     expect(credential.metadata).toMatchObject({ installations: 0 })

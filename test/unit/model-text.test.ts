@@ -33,7 +33,7 @@ describe("the model-facing text at access all", () => {
   const all = {
     "the Code Mode namespace": namespaceDescription({ enterprise: false }),
     "github_api's description": apiDescription(false),
-    "the Jelly summary": (JSON.parse(read("package.json")) as { jelly?: { summary?: string } }).jelly?.summary ?? "",
+    "the declared summary": (JSON.parse(read("package.json")) as { jelly?: { summary?: string } }).jelly?.summary ?? "",
     ...Object.fromEntries(SKILLS),
   }
 
