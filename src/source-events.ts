@@ -70,6 +70,7 @@ import {
 import type { OwnedMethod, ToolCall } from "@we-the-rebel-alliance/source-contract/tools-rpc"
 import type { ApiInput, ApiOutput } from "./api/contract.js"
 import type { ApiScope, Call, ReadLimits } from "./api/tool.js"
+import { ENTERPRISE_NAME } from "./enterprise.js"
 import { GitHubPluginError } from "./errors.js"
 import { SERVER_NAME } from "./rpc.js"
 import { EVENTS_TOOL_NAME } from "./tools.js"
@@ -219,6 +220,21 @@ type EventsCode = "INPUT_INVALID" | "SOURCE_UNKNOWN" | "CURSOR_INVALID" | "ACCOU
 const fail = (code: EventsCode, message: string, next: string): never => {
   throw new GitHubPluginError(code, message, next)
 }
+
+/**
+ * A sign-in GitHub refuses, as the source contract's sign-in failure: AUTH_REQUIRED, which it reads as NEEDS_SIGN_IN. A
+ * refused renewal is SIGN_IN_REJECTED everywhere else, a code the contract does not know, which a consumer would read as
+ * UNAVAILABLE. Every other error is itself.
+ */
+const asSignIn = (error: unknown): unknown =>
+  error instanceof GitHubPluginError && error.code === "SIGN_IN_REJECTED" ? new GitHubPluginError("AUTH_REQUIRED", error.detail, error.nextStep) : error
+/** A 401 on a required read rejects the token. Notifications can also answer 401 for lack of scope. */
+const requiresSignIn = (get: Get, host?: string): Get =>
+  async (...args) => {
+    const output = await get(...args)
+    if (output.status === 401) fail("AUTH_REQUIRED", "GitHub rejected the saved sign-in.", `Run /connect and choose ${host === undefined ? "GitHub" : ENTERPRISE_NAME} to sign in again.`)
+    return output
+  }
 
 /** The login in GET /user's answer, or a login itself. */
 export function loginOf(value: unknown): string | undefined {
@@ -1019,9 +1035,11 @@ function earlier(state: Record<string, unknown>): CursorState {
   return withLookback(from, times, behind, record(lookback) ? lookback["h"] : undefined)
 }
 
-/** The signed-in login, or AUTH_REQUIRED; `method` names the caller in the message. */
+/** The signed-in login, or AUTH_REQUIRED, a refused renewal included; `method` names the caller in the message. */
 async function signedIn(identity: Identity, method: string): Promise<string> {
-  const login = await identity()
+  const login = await identity().catch((error: unknown) => {
+    throw asSignIn(error)
+  })
   if (login === undefined) return fail("AUTH_REQUIRED", `GitHub is not signed in, so ${method} has no account to read.`, "Run /connect and choose GitHub.")
   if (!LOGIN.test(login)) return fail("UNAVAILABLE", "The GitHub sign-in does not name a GitHub login.", "Run /connect and choose GitHub to sign in again.")
   return login
@@ -1073,6 +1091,7 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
     p: { path: "/search/issues", sort: "updated", query: (range) => `is:pull-request involves:${login} updated:${range}`, make: (raw) => carried("p", streamOf(issueItem(raw, account), "p")) },
     c: { path: "/search/commits", sort: "committer-date", query: (range) => `author:${login} committer-date:${range}`, make: (raw) => carried("c", commitItem(raw, account)) },
   }
+  const searchGet = requiresSignIn(get, host)
   const budget: Budget = { left: SEARCH_BUDGET }
   const searched: Record<"i" | "p" | "c", SearchRead> = { i: { items: [], complete: true, last: Number.POSITIVE_INFINITY, start: from.i }, p: { items: [], complete: true, last: Number.POSITIVE_INFINITY, start: from.p }, c: { items: [], complete: true, last: Number.POSITIVE_INFINITY, start: from.c } }
   // A second a call could not read whole for want of requests is read first: a held second (`h` in the cursor), or one
@@ -1086,14 +1105,14 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   for (const stream of firsts) {
     const allowance: Budget = { left: Math.max(0, budget.left - others.length) }
     const allowed = allowance.left
-    searched[stream] = await searchSecond(get, searches[stream], from[stream], heldSecond(stream)!, allowance, true)
+    searched[stream] = await searchSecond(searchGet, searches[stream], from[stream], heldSecond(stream)!, allowance, true)
     budget.left -= allowed - allowance.left
   }
   // Each search leaves one request for every search after it, so none is left without a page to read.
   for (const [index, stream] of others.entries()) {
     const allowance: Budget = { left: Math.max(0, budget.left - (others.length - 1 - index)) }
     const allowed = allowance.left
-    searched[stream] = await search(get, searches[stream], from[stream], request.limit, allowance, end)
+    searched[stream] = await search(searchGet, searches[stream], from[stream], request.limit, allowance, end)
     budget.left -= allowed - allowance.left
   }
   // A stream whose read found only one second reads that second whole, with what is left of the budget: the earliest
@@ -1101,7 +1120,7 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   // from where the search left the stream: its position, or past seconds the search found empty.
   const stuck = (["i", "p", "c"] as const).flatMap((stream) => (searched[stream].stuck === undefined ? [] : [{ stream, second: searched[stream].stuck! }]))
   for (const { stream, second } of stuck.sort((a, b) => a.second - b.second || (a.stream < b.stream ? -1 : 1))) {
-    searched[stream] = await searchSecond(get, searches[stream], searched[stream].start, second, budget)
+    searched[stream] = await searchSecond(searchGet, searches[stream], searched[stream].start, second, budget)
   }
 
   // GitHub keeps notifications for three months: a stream that starts before that may have lost some, so it restarts at
@@ -1282,7 +1301,7 @@ export async function probeEvents(get: Get, identity: Identity, input: unknown, 
   if (parsed.value.account !== undefined && parsed.value.account.toLowerCase() !== account) {
     fail("ACCOUNT_MISMATCH", `GitHub is signed in to another account than "${parsed.value.account}".`, `Sign in to GitHub as that account (/connect, GitHub), or read as "${account}", the signed-in login.`)
   }
-  const output = await get("/user", {})
+  const output = await requiresSignIn(get, host)("/user", {})
   if (!output.ok) fail("UNAVAILABLE", `GitHub answered /user with ${output.status}.`, output.nextStep ?? "Run /github-status, then call probe again.")
   const confirmed = loginOf(output.data)
   if (confirmed === undefined) fail("UNAVAILABLE", "GitHub's answer to /user named no login.", "Run /github-status, then call probe again.")
@@ -1544,6 +1563,8 @@ const getter =
     })
     try {
       return await Promise.race([deps.api.run({ method: "GET", path, query }, { ...call, script: true, signal }, scope, maxBytes === undefined ? undefined : { inlineBytes: maxBytes, readBytes: maxBytes }), late])
+    } catch (error) {
+      throw asSignIn(error)
     } finally {
       clearTimeout(timer)
     }

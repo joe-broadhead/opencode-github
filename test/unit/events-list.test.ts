@@ -9,9 +9,10 @@ import { describe, expect, it } from "vitest"
 import type { ApiOutput } from "../../src/api/contract.js"
 import { registerApiTool } from "../../src/api/tool.js"
 import { DEFAULT_TOOLSETS, GITHUB_COM } from "../../src/config.js"
+import { signInAgain } from "../../src/device-flow.js"
 import { GitHubPluginError } from "../../src/errors.js"
 import { encodeBoundCursor, encodeCursor } from "@we-the-rebel-alliance/source-contract/cursor"
-import { EVENT_LIMITS, PAGE, assertEventsListConformance, resultProblems, type EventsListResult } from "@we-the-rebel-alliance/source-contract/events"
+import { EVENT_LIMITS, PAGE, assertEventsListConformance, canonicalCode, resultProblems, type EventsListResult } from "@we-the-rebel-alliance/source-contract/events"
 import { checkOutput } from "@we-the-rebel-alliance/source-contract/registry"
 import { type Rule, defaultRules, effectOf } from "../../src/permissions.js"
 import {
@@ -834,6 +835,80 @@ describe("the tool and the tools RPC methods", () => {
       expect(effectOf(defaultRules(access), "github_probe", "*")).toBe("allow")
     }
     expect((await method.run({ since: "2999-01-01" }, { ...call, signal: new AbortController().signal, progress: async () => {} })) as EventsListResult).toMatchObject({ source: "github", events: [] })
+  })
+})
+
+// A sign-in GitHub refuses, a renewal refused or a token rejected, is the source contract's sign-in failure on every
+// source read and probe: AUTH_REQUIRED, which the contract reads as NEEDS_SIGN_IN. Any other code would reach a consumer
+// as UNAVAILABLE, as though the source had changed.
+describe("a sign-in GitHub refuses, on a source read", () => {
+  const refused = async () => {
+    throw signInAgain("GitHub")
+  }
+  const unauthorized = async (): Promise<ApiOutput> => ({
+    ok: false, status: 401, data: { message: "Bad credentials" }, truncated: false, trust: { githubContent: "untrusted" },
+  })
+  const refusal = async (promise: Promise<unknown>) => {
+    try {
+      await promise
+    } catch (error) {
+      return error instanceof GitHubPluginError ? { code: error.code, next: error.nextStep, canonical: canonicalCode(error.code) } : String(error)
+    }
+    return undefined
+  }
+  const SIGN_IN = { code: "AUTH_REQUIRED", next: "Run /connect and choose GitHub to sign in again.", canonical: "NEEDS_SIGN_IN" }
+
+  it("is AUTH_REQUIRED when the renewal is refused, with the sign-in's next step", async () => {
+    expect(await refusal(probeEvents(github().get, refused, {}))).toEqual(SIGN_IN)
+    expect(await refusal(listEvents(github().get, refused, { since: SINCE }, NOW))).toEqual(SIGN_IN)
+    expect(await refusal(listNotifications(github().get, refused, { list: NOTIFICATIONS_LIST }, NOW))).toEqual(SIGN_IN)
+  })
+
+  it("is AUTH_REQUIRED when GitHub rejects the token with 401", async () => {
+    expect(await refusal(probeEvents(unauthorized, github().identity, {}))).toEqual(SIGN_IN)
+    expect(await refusal(listEvents(unauthorized, github().identity, { since: SINCE }, NOW))).toEqual(SIGN_IN)
+  })
+
+  it("points a rejected Enterprise source read to the Enterprise sign-in", async () => {
+    const host = "github.example"
+    const expected = { ...SIGN_IN, next: "Run /connect and choose GitHub Enterprise to sign in again." }
+    expect(await refusal(probeEvents(unauthorized, github().identity, {}, host))).toEqual(expected)
+    expect(await refusal(listEvents(unauthorized, github().identity, { since: SINCE }, NOW, host))).toEqual(expected)
+  })
+
+  it("exposes AUTH_REQUIRED in the model tool error metadata", async () => {
+    type Execute = (input: unknown, call: { sessionID: string; agent: string; messageID: string; id: string }) => Promise<unknown>
+    let execute: Execute | undefined
+    const ctx = {
+      permission: { assert: async () => {} },
+      tool: {
+        transform: async (edit: (editor: { add: (tool: { execute: Execute }) => void }) => void) => {
+          edit({ add: (tool) => { execute = tool.execute } })
+          return { dispose: async () => {} }
+        },
+      },
+    }
+    const deps = { ctx, api: { run: unauthorized }, identity: github().identity, now: () => NOW }
+    await registerEventsTool(ctx as never, deps)
+    await expect(execute!({ since: SINCE }, { sessionID: "ses_1", agent: "build", messageID: "msg_1", id: "call_1" })).rejects.toMatchObject({
+      _tag: "Tool.Error",
+      message: "AUTH_REQUIRED: GitHub rejected the saved sign-in. Next step: " + SIGN_IN.next,
+      metadata: { code: SIGN_IN.code, next: SIGN_IN.next },
+    })
+  })
+
+  it("is AUTH_REQUIRED when the renewal is refused between the sign-in check and a request", async () => {
+    const fake = github()
+    const deps = {
+      ctx: { permission: { assert: async () => {} } },
+      api: { run: refused },
+      identity: fake.identity,
+      now: () => NOW,
+    } as never
+    const call = { sessionID: "ses_1", agent: "build", messageID: "msg_1", id: "call_1" }
+    expect(await refusal(runProbe(deps, {}, call))).toEqual(SIGN_IN)
+    expect(await refusal(runEvents(deps, { since: SINCE }, call))).toEqual(SIGN_IN)
+    expect(await refusal(runSource(deps, { source: SOURCE, list: NOTIFICATIONS_LIST }, call))).toEqual(SIGN_IN)
   })
 })
 

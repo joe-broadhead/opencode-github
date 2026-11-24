@@ -4,7 +4,10 @@ import { describe, expect, it } from "vitest"
 import { SCRIPT_API_METHOD, scriptApi } from "../../src/api/script.js"
 import { API_ACTION, registerApiTool } from "../../src/api/tool.js"
 import { DEFAULT_TOOLSETS, GITHUB_COM } from "../../src/config.js"
+import { signInAgain } from "../../src/device-flow.js"
 import { GitHubPluginError } from "../../src/errors.js"
+import { EVENTS_ACTION, PROBE_ACTION, eventsMethod, probeMethod } from "../../src/source-events.js"
+import { canonicalCode } from "@we-the-rebel-alliance/source-contract/events"
 import { registerToolsRpc, type ToolCall } from "@we-the-rebel-alliance/source-contract/tools-rpc"
 import { METHODS, NEXT_STEPS, PLUGIN, PLUGIN_ID, pluginError, TOOLS_RPC_ID } from "../../src/tools-rpc.js"
 import { HIDDEN, KNOWN_TOOLS, allReadTools } from "../../src/tools.js"
@@ -31,13 +34,15 @@ async function setUp(
     managed?: boolean
     servers?: { name: string; status: { status: string } }[]
     signedIn?: boolean
-    /** GitHub's answer per URL; anything else is 200. */
+    sources?: boolean
+    beforeResolve?: () => void
+    /** GitHub's answer per URL or pathname; anything else is 200. */
     answers?: Record<string, () => Response>
     /** Asserts refused as the tools RPC's hook refuses an ask: a Tool.Error with the request as its cause. */
     refuse?: boolean | ((resource: string) => boolean)
   } = {},
 ) {
-  const agents = input.agents ?? { build: BASE }
+  const agents = input.agents ?? { build: input.sources ? [...BASE, rule(PROBE_ACTION, "allow"), rule(EVENTS_ACTION, "allow")] : BASE }
   const requests: { url: string; method: string }[] = []
   const asserts: unknown[] = []
   const runs: ToolCall[] = []
@@ -75,7 +80,10 @@ async function setUp(
     integration: {
       connection: {
         active: async () => (input.signedIn === false ? undefined : { type: "credential", id: "cred_1", label: "octocat", method: "oauth" }),
-        resolve: async () => ({ type: "oauth", methodID: "github-token", access: TOKEN, refresh: "", expires: 0 }),
+        resolve: async () => {
+          input.beforeResolve?.()
+          return { type: "oauth", methodID: "github-token", access: TOKEN, refresh: "", expires: 0 }
+        },
         status: async () => {},
       },
     },
@@ -90,11 +98,16 @@ async function setUp(
     integrationID: () => "mcp_github",
     fetch: async (url, init) => {
       requests.push({ url, method: init.method ?? "GET" })
-      return input.answers?.[url]?.() ?? Response.json({ full_name: "octo/repo" })
+      return input.answers?.[url]?.() ?? input.answers?.[new URL(url).pathname]?.() ?? Response.json({ full_name: "octo/repo" })
     },
   })
   const spy = { ...api, run: (...[value, call]: Parameters<typeof api.run>) => (runs.push(call as ToolCall), api.run(value, call)) }
-  await registerToolsRpc(ctx as never, { plugin: PLUGIN, methods: [...METHODS, scriptApi(spy)], mcp: { server: "github", managed: () => input.managed ?? true } })
+  const sources = { ctx: { permission: ctx.permission as never }, api, identity: api.identity, now: () => Date.parse("2026-11-10T00:00:00Z") }
+  await registerToolsRpc(ctx as never, {
+    plugin: PLUGIN,
+    methods: [...METHODS, scriptApi(spy), ...(input.sources ? [eventsMethod(sources), probeMethod(sources)] : [])],
+    mcp: { server: "github", managed: () => input.managed ?? true },
+  })
   const call = (method: string, value: unknown, agent = "build") =>
     handlers[method]!({ sessionID: `ses_${agent}`, input: value }, { signal: new AbortController().signal, error: (type, message, data) => ({ type, message, data }) })
   return { contract: contract!, handlers, call, requests, asserts, runs }
@@ -157,6 +170,67 @@ describe("GitHub's tools RPC", () => {
     expect(description.methods.find((entry: { name: string }) => entry.name === SCRIPT_API_METHOD)).toMatchObject({ available: false, reason: "AUTH_REQUIRED" })
     expect(await h.call(SCRIPT_API_METHOD, { method: "GET", path: "/user" })).toMatchObject({ type: "failed", data: { code: "AUTH_REQUIRED", next: "Run /connect and choose GitHub." } })
     expect(h.requests).toEqual([])
+  })
+})
+
+describe("the source tools RPC", () => {
+  const ACTIVITY = { source: "github", since: "2026-11-09" }
+  const NOTIFICATIONS = { source: "github", list: "notifications" }
+  const SEARCH = () => Response.json({ total_count: 0, items: [], incomplete_results: false })
+  const UNAUTHORIZED = () => Response.json({ message: "Bad credentials" }, { status: 401 })
+  const NEXT = "Run /connect and choose GitHub to sign in again."
+  const SIGN_IN = { type: "failed", data: { code: "AUTH_REQUIRED", next: NEXT } }
+
+  it("reports a rejected probe and a rejected commits search as NEEDS_SIGN_IN, but returns the raw 401 for api", async () => {
+    const h = await setUp({ sources: true, answers: { "/user": UNAUTHORIZED, "/search/issues": SEARCH, "/search/commits": UNAUTHORIZED } })
+    for (const [method, input] of [["probe", {}], ["events_list", ACTIVITY]] as const) {
+      const response = await h.call(method, input)
+      expect(response).toMatchObject(SIGN_IN)
+      expect(canonicalCode(response.data.code)).toBe("NEEDS_SIGN_IN")
+    }
+    expect(await h.call(SCRIPT_API_METHOD, { method: "GET", path: "/user" })).toMatchObject({ ok: false, status: 401, nextStep: `GitHub rejected the saved sign-in. ${NEXT}` })
+    expect(h.requests.map(({ method, url }) => [method, new URL(url).pathname])).toEqual([
+      ["GET", "/user"], ["GET", "/search/issues"], ["GET", "/search/issues"], ["GET", "/search/commits"], ["GET", "/user"],
+    ])
+  })
+
+  it.each([
+    ["when checking identity", 1],
+    ["when loading the credential for the first GET", 2],
+  ])("normalizes a wrapped renewal refusal %s for each source route, but not for api", async (_where, rejectAt) => {
+    let resolveCount = 0
+    const h = await setUp({
+      sources: true,
+      beforeResolve: () => {
+        if (++resolveCount >= rejectAt) throw new Error("credential resolution failed", { cause: signInAgain("GitHub") })
+      },
+    })
+    for (const [method, input] of [["probe", {}], ["events_list", ACTIVITY], ["events_list", NOTIFICATIONS]] as const) {
+      resolveCount = 0
+      const response = await h.call(method, input)
+      expect(response).toMatchObject(SIGN_IN)
+      expect(canonicalCode(response.data.code)).toBe("NEEDS_SIGN_IN")
+    }
+    resolveCount = rejectAt - 1
+    expect(await h.call(SCRIPT_API_METHOD, { method: "GET", path: "/user" })).toMatchObject({ type: "failed", data: { code: "SIGN_IN_REJECTED", next: NEXT } })
+    expect(h.requests).toEqual([])
+  })
+
+  it.each([401, 403, 404, 422])("keeps the notifications scope fallback for HTTP %s without probing or widening permissions", async (status) => {
+    const h = await setUp({
+      sources: true,
+      agents: { build: [rule(EVENTS_ACTION, "allow")] },
+      answers: { "/search/issues": SEARCH, "/search/commits": SEARCH, "/notifications": () => Response.json({}, { status }) },
+    })
+    expect(await h.call("events_list", ACTIVITY)).toMatchObject({ events: [], more: false })
+    expect(await h.call("events_list", NOTIFICATIONS)).toMatchObject({ data: { items: [], editable: false } })
+    expect(h.requests.map(({ url }) => new URL(url).pathname)).toEqual(["/search/issues", "/search/issues", "/search/commits", "/notifications", "/notifications"])
+  })
+
+  it("does not treat a transient or scope failure on a required read as rejected auth", async () => {
+    const h = await setUp({ sources: true, answers: { "/user": () => Response.json({}, { status: 503 }), "/search/issues": () => Response.json({}, { status: 403 }) } })
+    expect(await h.call("probe", {})).toMatchObject({ type: "failed", data: { code: "UNAVAILABLE" } })
+    expect(await h.call("events_list", ACTIVITY)).toMatchObject({ type: "failed", data: { code: "UNAVAILABLE" } })
   })
 })
 
