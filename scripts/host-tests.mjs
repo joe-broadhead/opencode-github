@@ -1,5 +1,5 @@
 // Runs the host tests (test/host) once per tested OpenCode release, TESTED_HOSTS in src/host-version.ts. The release
-// in the lockfile (2.2.3) runs on the SDK in node_modules. Each other one runs on HOST_SDK_DIR_<version>, a folder whose
+// in the lockfile (2.4.1) runs on the SDK in node_modules. Another release runs on HOST_SDK_DIR_<version>, a folder whose
 // node_modules holds that @opencode/sdk, or else on @opencode/sdk@<version> installed with scripts disabled, once per
 // run, into a temp folder under /tmp that is removed afterwards. The lockfile never gets a second SDK.
 // With HOST_SDK_DIR set, it runs once, on that SDK only. Extra arguments go to `bun test`.

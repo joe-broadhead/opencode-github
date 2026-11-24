@@ -1,10 +1,10 @@
 // GitHub's source under the source contract (`@we-the-rebel-alliance/source-contract`, declared in package.json's
 // `sources` as `github.activity`): events_list lists what the signed-in person did or was involved in since a cursor,
-// as normalised events, oldest first, for Memory's collector and other consumers, and probe names who is signed in.
+// as normalised events, oldest first, for a consumer's collector and other scripts, and probe names who is signed in.
 //
 // events_list only reads: GET requests through github_api's own spec, with the plugin's sign-in. Each GET asserts the
 // tool's own permission, `github_events_list`, on its `GET /path` as the caller, unattended: it runs only under a prior
-// allow rule, and the grant for the tool (Jelly writes one for a declared read) covers exactly these reads. It reaches
+// allow rule, and the grant for the tool covers exactly these reads. It reaches
 // nothing but EVENTS_READS. It never asks GitHub who is signed in: the account and the owner are the sign-in's own,
 // the login GitHub's GET /user named when the person signed in, which /github-status shows as the Account. probe makes
 // that one GET /user, under its own action `github_probe`, to confirm the sign-in still names that login.
@@ -64,7 +64,6 @@ import {
   parseProbeInput,
   probeResult,
   screenEvents,
-  secretKinds,
   startTime,
 } from "@we-the-rebel-alliance/source-contract/events"
 import type { OwnedMethod, ToolCall } from "@we-the-rebel-alliance/source-contract/tools-rpc"
@@ -76,7 +75,7 @@ import { SERVER_NAME } from "./rpc.js"
 import { EVENTS_TOOL_NAME } from "./tools.js"
 
 /** The plugin's package name, which every page names. */
-export const PACKAGE = "@joe-broadhead/opencode-github"
+export const PACKAGE = "@we-the-rebel-alliance/github-plugin"
 /** The source contract's namespace for this plugin: the source is `github.activity`, and each cursor is bound to it. */
 export const NAMESPACE = "github"
 /** The one source this plugin lists: events_list's `source` input. */
@@ -91,10 +90,6 @@ export const PROBE_ACTION = `${SERVER_NAME}_${PROBE}`
  */
 export const EVENTS_READS = ["GET /search/issues", "GET /search/commits", "GET /notifications"] as const
 const EVENTS_SCOPE: ApiScope = { action: EVENTS_ACTION, resources: EVENTS_READS }
-/** The list snapshot `github.notifications`. One GET /notifications, the same client as the activity feed. */
-export const NOTIFICATIONS_LIST = "notifications"
-const LIST_CAP = 50
-const LIST_SCOPE: ApiScope = { action: EVENTS_ACTION, resources: ["GET /notifications"] }
 /** The only request probe sends, asserted as PROBE_ACTION on its resource: who the token belongs to. */
 export const PROBE_READS = ["GET /user"] as const
 const PROBE_SCOPE: ApiScope = { action: PROBE_ACTION, resources: PROBE_READS }
@@ -172,14 +167,11 @@ export type Identity = () => Promise<string | undefined>
 /**
  * A place in a stream: a time, and inside its second an order key `i` ("" before every item of the second, AFTER_SECOND
  * after all of them). An item's order key is ORDER_KEY_LENGTH characters of a hash of its id for the searches (so a
- * position never spells out a repository's name), and the notification's id for notifications. `raw` marks a position
- * carried over from a 0.0.6 or 0.0.7 cursor inside a second, which ordered that second by id: until the stream leaves
- * that second, its items there keep that order (`i` is the id), so the walk goes on where it stopped.
+ * position never spells out a repository's name), and the notification's id for notifications.
  */
 interface Key {
   readonly t: number
   readonly i: string
-  readonly raw?: true
   /** A walk through this second in GitHub's order (`searchSecond`), where `i` is a `walkKey`. */
   readonly walk?: Walk
 }
@@ -855,8 +847,7 @@ const bindingOf = (account: string): CursorBinding => ({ plugin: NAMESPACE, sour
 const START_AGAIN = "Call events_list without a cursor, with since, to start again."
 const refuseCursor = (): never => fail("CURSOR_INVALID", "The cursor was not issued by GitHub's events_list for this account and its signed-in user.", START_AGAIN)
 
-/**
- * The account a bound cursor of this source names inside, read before its binding is checked, to tell another
+/** The account a bound cursor of this source names inside, read before its binding is checked, to tell another
  * account's cursor from a broken one; undefined for anything else, which the binding check then refuses.
  */
 function cursorAccount(cursor: string): string | undefined {
@@ -864,16 +855,6 @@ function cursorAccount(cursor: string): string | undefined {
     const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as unknown
     const account = record(value) && value["v"] === CURSOR_V2 && value["s"] === SOURCE ? value["a"] : undefined
     return typeof account === "string" && LOGIN.test(account) ? account.toLowerCase() : undefined
-  } catch {
-    return undefined
-  }
-}
-
-/** The contract version a cursor names (`v`); undefined for anything that is not a cursor. */
-function cursorVersion(cursor: string): unknown {
-  try {
-    const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as unknown
-    return record(value) ? value["v"] : undefined
   } catch {
     return undefined
   }
@@ -899,10 +880,9 @@ interface CursorState {
 const SEEN = /^([0-9a-f]{8})([0-9a-z]{1,11})$/
 
 /**
- * The cursor's format, `k` in it. 1: positions as a list in STREAMS order, each `[time, key]` (`[time, id, 1]` for a
- * position carried over from an older cursor inside a second, `[time, walk key, total, size]` for a walk), the lookback
- * as `[behind, hashes]`, a held second as `h: [stream, time]`, and every time in base 36 (`timeOf`). A cursor without `k` is 0.0.6's and 0.0.7's: times in milliseconds, and positions keyed by stream
- * whose search ids order their second by id.
+ * The cursor's format, `k` in it. 1: positions as a list in STREAMS order, each `[time, key]` (`[time, walk key, total,
+ * size]` for a walk), the lookback as `[behind, hashes]`, a held second as `h: [stream, time]`, and every time in base
+ * 36 (`timeOf`).
  */
 const CURSOR_FORMAT = 1
 /**
@@ -910,9 +890,7 @@ const CURSOR_FORMAT = 1
  * fields are bounded (a login of 39, an owner hash of 16, search order keys of ORDER_KEY_LENGTH, a notification key of
  * 20 digits, times of at most 9 characters, a walk's place, total and page size, a held second), so with every field at
  * its longest, all three searches walking a second and all LOOKBACK_REMEMBERED notifications remembered it is 799; past
- * CURSOR_MAX the lookback would forget its oldest notifications. Only a
- * position carried over from an older cursor inside a second, which keeps that cursor's id until its stream leaves the
- * second, can pass it, and stays shorter than the cursor it came from.
+ * CURSOR_MAX the lookback would forget its oldest notifications.
  */
 export const CURSOR_MAX = 960
 /** A time in a cursor: whole seconds in base 36, or `~` and milliseconds in base 36 for a time inside a second. */
@@ -926,42 +904,16 @@ const timeOf = (value: unknown): number | undefined => {
 }
 
 /**
- * The cursor's state. Every cursor a release wrote is read as it was written, and the read goes on from it with nothing
- * lost or listed again: format 1 (`k`); 0.0.6's and 0.0.7's (positions in milliseconds, with a lookback); 0.0.3's to
- * 0.0.5's (the same, without a lookback or a read's cut); and 0.0.0's to 0.0.2's (contract 1, unbound, account
- * `default`, one stream for issues and pull requests), which only the owner's hash ties to the sign-in. Anything else,
- * a cursor bound to another plugin, source or account, or holding another sign-in's owner, is CURSOR_INVALID: start
- * again with since.
+ * The cursor's state, format 1 only: anything else, a cursor bound to another plugin, source or account, or holding
+ * another sign-in's owner, is CURSOR_INVALID: start again with since.
  */
 function stateOf(cursor: string, account: string, owner: EventsOwner): CursorState {
-  const decoded = decodeBoundCursor(bindingOf(account), cursor, { acceptV1: true })
+  const decoded = decodeBoundCursor(bindingOf(account), cursor)
   if (!decoded.ok) return refuseCursor()
   const state = decoded.state
   if (state["o"] !== digest(owner)) return refuseCursor()
-  if (decoded.legacy) return state["a"] === "default" ? first(state) : refuseCursor()
   if (state["a"] !== account) return refuseCursor()
-  return state["k"] === CURSOR_FORMAT ? current(state) : state["k"] === undefined ? earlier(state) : refuseCursor()
-}
-
-/** A position an older cursor wrote: a time in milliseconds and an id, which ordered its second (`raw`) inside one. */
-function olderKey(pair: unknown, search: boolean): Key | undefined {
-  if (!(Array.isArray(pair) && pair.length === 2 && typeof pair[0] === "number" && Number.isSafeInteger(pair[0]) && typeof pair[1] === "string")) return undefined
-  const inside = search && pair[1] !== "" && pair[1] !== AFTER_SECOND
-  return { t: pair[0], i: pair[1], ...(inside ? { raw: true as const } : {}) }
-}
-
-/**
- * A cursor of 0.0.0 to 0.0.2: issues and pull requests were one stream, in one order, so its position is each of the
- * two streams' own: what it listed of either lies at or before it. It had no lookback.
- */
-function first(state: Record<string, unknown>): CursorState {
-  const positions = record(state["p"]) ? state["p"] : undefined
-  if (positions === undefined || Object.keys(positions).sort().join() !== "c,i,n") return refuseCursor()
-  const issues = olderKey(positions["i"], true)
-  const commits = olderKey(positions["c"], true)
-  const notes = olderKey(positions["n"], false)
-  if (issues === undefined || commits === undefined || notes === undefined) return refuseCursor()
-  return withLookback({ i: issues, p: issues, c: commits, n: notes }, [undefined, undefined, undefined], undefined, undefined)
+  return state["k"] === CURSOR_FORMAT ? current(state) : refuseCursor()
 }
 
 /** The read's state the cursor carries, after its positions: the gap, the cut, the loss and the lookback. */
@@ -972,8 +924,6 @@ function withLookback(from: Record<StreamName, Key>, times: readonly (number | u
     ...(cut === undefined ? {} : { cut }),
     ...(lostAt === undefined ? {} : { lostAt }),
   }
-  // 0.0.5 and earlier had no lookback: it looks again at nothing before the position.
-  if (behind === undefined && hashes === undefined) return { from, notified: { position: from.n, floor: from.n.t + 1000, seen: new Map() }, ...read }
   if (behind === undefined || !Array.isArray(hashes) || hashes.length > LOOKBACK_REMEMBERED) return refuseCursor()
   const seen = new Map<string, number>()
   for (const entry of hashes) {
@@ -993,9 +943,8 @@ function current(state: Record<string, unknown>): CursorState {
     if (t === undefined) return undefined
     const i = entry[1] as string
     if (entry.length === 2) return { t, i }
-    // Only a search position may be carried over from an older cursor, or walk a second.
+    // Only a search position walks a second.
     if (index >= 3) return undefined
-    if (entry.length === 3) return entry[2] === 1 ? { t, i, raw: true } : undefined
     const total = typeof entry[2] === "string" && /^[0-9a-z]{1,3}$/.test(entry[2]) ? Number.parseInt(entry[2], 36) : undefined
     const size = typeof entry[3] === "string" ? Number.parseInt(entry[3], 36) : undefined
     const walks = entry.length === 4 && walkOffset(i) !== undefined && total !== undefined && total <= SEARCH_CAP && (size === 1 || size === SEARCH_SMALL_PAGE || size === SEARCH_PER_PAGE)
@@ -1015,25 +964,6 @@ function current(state: Record<string, unknown>): CursorState {
   return stream !== undefined && second !== undefined ? { ...read, held: { stream, second } } : refuseCursor()
 }
 
-/**
- * A cursor of 0.0.3 to 0.0.7. Its search positions inside a second ordered that second by id: they are carried over as
- * such (`raw`), so the walk goes on where it stopped. 0.0.6 and 0.0.7 added the lookback (`l`) and the read's gap, cut
- * and loss; 0.0.5 and earlier had none of them.
- */
-function earlier(state: Record<string, unknown>): CursorState {
-  const positions = record(state["p"]) ? state["p"] : undefined
-  const keys = STREAMS.map((stream) => olderKey(positions?.[stream], stream !== "n"))
-  if (keys.some((key) => key === undefined)) return refuseCursor()
-  if (state["l"] === undefined && ["g", "u", "q"].some((name) => state[name] !== undefined)) return refuseCursor()
-  const from = { i: keys[0]!, p: keys[1]!, c: keys[2]!, n: keys[3]! }
-  const times = ["g", "u", "q"].map((name) => {
-    const value = state[name]
-    return value === undefined ? undefined : typeof value === "number" && Number.isSafeInteger(value) ? value : refuseCursor()
-  })
-  const lookback = state["l"]
-  const behind = record(lookback) && typeof lookback["f"] === "number" && Number.isSafeInteger(lookback["f"]) ? lookback["f"] : undefined
-  return withLookback(from, times, behind, record(lookback) ? lookback["h"] : undefined)
-}
 
 /** The signed-in login, or AUTH_REQUIRED, a refused renewal included; `method` names the caller in the message. */
 async function signedIn(identity: Identity, method: string): Promise<string> {
@@ -1055,11 +985,8 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   if (!parsed.ok) return fail("INPUT_INVALID", `The events_list input is invalid: ${parsed.problems.join("; ")}.`, "Pass only since, cursor, limit (1 to 500), account and source, as the tool's schema describes.")
   const request = parsed.value
   if (request.source !== undefined && request.source !== SOURCE) fail("SOURCE_UNKNOWN", `This plugin has no source "${request.source}"; its one source is "${SOURCE}".`, `Leave source out, or pass "${SOURCE}".`)
-  // A cursor of 0.0.0 to 0.0.2 came with their one account, `default`, or none: it reads the signed-in account, as they
-  // did, and its owner's hash still ties it to the sign-in.
-  const first = request.cursor !== undefined && (request.account === undefined || request.account === "default") && cursorVersion(request.cursor) === 1
-  const asked = request.account === undefined || first ? undefined : request.account.toLowerCase()
-  if (request.cursor !== undefined && !first) {
+  const asked = request.account?.toLowerCase()
+  if (request.cursor !== undefined) {
     if (asked === undefined) fail("INPUT_INVALID", "A listing with a cursor names the account it reads: events_list has no account.", 'Pass "account", the signed-in login that probe and the previous result name, with the cursor.')
     const named = cursorAccount(request.cursor)
     if (named !== undefined && named !== asked) {
@@ -1080,16 +1007,12 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
   // is listed on any page of the read; the next read lists it.
   const end = state.cut ?? Math.floor(now - SETTLE_MS)
 
-  // A position a 0.0.6 or 0.0.7 cursor left inside a second ordered it by id: that second's items keep that order, so
-  // the walk goes on exactly where it stopped, and the position stays so until the stream leaves the second.
-  const carried = (stream: "i" | "p" | "c", item: Item | undefined): Item | undefined =>
-    item !== undefined && from[stream].raw && item.t === from[stream].t ? { ...item, i: item.id, raw: true } : item
   // GitHub refuses a search for issues and pull requests together from a GitHub App user token (HTTP 422): one each.
   const searches: Record<"i" | "p" | "c", Search> = {
     // An item belongs to the stream that read it, so that stream's position moves past it.
-    i: { path: "/search/issues", sort: "updated", query: (range) => `is:issue involves:${login} updated:${range}`, make: (raw) => carried("i", streamOf(issueItem(raw, account), "i")) },
-    p: { path: "/search/issues", sort: "updated", query: (range) => `is:pull-request involves:${login} updated:${range}`, make: (raw) => carried("p", streamOf(issueItem(raw, account), "p")) },
-    c: { path: "/search/commits", sort: "committer-date", query: (range) => `author:${login} committer-date:${range}`, make: (raw) => carried("c", commitItem(raw, account)) },
+    i: { path: "/search/issues", sort: "updated", query: (range) => `is:issue involves:${login} updated:${range}`, make: (raw) => streamOf(issueItem(raw, account), "i") },
+    p: { path: "/search/issues", sort: "updated", query: (range) => `is:pull-request involves:${login} updated:${range}`, make: (raw) => streamOf(issueItem(raw, account), "p") },
+    c: { path: "/search/commits", sort: "committer-date", query: (range) => `author:${login} committer-date:${range}`, make: (raw) => commitItem(raw, account) },
   }
   const searchGet = requiresSignIn(get, host)
   const budget: Budget = { left: SEARCH_BUDGET }
@@ -1163,7 +1086,7 @@ export async function listEvents(get: Get, identity: Identity, input: unknown, n
     // A late notification lies behind the position: it never moves the position back.
     if (compare(item, positions[item.s]) > 0) {
       const walk = item.s === "n" ? undefined : searched[item.s].walk
-      positions[item.s] = { t: item.t, i: item.i, ...(item.raw ? { raw: true as const } : {}), ...(walk !== undefined && walkOffset(item.i) !== undefined ? { walk } : {}) }
+      positions[item.s] = { t: item.t, i: item.i, ...(walk !== undefined && walkOffset(item.i) !== undefined ? { walk } : {}) }
     }
     if (item.s === "n") {
       seen.set(seenKey(item), item.t)
@@ -1259,8 +1182,8 @@ export function encodeState(
   read: { gapAt: number | undefined; cut: number | undefined; lostAt: number | undefined; held?: CursorState["held"] },
 ): string {
   const p = STREAMS.map((stream) => {
-    const { t, i, raw, walk } = positions[stream]
-    return raw ? [timeText(t), i, 1] : walk !== undefined ? [timeText(t), i, walk.total.toString(36), walk.size.toString(36)] : [timeText(t), i]
+    const { t, i, walk } = positions[stream]
+    return walk !== undefined ? [timeText(t), i, walk.total.toString(36), walk.size.toString(36)] : [timeText(t), i]
   })
   const held = read.held === undefined ? {} : { h: [STREAMS.indexOf(read.held.stream), timeText(read.held.second)] }
   const times = Object.fromEntries(
@@ -1310,7 +1233,7 @@ export async function probeEvents(get: Get, identity: Identity, input: unknown, 
 }
 
 export const EVENTS_DESCRIPTION =
-  "For Memory's collector and scripts, not for answering questions: lists what the signed-in GitHub user was involved in since a cursor, as normalised events, oldest first: " +
+  "For a consumer's collector and scripts, not for answering questions: lists what the signed-in GitHub user was involved in since a cursor, as normalised events, oldest first: " +
   "each change to an issue or pull request they are involved in, each commit they authored, and other notifications where the sign-in may read them, with html_url links. " +
   "Pass the previous result's cursor, with its account, to list what came after; without one it starts at since, or 24 hours ago. It only reads, with GET requests, and never asks. " +
   "A commit that reaches a default branch after the cursor passed its committer date (a pull request merged later, a cherry-pick) is not listed; the pull request's merge is. " +
@@ -1337,18 +1260,6 @@ export const EVENTS_INPUT = {
       description: "The signed-in GitHub login, lowercase, as probe and every result name it. Required with a cursor; another login is refused.",
     },
     source: { type: "string", enum: [SOURCE], description: "The one source this plugin lists; github." },
-  },
-} as const
-
-/**
- * The tools RPC method's input: the model tool's, plus the list snapshot's name. No model sees `list`: the tool's schema
- * is EVENTS_INPUT, and a list answer is not an events page, so only a consumer that binds the snapshot asks for it.
- */
-export const EVENTS_METHOD_INPUT = {
-  ...EVENTS_INPUT,
-  properties: {
-    ...EVENTS_INPUT.properties,
-    list: { type: "string", enum: [NOTIFICATIONS_LIST], description: "A list snapshot instead of events: notifications, the latest ones the sign-in may read. Pass source github." },
   },
 } as const
 
@@ -1386,50 +1297,6 @@ export const EVENTS_OUTPUT = {
   },
 } as const
 
-/**
- * The list snapshot's answer, as the contract's snapshot envelope and its registry's `list` output. It is the tools RPC
- * method's second output: the host validates every method answer against the method's declared output, so an events-only
- * schema would refuse it `rpc.invalid_output`. `shortened` says whole items were dropped to stay in `maxBytes`.
- */
-export const LIST_ANSWER = {
-  type: "object",
-  additionalProperties: false,
-  required: ["source", "account", "data", "asOf", "trust"],
-  properties: {
-    source: { type: "string", const: SOURCE },
-    account: { type: "string", description: "The signed-in GitHub login, lowercase." },
-    data: {
-      type: "object",
-      additionalProperties: false,
-      required: ["items", "editable"],
-      properties: {
-        items: {
-          type: "array",
-          maxItems: LIST_CAP,
-          items: {
-            type: "object",
-            additionalProperties: false,
-            required: ["id", "text"],
-            properties: {
-              id: { type: "string", minLength: 1, maxLength: 128 },
-              text: { type: "string", maxLength: 200 },
-              done: { type: "boolean" },
-              note: { type: "string", maxLength: 200 },
-            },
-          },
-        },
-        editable: { type: "boolean", const: false },
-      },
-    },
-    asOf: { type: "string", description: "When the list was read, UTC ISO." },
-    trust: { type: "string", const: "untrusted" },
-    shortened: { type: "boolean", description: "True when whole items were dropped from the end to stay within maxBytes." },
-  },
-} as const
-
-/** The tools RPC method's output: an events page, or the list snapshot's answer, whichever the input asked for. */
-export const EVENTS_METHOD_OUTPUT = { anyOf: [EVENTS_OUTPUT, LIST_ANSWER] } as const
-
 const PROBE_INPUT = {
   type: "object",
   additionalProperties: false,
@@ -1462,71 +1329,6 @@ export interface EventsDeps {
   readonly now?: () => number
   /** READ_DEADLINE_MS unless a test sets a shorter one. */
   readonly deadlineMs?: number
-}
-
-/** True when the call asks for the notifications list snapshot, including a list value this plugin does not have. */
-export const isNotificationsList = (input: unknown): boolean => record(input) && "list" in input
-
-/** The most bytes the list answer may hold: the source's declared `maxBytes`. */
-export const LIST_MAX_BYTES = 65_536
-
-/** A string's UTF-8 bytes, as JSON carries it. */
-const jsonBytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length
-
-/**
- * The latest notifications as the contract's `list` output, for a consumer that binds `github.notifications` and does
- * not know GitHub. One `GET /notifications` through the same client as `events_list`, not a second one, read whole up
- * to the same EVENTS_MAX_BYTES the activity feed's notifications read takes: the source's declared `maxBytes` bounds
- * what this answer holds, not what GitHub answers. Every notification is listed, read or unread, as GitHub's inbox
- * holds them, not only threads the person participates in, newest first and once each. A title that holds a secret is
- * left out, screened whole before it is cut. The answer stays inside LIST_MAX_BYTES by dropping whole items from its
- * end, which it says with `shortened: true`: it never cuts an item's bytes.
- */
-export async function listNotifications(get: Get, identity: Identity, input: unknown, now: number) {
-  const data = record(input) ? input : {}
-  if (data["list"] !== NOTIFICATIONS_LIST) {
-    fail("SOURCE_UNKNOWN", `A list read names "${NOTIFICATIONS_LIST}", not "${text(data["list"]) ?? ""}".`, `Pass "list" as "${NOTIFICATIONS_LIST}".`)
-  }
-  if (data["source"] !== undefined && data["source"] !== SOURCE) {
-    fail("SOURCE_UNKNOWN", `This plugin has no list for "${text(data["source"]) ?? ""}".`, `Pass source "${SOURCE}" with list "${NOTIFICATIONS_LIST}".`)
-  }
-  const asked = text(data["account"])?.toLowerCase()
-  const login = await signedIn(identity, EVENTS_TOOL_NAME)
-  const account = accountOf(login)
-  if (asked !== undefined && asked !== account) {
-    fail("ACCOUNT_MISMATCH", `GitHub is signed in to another account than "${text(data["account"])}".`, `Sign in to GitHub as that account (/connect, GitHub), or read as "${account}", the signed-in login.`)
-  }
-  const page = await list(get, "/notifications", { all: true, per_page: LIST_CAP }, (body) => body, [401, 403, 404, 422], EVENTS_MAX_BYTES)
-  if (page?.truncated === true) {
-    fail("TOO_LARGE", "GitHub's answer to /notifications is over 32 MB, the most the list reads whole.", "Nothing in the list read changes it: the answer is over the bytes it reads whole.")
-  }
-  const seen = new Set<string>()
-  const found: { at: number; item: { id: string; text: string; note?: string } }[] = []
-  for (const raw of page?.items ?? []) {
-    if (!record(raw)) continue
-    const id = text(raw["id"])?.slice(0, 128)
-    const subject = record(raw["subject"]) ? raw["subject"] : {}
-    const title = text(subject["title"]) ?? text(subject["type"])
-    const at = time(raw["updated_at"])
-    if (id === undefined || title === undefined || at === undefined || seen.has(id)) continue
-    // The whole title, whitespace collapsed and control characters dropped, is screened before any of it is cut.
-    const full = title.replace(/\s+/g, " ").replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
-    if (full === "" || secretKinds(full).length > 0) continue
-    seen.add(id)
-    const repository = record(raw["repository"]) ? raw["repository"] : {}
-    const note = [text(repository["full_name"]), text(raw["reason"])?.replaceAll("_", " ")].filter((part) => part !== undefined).join(", ").replace(/[\u0000-\u001f\u007f-\u009f]/g, "").slice(0, 200)
-    found.push({ at, item: { id, text: full.slice(0, 200), ...(note === "" ? {} : { note }) } })
-  }
-  // Newest first, then the cap: GitHub lists notifications by update already, and this holds across pages.
-  const items = found.sort((a, b) => b.at - a.at).slice(0, LIST_CAP).map((row) => row.item)
-  const answer = { source: SOURCE, account, data: { items, editable: false as const }, asOf: new Date(now).toISOString(), trust: "untrusted" as const }
-  // Whole items, from the end, never an item's bytes: a pathological page cannot answer TOO_LARGE from the consumer.
-  let shortened = false
-  while (items.length > 0 && jsonBytes({ ...answer, shortened }) > LIST_MAX_BYTES) {
-    items.pop()
-    shortened = true
-  }
-  return shortened ? { ...answer, shortened } : answer
 }
 
 /** Asserts a method's own action for the caller, as the calling tool, before anything else. */
@@ -1573,19 +1375,12 @@ const getter =
 /**
  * The tool's and the method's one run: asserts github_events_list for the caller, then lists, with GETs only. Each GET
  * runs as an unattended call of github_api's spec under EVENTS_SCOPE, so it resolves and asserts `github_events_list`
- * (not `github_api`) on its own `GET /path` before it is sent: an agent with no base allow rule, as Jelly's are, needs
- * only the tool's own allow; a rule that asks or denies refuses it, and nothing is sent.
+ * (not `github_api`) on its own `GET /path` before it is sent: an agent with no base allow rule needs only the tool's own
+ * allow; a rule that asks or denies refuses it, and nothing is sent.
  */
 export async function runEvents(deps: EventsDeps, input: unknown, call: Call): Promise<EventsListResult> {
   await assertAction(deps, EVENTS_ACTION, call)
   return listEvents(getter(deps, call, EVENTS_SCOPE, "Call events_list again with the same cursor; if GitHub keeps answering slowly, run /github-status."), deps.identity, input, (deps.now ?? Date.now)(), deps.host)
-}
-
-/** `events_list` for either path: the notifications list, or the activity feed. The list asserts the same action, on `GET /notifications` only. */
-export async function runSource(deps: EventsDeps, input: unknown, call: Call): Promise<EventsListResult | Awaited<ReturnType<typeof listNotifications>>> {
-  if (!isNotificationsList(input)) return runEvents(deps, input, call)
-  await assertAction(deps, EVENTS_ACTION, call)
-  return listNotifications(getter(deps, call, LIST_SCOPE, "Call events_list again; if GitHub keeps answering slowly, run /github-status."), deps.identity, input, (deps.now ?? Date.now)())
 }
 
 /** probe's one run: asserts github_probe for the caller, then its one GET /user under PROBE_SCOPE. */
@@ -1634,9 +1429,9 @@ export function eventsMethod(deps: EventsDeps): OwnedMethod {
     name: EVENTS_TOOL_NAME,
     action: EVENTS_ACTION,
     description: EVENTS_DESCRIPTION,
-    input: EVENTS_METHOD_INPUT,
-    output: EVENTS_METHOD_OUTPUT,
-    run: (input: unknown, call: ToolCall) => runSource(deps, input, call),
+    input: EVENTS_INPUT,
+    output: EVENTS_OUTPUT,
+    run: (input: unknown, call: ToolCall) => runEvents(deps, input, call),
   }
 }
 

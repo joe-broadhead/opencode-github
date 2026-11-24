@@ -6,7 +6,7 @@ Set options in the plugin's entry in `opencode.json`:
 {
   "plugins": [
     {
-      "package": "github:joe-broadhead/opencode-github#v0.0.11",
+      "package": "github:we-the-rebel-alliance/github-plugin#v<version>",
       "options": {
         "toolsets": ["context", "repos", "issues", "pull_requests"],
         "access": "ask-changes",
@@ -22,7 +22,7 @@ Every option is optional. An unknown option or a wrong value
 stops the plugin from loading with an error that names the option, for example:
 
 ```text
-OPTIONS_INVALID: Invalid plugin option "toolset": this option does not exist. Next step: Fix the options for github:joe-broadhead/opencode-github#v0.0.11 in opencode.json.
+OPTIONS_INVALID: Invalid plugin option "toolset": this option does not exist. Next step: Fix the options for github:we-the-rebel-alliance/github-plugin in opencode.json.
 ```
 
 ## Options
@@ -31,13 +31,12 @@ OPTIONS_INVALID: Invalid plugin option "toolset": this option does not exist. Ne
 | --- | --- | --- |
 | `toolsets` | every toolset marked "default" below | GitHub toolsets to load, sent as GitHub's `X-MCP-Toolsets` header. At least one, each once, from the [list below](#toolsets). |
 | `access` | `"all"` | What the generated default rules allow: `"all"` (every tool runs), `"ask-changes"` (reads run, every change asks) or `"read-only"` (reads run, every change is denied, and GitHub's `X-MCP-Readonly` header turns its own write tools off). See [Permissions](#permissions). |
-| `readOnly` | none | Deprecated: `true` means `access: "read-only"` and `false` means `access: "all"`, with a note in status. An explicit `access` wins. |
 | `lockdown` | `false` | With `true`, sends GitHub's `X-MCP-Lockdown: true` header. See [`lockdown`](#lockdown). |
-| `unknownTools` | `"ask"` | `"list"`, or `"ask"` (the same value), keeps GitHub tools the plugin does not know visible, so the default block's `github_*` rule decides them (allowed at the default `access`). `"hide"` removes them. See [`unknownTools`](#unknowntools). |
+| `unknownTools` | `"list"` | `"list"` keeps GitHub tools the plugin does not know visible, so the default block's `github_*` rule decides them (allowed at the default `access`). `"hide"` removes them. See [`unknownTools`](#unknowntools). |
 | `clientId` | none (token sign-in only) | A GitHub OAuth App or GitHub App for device sign-in; with it `/connect` also offers **Sign in with GitHub**. Letters, digits, `.`, `_` and `-`, up to 100 characters. See [`clientId` and `scopes`](#clientid-and-scopes). |
 | `appSlug` | none | The GitHub App's URL name (`github.com/apps/<appSlug>`), for the link that installs it. Lower-case letters, digits and `-`. See [A GitHub App](#a-github-app). |
 | `scopes` | `["repo", "read:org"]` | Scopes that device sign-in with an OAuth App asks for, each once; `[]` sends none. A GitHub App ignores them. Tokens are not affected. |
-| `allowUntestedHost` | `false` | Load on an OpenCode release outside the supported range `>=2.2.3 <2.4.0`, with a warning in the status. See [`allowUntestedHost`](#allowuntestedhost). |
+| `allowUntestedHost` | `false` | Load on an OpenCode release outside the supported range `>=2.4.1 <2.5.0`, with a warning in the status. See [`allowUntestedHost`](#allowuntestedhost). |
 | `host` | none (github.com) | A GitHub Enterprise Server host name, such as `github.example.com`. See [`host`](#host-github-enterprise-server). |
 
 The MCP server name (`github`) and URL (`https://api.githubcopilot.com/mcp/`) are fixed. Changing an option keeps
@@ -442,14 +441,12 @@ read-only mode on, so its server lists no write tools:
 ]
 ```
 
-- `readOnly: true` and `readOnly: false` are deprecated: they mean `"read-only"` and `"all"`, and `/github-status` says
-  so. An explicit `access` wins over them.
 - The reads are allowed at every access value, whichever toolsets are on; a method a toolset turns off is unavailable
   rather than denied.
 - Agents without the base allow rule are unchanged. The block is added once, even after a reload. Such an agent does
   not get the `github_api` read allows either, so its `github_api` reads ask, and a script's reads are refused with
-  `PERMISSION_DENIED`, unless its own rules allow them (`events_list` needs only an allow for `github_events_list`,
-  which Jelly writes for its agents): add
+  `PERMISSION_DENIED`, unless its own rules allow them (`events_list` needs only an allow for `github_events_list`):
+  add
   `{ "action": "github_api", "resource": "GET *", "effect": "allow" }`, and the same for `HEAD *`, `POST /markdown`,
   `POST /markdown/raw` and `QUERY /graphql` as you need them.
 - OpenCode applies the last rule that matches. So the agent's own later rules still win (Plan keeps its rules, and
@@ -469,7 +466,7 @@ The result:
 
 ### Recipes
 
-Put these in the top-level `permissions` list of `opencode.json`. Every rule needs `"resource": "*"`; OpenCode 2.2.3
+Put these in the top-level `permissions` list of `opencode.json`. Every rule needs `"resource": "*"`; OpenCode
 skips a rule without it and logs a warning.
 
 Let one write run without a prompt:
@@ -630,7 +627,7 @@ see [Scripting](scripting.md#api).
 `github_events_list` (`tools.github.events_list` in Code Mode, and the tools RPC method `events_list`) is GitHub's
 source under the shared source contract, `@we-the-rebel-alliance/source-contract` v0.3.0 (see [Sources](#sources)). It
 lists what the signed-in user was involved in since a cursor, as normalised events, oldest first. It only reads, never
-asks and calls no model, so Memory's collector can run it unattended.
+asks and calls no model, so a consumer's collector can run it unattended.
 
 ```
 events_list({ since?, cursor?, limit?, account?, source? })
@@ -654,16 +651,13 @@ refused with `ACCOUNT_MISMATCH`, and so is a cursor issued for another account, 
 the source contract's bound cursor, tied to this plugin, the source and the account, with a digest of the owner
 inside, so a cursor that was changed, or issued before a sign-in to another account, is `CURSOR_INVALID`: start again
 with `since`. **A cursor is at most 960 characters**, under the contract's 1,024 (799 at its longest): a search position
-holds an 11-character hash of its item's id, never a repository's name, and times are seconds in base 36. **Every cursor
-a release issued is still read**, and the read goes on from it with nothing lost or listed twice: 0.0.6's and 0.0.7's,
-0.0.3's to 0.0.5's (no lookback), and 0.0.0's to 0.0.2's (contract 1, account `default`, which may come with the account
-`default` or none, and which the owner's digest inside ties to the sign-in). Inside a second it stopped in, an older
-cursor keeps its order by id until the second ends. Only a cursor no release could have written is refused.
+holds an 11-character hash of its item's id, never a repository's name, and times are seconds in base 36. Only the
+current format is read: a cursor no release could have written, another source's or another account's is refused.
 
 It asserts `github_events_list`, then makes only GET requests, through `github_api`'s own spec with the plugin's
 sign-in. Each GET asserts the tool's own permission, `github_events_list`, on its own `GET /path` first, not
-`github_api`, unattended: it runs only under an allow rule for `github_events_list` (the block has one, and Jelly writes
-one for its agents, which have no base allow), and a rule that asks or denies it refuses it with `PERMISSION_DENIED`
+`github_api`, unattended: it runs only under an allow rule for `github_events_list` (the block has one), and a rule
+that asks or denies it refuses it with `PERMISSION_DENIED`
 before the request is sent. It sends nothing but the three GETs below; another path, a redirect elsewhere or a change
 is refused before it is sent:
 
@@ -762,27 +756,10 @@ is signed in, `{ source: "github", account, owner, trust }`, with the same accou
 it reads. It makes one `GET /user`, asserted as `github_probe` on `GET /user`, to confirm the token still belongs to that
 login, and refuses another account with `ACCOUNT_MISMATCH`.
 
-**`github.notifications`, the list snapshot.** The tools RPC method `events_list` called with `{ "source": "github",
-"list": "notifications" }` answers the contract's `list` output for a consumer that renders one: `data` is `{ items,
-editable: false }`, the latest 50 notifications GitHub's inbox holds, newest first, read or unread, once each, each
-`{ id, text, note? }` with the subject's title as `text` and the repository and the reason as `note`. The model tool
-`github_events_list` does **not** take `list` and never answers a list: a list snapshot is for a consumer, not an agent.
-It is one `GET /notifications` with `all` and `per_page` 50, through the same client as the activity feed and not a
-second one, and asserts `github_events_list` on `GET /notifications` only. A notification about an issue or a pull
-request is listed, unlike the activity feed, which leaves it to its issue stream; a title that holds a secret is left
-out, screened whole before it is cut; a sign-in that may not read notifications (a 401, 403 or 404) answers an empty
-list. An answer over 32 MB answers `TOO_LARGE`, as the activity feed's notifications do, and a `list` this plugin does
-not have, or another `source`, answers `SOURCE_UNKNOWN`. The answer stays inside the source's 64 KB (`maxBytes`): whole
-items are dropped from its end when 50 cannot fit, and `shortened: true` says so. A consumer may reuse it for 15
-minutes (`maxAgeSec`).
-
 ## Sources
 
 `package.json` declares the plugin's sources in its top-level `sources` key, under source-contract version 1, so a
-consumer (Memory, jelly, Artifacts) reads them from the installed package. `github.activity` is the events feed.
-`github.notifications` is a list snapshot of the latest notifications, read through the tools RPC method `events_list`
-with `{ "source": "github", "list": "notifications" }`, and its grant is `github_events_list` on `GET /notifications`
-only. `github.activity` is:
+consumer reads them from the installed package. `github.activity` is the events feed:
 
 | Key | Value |
 | --- | --- |
@@ -793,7 +770,7 @@ only. `github.activity` is:
 | `permission.events` | `github_events_list` |
 | `permission.rules` | `github_events_list` on `GET /search/issues`, `GET /search/commits` and `GET /notifications`: exactly the reads it makes |
 | `private` | `true`: private repositories and your notifications |
-| `cost` | `free`: GitHub's REST API is not billed; it is rate-limited (see the README's Known limits) |
+| `cost` | `free`: GitHub's REST API is not billed; GitHub's own rate limits apply |
 | `maxBytes` | 900,000 |
 | `urlHosts` | `github.com` |
 | `sources.rpc`, `sources.probe.action` | `github.platform.tools`, `github_probe` |
@@ -801,8 +778,8 @@ only. `github.activity` is:
 The grants are stated verbatim (`rules`) rather than as `operations`, because each read is the tool's own action on a
 `GET /path`, which an operation name cannot express. For the same reason the probe's `GET /user` cannot be declared as
 a `permission.identity` operation: the probe asserts only `github_probe`, on `*` and on `GET /user`. Contract v0.2.0's
-`permission.identityRules` can state that grant; the declaration adds it once the consumers (Memory, Jelly) read
-v0.2.0, because a consumer on v0.1.x refuses the key. `npm run conformance` (and `npm run check`) runs the contract's
+`permission.identityRules` can state that grant; the declaration adds it once consumers read v0.2.0, because a
+consumer on v0.1.x refuses the key. `npm run conformance` (and `npm run check`) runs the contract's
 conformance kit over the source, on recorded answers with no GitHub call, and writes
 `reports/conformance-report.json` for a release to attach. Every check that applies runs, the gap checks on a cursor
 whose notifications GitHub no longer keeps and on a `since` before them. `failed-holds-cursor` cannot apply, with its
@@ -826,10 +803,9 @@ permission rules.
 
 GitHub adds, renames and removes tools over time. A GitHub tool that is not in the plugin's catalog is "unknown":
 
-- With `"list"`, or `"ask"` (the same value, and the default), it stays visible, and the default block's `github_*` rule decides it: it runs like every
+- With `"list"` (the default), it stays visible, and the default block's `github_*` rule decides it: it runs like every
   other tool at the default `access`, asks at `"ask-changes"` and is denied at `"read-only"`. Known tools keep working.
-  `"ask"` is the older name, from before the all-allow default: it does not make an unknown tool ask, and it cannot. To make
-  one ask or stop, set `access`, or add a rule for it.
+  To make one ask or stop, set `access`, or add a rule for it.
 - With `"hide"`, the plugin removes it from the agents' tools.
 
 The status names the unknown tools GitHub currently offers, and says which of the above applies (`allowed by
@@ -838,7 +814,7 @@ server.
 
 ## Fine-grained token permissions
 
-The full list is in the README's [Sign in](https://github.com/joe-broadhead/opencode-github/blob/HEAD/README.md#sign-in).
+The sign-in paths are in the README's [Sign in](https://github.com/we-the-rebel-alliance/github-plugin/blob/master/README.md#sign-in).
 Which default toolset needs which read permission:
 
 | Permission | Toolsets |
@@ -865,14 +841,13 @@ To use your own OAuth App, register it under **GitHub Settings → Developer set
 tick **Enable Device Flow**, do not generate a client secret, and set its client ID:
 
 ```json
-{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.11", "options": { "clientId": "<your OAuth App client ID>" } }] }
+{ "plugins": [{ "package": "github:we-the-rebel-alliance/github-plugin#v<version>", "options": { "clientId": "<your OAuth App client ID>" } }] }
 ```
 
 `scopes` changes what device sign-in asks for, for example `["public_repo"]` for public repositories only. Scopes
 are requested at sign-in; they are not part of the app.
 
-An organisation can set `clientId` and `scopes` for everyone on a machine; see
-[Organisation rollout](../README.md#organisation-rollout).
+An organisation can set `clientId` and `scopes` in the plugin entry of the config it gives its machines, for everyone.
 
 ### A GitHub App
 
@@ -901,7 +876,7 @@ tokens** on. Then:
   account, and links the install page.
 
 ```json
-{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.11", "options": { "clientId": "<the GitHub App's client ID>", "appSlug": "<its URL name>" } }] }
+{ "plugins": [{ "package": "github:we-the-rebel-alliance/github-plugin#v<version>", "options": { "clientId": "<the GitHub App's client ID>", "appSlug": "<its URL name>" } }] }
 ```
 
 ## `host` (GitHub Enterprise Server)
@@ -918,7 +893,7 @@ GitHub's hosted MCP server does not support GitHub Enterprise Server. With `host
 - the status names the server and says that only `github_api` works.
 
 ```json
-{ "plugins": [{ "package": "github:joe-broadhead/opencode-github#v0.0.11", "options": { "host": "github.example.com", "clientId": "<the server's OAuth App client ID>" } }] }
+{ "plugins": [{ "package": "github:we-the-rebel-alliance/github-plugin#v<version>", "options": { "host": "github.example.com", "clientId": "<the server's OAuth App client ID>" } }] }
 ```
 
 For GitHub's MCP tools on the server, run GitHub's `github-mcp-server` yourself as a local MCP server with
@@ -930,21 +905,19 @@ GHE.com (data residency) is not supported yet; `host` refuses `*.ghe.com`.
 
 ## `allowUntestedHost`
 
-The plugin supports OpenCode `>=2.2.3 <2.4.0` and is tested on 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7, 2.3.0, 2.3.1 and 2.3.2. A release inside the
-range that is not in that list, such as 2.2.99, still loads, and the status marks it untested. On a later 2.2 or 2.3 release it
-loads and works; the status shows `OpenCode: 2.2.99 (untested; supported range >=2.2.3 <2.4.0)`, and the status RPC
-`host.tested: false`, and the state and next step stay those of the connection. Outside the range, including
-prereleases and development builds, it refuses to load, so there is no `/github-status`, `/github` dialog or status
-RPC, and no state `host_untested`:
+The plugin supports OpenCode `>=2.4.1 <2.5.0` and is tested on 2.4.1. A release inside the range that is not in that
+list, such as 2.4.99, still loads, and its status marks it untested; the state and next step stay those of the
+connection. Outside the range, including prereleases and development builds, it refuses to load, so there is no
+`/github-status`, `/github` dialog or status RPC, and no state `host_untested`:
 
 ```text
-HOST_UNTESTED: OpenCode 2.4.0 is outside the supported range >=2.2.3 <2.4.0. Next step: Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true.
+HOST_UNTESTED: OpenCode 2.5.0 is outside the supported range >=2.4.1 <2.5.0. Next step: Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true.
 ```
 
 With `allowUntestedHost: true`, it loads and the status shows this warning:
 
 ```text
-OpenCode 2.4.0 is outside the supported range >=2.2.3 <2.4.0. It loaded because allowUntestedHost is set.
+OpenCode 2.5.0 is outside the supported range >=2.4.1 <2.5.0. It loaded because allowUntestedHost is set.
 ```
 
 ## Errors
@@ -954,8 +927,8 @@ passed through unchanged.
 
 | Code | When | Next step |
 | --- | --- | --- |
-| `OPTIONS_INVALID` | An option is unknown or has a wrong value. The message names the option. | Fix the options for github:joe-broadhead/opencode-github#v0.0.11 in opencode.json. |
-| `HOST_UNTESTED` | OpenCode is outside `>=2.2.3 <2.4.0` and `allowUntestedHost` is not set. | Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true. |
+| `OPTIONS_INVALID` | An option is unknown or has a wrong value. The message names the option. | Fix the options for github:we-the-rebel-alliance/github-plugin in opencode.json. |
+| `HOST_UNTESTED` | OpenCode is outside `>=2.4.1 <2.5.0` and `allowUntestedHost` is not set. | Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true. |
 | `SKILLS_INVALID` | A skill file shipped with the plugin is missing or malformed. | Reinstall the plugin. |
 | `STATUS_UNAVAILABLE` | OpenCode did not report the `github` server's state. | Try again in a few seconds; if it persists, restart OpenCode. |
 | `SIGN_IN_EXPIRED` | The device code expired before it was entered. | Start the sign-in again. |
@@ -977,7 +950,7 @@ passed through unchanged.
 | `TOKEN_CHECK_TIMEOUT` | GitHub did not answer the token check within 10 seconds. | Try again. |
 | `TOKEN_CHECK_UNREACHABLE` | api.github.com could not be reached. | Check your network, then try again. |
 | `TOKEN_CHECK_FAILED` | GitHub could not check the token, or returned no account name. | Try again later. |
-| `READ_ONLY` | A `github_api` call would change GitHub, and `access` is `"read-only"` (or the deprecated `readOnly: true`). | Tell the user that this needs the plugin option `access: "all"`, which they set in opencode.json; each change then runs without asking, unless they keep `ask-changes`. |
+| `READ_ONLY` | A `github_api` call would change GitHub, and `access` is `"read-only"`. | Tell the user that this needs the plugin option `access: "all"`, which they set in opencode.json; each change then runs without asking, unless they keep `ask-changes`. |
 | `AUTH_REQUIRED` | `github_api`, `events_list` or `probe` has no GitHub sign-in to use; or a source read hit a 401 on `/user` or a search, or a refused renewal (which `github_api` names `SIGN_IN_REJECTED`). The source contract reads this as `NEEDS_SIGN_IN`. A 401 from `/notifications` can mean missing scope and still leaves notifications out. | Run /connect and choose GitHub (GitHub Enterprise with `host`). |
 | `PERMISSION_DENIED` | A rule asks or denies a call, and the caller is a script or `events_list`: an `ask` cannot be answered and a `deny` refuses. For `github_api` the rule must name the request's own `METHOD /path`; for `events_list`'s reads it is `github_events_list` on the same resource. | Add or narrow the rule for the session or for its agent. |
 | `API_INPUT_INVALID` | The `github_api` input does not fit, for example `download` with a method other than GET. | Fix the github_api input and call it again. |
@@ -992,11 +965,11 @@ passed through unchanged.
 | `API_REDIRECT_INSECURE` | GitHub redirected to a non-HTTPS address. | Try again later. |
 | `API_REDIRECTED` | GitHub redirected a change, which is never followed. The message names the new path. | Call github_api again with path <the new path>, so the change is checked for that path. |
 | `API_REDIRECT_OFF_HOST` | GitHub redirected a read outside its API. | For job logs, call get_job_logs with return_content: true; for other files, pass download: { path }, which follows GitHub's storage redirects without the token. A script gets the get_job_logs method instead, and with `host` the step names only download. |
-| `INPUT_INVALID` | The `events_list` or `probe` input breaks the source contract, or a listing with a cursor names no account. | Pass only since, cursor, limit (1 to 500), list, account and source, as the tool's schema describes; pass account with a cursor. |
-| `SOURCE_UNKNOWN` | `events_list` or `probe` names a source, or a `list`, the plugin does not have. | Leave source out, or pass github; pass list `notifications` with it. |
+| `INPUT_INVALID` | The `events_list` or `probe` input breaks the source contract, or a listing with a cursor names no account. | Pass only since, cursor, limit (1 to 500), account and source, as the tool's schema describes; pass account with a cursor. |
+| `SOURCE_UNKNOWN` | `events_list` or `probe` names a source the plugin does not have. | Leave source out, or pass github. |
 | `CURSOR_INVALID` | The cursor was not issued by GitHub's `events_list` for this account and its signed-in user, or was changed. | Call events_list without a cursor, with since, to start again. |
 | `ACCOUNT_MISMATCH` | `events_list` or `probe` names another account than the signed-in login, or a cursor issued for another account. | Pass the account the cursor was issued for, or sign in to GitHub as that account; probe names the signed-in login. |
-| `TOO_LARGE` | A notifications answer for `events_list` or its `notifications` list is over 32 MB. A search answer over it is read in smaller pages instead. | Nothing in `events_list` changes it: the answer is over the bytes it reads whole. |
+| `TOO_LARGE` | A notifications answer for `events_list` is over 32 MB. A search answer over it is read in smaller pages instead. | Nothing in `events_list` changes it: the answer is over the bytes it reads whole. |
 | `UNAVAILABLE` | A search, notifications or `GET /user` read for `events_list` or `probe` failed or took more than 60 seconds, or the sign-in names no login. | Call it again with the same cursor; if it keeps failing, run /github-status. |
 
 A script's calls through the tools RPC, `github.platform.tools`, have more codes for sessions, permissions and the
@@ -1004,7 +977,3 @@ server's state; see [Scripting](scripting.md#errors).
 
 When the status cannot be read, the `/github` view shows "GitHub status unavailable. Run /github-status for
 details."
-
-On OpenCode 2.2.3 and 2.2.4, a device sign-in that fails before the code is shown, and a pasted token that fails its
-check, appear only as `UnexpectedStatus: 500`; the coded message is in OpenCode's log. Failures while OpenCode waits
-for you to enter the device code are shown as written.

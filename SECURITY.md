@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Only the newest release is supported, on the OpenCode releases it is tested on (`>=2.2.3 <2.4.0`).
+Only the newest release is supported, on the OpenCode releases it is tested on (`>=2.4.1 <2.5.0`, tested on 2.4.1).
 
 ## Reporting a vulnerability
 
@@ -37,8 +37,6 @@ service.
 - No client secret or app client ID ships. Device sign-in is offered only when `clientId` names an OAuth App or a
   GitHub App, and needs only its public client ID. A GitHub App's refresh token is stored with the credential by
   OpenCode, sent only to `login/oauth/access_token` to renew it, and replaced by the new one each time.
-- When you paste a token into `opencode auth login` on OpenCode 2.2.3, the terminal shows it as you type. Clear the
-  screen afterwards if others can see it.
 - To revoke access, sign out in OpenCode (`opencode auth logout GitHub <login>`, with your GitHub login), then revoke
   the app under **GitHub Settings → Applications → Authorized OAuth Apps** (or **Authorized GitHub Apps**), or delete the token under **Developer
   settings → Personal access tokens**.
@@ -74,7 +72,8 @@ public issues, can place text that tries to steer your agent.
   repository, run workflows, and make any `github_api` REST or GraphQL call. Nothing asks first. To restrict it, set
   the plugin option `"access": "ask-changes"` (reads run, every change asks) or `"access": "read-only"` (reads run,
   every change is denied and GitHub's own server lists no write tools), give the agent its own later rules, or add a
-  rule per tool. The README's Permissions section has the three ways and the generated block.
+  rule per tool. The README's Permissions section names the three ways; `docs/configuration.md` prints the generated
+  block.
 - Values can still be refused by GitHub itself: a token without write scope cannot push, and GitHub Enterprise admins
   can restrict a token further.
 - **Saved approvals are project-wide.** Choosing **Always allow** saves the approval for the whole project, for every
@@ -112,9 +111,9 @@ with no model. Every known tool is a method, with its class, but a method is not
 - `events_list` (`github_events_list`) asserts `github_events_list`, then makes only GET requests through `api`'s
   own handling: it returns the titles, bodies (cut to 4,096 characters), commit messages, logins and links of what the
   signed-in user was involved in, with the sign-in's recorded login as the account and owner. An event whose title or
-  text holds a secret is never returned. `probe` (`github_probe`) makes one `GET /user` and returns only that login. Memory's collector calls it to copy
-  these events to your private memory space, after you turn GitHub on as a source; the plugin itself sends them
-  nowhere and stores nothing.
+  text holds a secret is never returned. `probe` (`github_probe`) makes one `GET /user` and returns only that login.
+  A consumer's collector uses it to confirm the source's sign-in before it lists these events, after you turn GitHub
+  on as a source; the plugin itself sends them nowhere and stores nothing.
 - MCP calls go through OpenCode's own connection and sign-in, and `api` uses the same sign-in, hosts and redirect
   handling as `github_api`. No token is returned.
 - GitHub's MCP error text reaches the script only as the first line, at most 300 characters, with tokens and URL query

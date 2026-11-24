@@ -16,6 +16,7 @@ describe("the shipped skills", () => {
     const skill = parseSkill(id, read(id))
     expect(skill.name).toBe(id)
     expect(skill.description.length).toBeGreaterThan(40)
+    expect(skill.description.length).toBeLessThanOrEqual(300)
     expect(skill.description).not.toContain("\n")
   })
 
@@ -84,7 +85,7 @@ describe("registerSkills", () => {
     for (const skill of added) {
       expect(skill.name).toBe(skill.id)
       expect(isAbsolute(skill.path) && existsSync(skill.path)).toBe(true)
-      expect(skill.content).toMatch(/^If GitHub's tools are absent, run `\/connect` and choose GitHub \(GitHub Enterprise for a configured Enterprise Server\), or on Jelly call jelly_connection_request\.\n\n# /)
+      expect(skill.content).toMatch(/^If GitHub's tools are absent, run `\/connect` and choose GitHub \(GitHub Enterprise for a configured Enterprise Server\)\.\n\n# /)
       expect(skill.description).toBe(parseSkill(skill.id, read(skill.id)).description)
     }
   })

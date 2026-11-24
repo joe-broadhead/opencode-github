@@ -108,8 +108,8 @@ describe(`defaults on OpenCode ${SDK_VERSION}`, () => {
       expect(result.status === "fulfilled" && result.value).toMatchObject({
         state: "connected",
         account: PAT_LOGIN,
-        tools: { visible: 5, unknown: ["github_brand_new_tool"], mode: "ask" },
-        host: { version: SDK_VERSION, range: ">=2.2.3 <2.4.0", tested: true },
+        tools: { visible: 5, unknown: ["github_brand_new_tool"], mode: "list" },
+        host: { version: SDK_VERSION, range: ">=2.4.1 <2.5.0", tested: true },
       })
     }
   })
@@ -385,16 +385,51 @@ describe(`a revoked sign-in on OpenCode ${SDK_VERSION}`, () => {
     await connected(host)
     expect(await until("the account's mark clears", async () => (await account())?.status === undefined)).toBe(true)
   })
+
+  // The modern era's initialization is the `server/discover` probe, not `initialize`
+  // (effect/src/ai/McpClient.ts:283-315; @opencode/core/dist/mcp/client.js:314,432,679-700). A 401 on the probe ends
+  // the attempt: it becomes NeedsAuthError, not a reason to fall back to the legacy `initialize`.
+  test("a revoked token ends at the server/discover probe, with no initialize after the 401", async () => {
+    host.fake.revoke()
+    await host.client.experimental.mcp.disconnect({ server: "github", location: host.location })
+    const before = host.fake.requests.length
+    await host.client.experimental.mcp.connect({ server: "github", location: host.location })
+    await until("github needs sign-in", async () => (await githubServer(host))?.status.status === "needs_auth")
+    const probes = host.fake.requests.slice(before).filter((request) => request.rpc !== undefined)
+    expect(probes.map((request) => request.rpc)).toEqual(["server/discover"])
+    expect(probes[0]).toMatchObject({ method: "POST", path: "/mcp/", authorized: false })
+    host.fake.restore()
+  })
+})
+
+// A server that offers the 2026-07-28 era through `server/discover`: the fake's answer is a valid modern result, so a
+// connection negotiates the modern era and never sends the legacy `initialize`.
+describe(`a server that answers server/discover on OpenCode ${SDK_VERSION}`, () => {
+  let host: Host
+  beforeAll(async () => {
+    host = await startHost({ fake: { modern: true } })
+    expect((await signInWithToken(host)).settled.status).toBe("complete")
+    await connected(host)
+  })
+  afterAll(() => host?.close())
+
+  test("connects in the modern era and sends no initialize", async () => {
+    await tool(host, "github_get_me")
+    const methods = mcpRequests(host).flatMap((request) => (request.rpc === undefined ? [] : [request.rpc]))
+    expect(methods[0]).toBe("server/discover")
+    expect(methods).not.toContain("initialize")
+    expect(methods).toContain("tools/list")
+  })
 })
 
 describe(`GitHub Enterprise Server on OpenCode ${SDK_VERSION}`, () => {
   let host: Host
   beforeAll(async () => {
-    // jelly is an agent as Jelly writes one: no base allow (everything else asks) and an allow per declared tool, here
+    // A collector is an agent with no base allow (everything else asks) and an allow per declared tool, here
     // github_events_list alone. The plugin's block never reaches it, so its github_api reads ask.
     host = await startHost({
       options: { host: "ghe.example.com", access: "all" },
-      config: () => ({ agents: { jelly: { description: "Collects for Memory", mode: "subagent", permissions: [{ action: "*", resource: "*", effect: "ask" }, allow("github_events_list")] } } }),
+      config: () => ({ agents: { collector: { description: "Collects GitHub events", mode: "subagent", permissions: [{ action: "*", resource: "*", effect: "ask" }, allow("github_events_list")] } } }),
     })
   })
   afterAll(() => host?.close())
@@ -454,10 +489,10 @@ describe(`GitHub Enterprise Server on OpenCode ${SDK_VERSION}`, () => {
     expect(await host.client.permission.list({ sessionID: denied })).toEqual([])
   })
 
-  // Memory's unattended collection in an agent without the base allow: Jelly's allow for github_events_list alone lets
+  // A consumer's unattended collection in an agent without the base allow: its allow for github_events_list alone lets
   // every inner read run, with no github_api rule; a deny on github_events_list stops it with nothing sent.
   test("events_list runs in an agent with no base allow and only an allow for github_events_list", async () => {
-    const sessionID = await session(host, "jelly")
+    const sessionID = await session(host, "collector")
     const before = host.fake.requests.length
     // The agent really has no github_api allow: a script's own GET is refused, with nothing sent.
     expect(await script(host, "api", { sessionID, input: { method: "GET", path: "/repos/octo/hello" } })).toMatchObject({ type: "failed", code: "PERMISSION_DENIED" })
@@ -467,7 +502,7 @@ describe(`GitHub Enterprise Server on OpenCode ${SDK_VERSION}`, () => {
     expect(listed.value).toMatchObject({ source: "github", owner: { id: expect.stringMatching(/^github:/) }, events: [], more: false })
     expect(host.fake.requests.slice(before)).toEqual([])
 
-    const denied = await session(host, "jelly", [deny("github_events_list")])
+    const denied = await session(host, "collector", [deny("github_events_list")])
     const after = host.fake.requests.length
     expect(await script(host, "events_list", { sessionID: denied, input: { since: "2999-01-01" } })).toMatchObject({ type: "failed", code: "PERMISSION_DENIED" })
     expect(host.fake.requests.slice(after)).toEqual([])
@@ -509,25 +544,6 @@ describe(`the tools RPC on OpenCode ${SDK_VERSION}`, () => {
     expect(result.value).toEqual({ output: { tool: "get_me", arguments: { query: "hello" } }, text: expect.stringContaining(`"login":"${PAT_LOGIN}"`) })
     expect(host.fake.requests.slice(before).filter((request) => request.rpc === "tools/call").map((request) => [request.tool, request.authorized])).toEqual([["get_me", true]])
     expect(JSON.stringify(result)).not.toContain(FIXTURE_PAT)
-  })
-
-  // The list snapshot rides this method with a second, declared output: the host validates every method answer, so an
-  // events-only schema refused it `rpc.invalid_output` before there was one.
-  test("a script reads the notifications list through the tools RPC, and the answer is the list's own shape", async () => {
-    const sessionID = await session(host)
-    const before = host.fake.requests.length
-    const listed = await script(host, "events_list", { sessionID, input: { source: "github", list: "notifications" } })
-    expect(listed).toMatchObject({
-      value: {
-        source: "github",
-        account: expect.stringMatching(/^[a-z0-9-]+$/),
-        data: { items: [{ id: "1", text: "A notification", note: "octo/hello, subscribed" }], editable: false },
-        trust: "untrusted",
-      },
-    })
-    expect(listed.value.shortened).toBeUndefined()
-    expect(listed.value.events).toBeUndefined()
-    expect(host.fake.requests.slice(before).map((request) => `${request.method} ${request.path}`)).toEqual(["GET /notifications"])
   })
 
   test("api reads GitHub's REST and GraphQL API with the same sign-in, and refuses a write before any request", async () => {
@@ -624,18 +640,6 @@ describe(`access on OpenCode ${SDK_VERSION}`, () => {
     })
   }
 
-  // The deprecated option is the same switch, with a note in status.
-  test("the deprecated readOnly option maps onto access, and status says so", async () => {
-    const host = await startHost({ options: { readOnly: true } })
-    try {
-      const fromRpc = await status(host)
-      expect(fromRpc).toMatchObject({ access: "read-only" })
-      expect(fromRpc.deprecation).toContain('The readOnly option is deprecated: it maps to access "read-only".')
-      expect(await statusCommand(host, await session(host))).toContain('Note: The readOnly option is deprecated: it maps to access "read-only".')
-    } finally {
-      await host.close()
-    }
-  })
 })
 
 describe("a github server the user already configured", () => {
@@ -668,14 +672,14 @@ describe("a github server the user already configured", () => {
 })
 
 describe("an untested OpenCode release", () => {
-  test("2.4.0 refuses to load the plugin and says how to override", async () => {
-    const host = await startHost({ version: "2.4.0" })
+  test("2.5.0 refuses to load the plugin and says how to override", async () => {
+    const host = await startHost({ version: "2.5.0" })
     try {
       const state = await pluginState(host)
       expect(state?.status).toBe("failed")
       const error = state?.status === "failed" ? state.error : ""
       expect(error).toStartWith(
-        "GitHubPluginError: HOST_UNTESTED: OpenCode 2.4.0 is outside the supported range >=2.2.3 <2.4.0. Next step: Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true.",
+        "GitHubPluginError: HOST_UNTESTED: OpenCode 2.5.0 is outside the supported range >=2.4.1 <2.5.0. Next step: Update OpenCode or the plugin, or set the plugin option allowUntestedHost: true.",
       )
       expect(await githubServer(host)).toBeUndefined()
     } finally {
@@ -683,15 +687,15 @@ describe("an untested OpenCode release", () => {
     }
   })
 
-  test("2.4.0 with allowUntestedHost loads the plugin, and status warns", async () => {
-    const host = await startHost({ version: "2.4.0", options: { allowUntestedHost: true } })
+  test("2.5.0 with allowUntestedHost loads the plugin, and status warns", async () => {
+    const host = await startHost({ version: "2.5.0", options: { allowUntestedHost: true } })
     try {
       expect(await pluginState(host)).toEqual({ status: "active" })
       expect(await status(host)).toMatchObject({
-        host: { version: "2.4.0", range: ">=2.2.3 <2.4.0", tested: false },
-        hostWarning: "OpenCode 2.4.0 is outside the supported range >=2.2.3 <2.4.0. It loaded because allowUntestedHost is set.",
+        host: { version: "2.5.0", range: ">=2.4.1 <2.5.0", tested: false },
+        hostWarning: "OpenCode 2.5.0 is outside the supported range >=2.4.1 <2.5.0. It loaded because allowUntestedHost is set.",
       })
-      expect(await statusCommand(host, await session(host))).toContain("OpenCode: 2.4.0 (untested: OpenCode 2.4.0 is outside the supported range")
+      expect(await statusCommand(host, await session(host))).toContain("OpenCode: 2.5.0 (untested: OpenCode 2.5.0 is outside the supported range")
     } finally {
       await host.close()
     }

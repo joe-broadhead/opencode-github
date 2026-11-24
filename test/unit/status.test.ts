@@ -73,7 +73,7 @@ function deps(overrides: Partial<StatusDeps> = {}): StatusDeps {
     conflict: () => false,
     integrationID: () => ID,
     tools: () => ({ visible: 26, unknown: [] }),
-    hostVersion: "2.2.3",
+    hostVersion: "2.4.1",
     skills: [{ id: "github-pr-review", path: OWN }],
     ...overrides,
   }
@@ -89,17 +89,17 @@ describe("computeStatus", () => {
         fakeCtx({ server: "connected", label: "octocat", metadata: { login: "octocat", githubApp: true, installations } }).ctx,
         deps({ options: loadOptions(appSlug ? { appSlug } : {}), fetch }),
       )
-    const none = await note(0, "jelly-dev")
+    const none = await note(0, "example-app")
     expect(none.account).toBe("octocat")
     expect(none.nextStep).toBe(
-      "The GitHub App is not installed on any account this sign-in reaches, so it sees no repositories. Install it at https://github.com/apps/jelly-dev/installations/new.",
+      "The GitHub App is not installed on any account this sign-in reaches, so it sees no repositories. Install it at https://github.com/apps/example-app/installations/new.",
     )
     expect((await note(0)).nextStep).toContain("Install the GitHub App on that account or organization.")
-    expect((await note(2, "jelly-dev")).nextStep).toBe("Nothing to do.")
+    expect((await note(2, "example-app")).nextStep).toBe("Nothing to do.")
     expect(seen).toEqual(["https://api.github.com/user/installations?per_page=1", "https://api.github.com/user/installations?per_page=1"])
     // Installed after sign-in: the sign-in still records none, and the status asks GitHub again.
     live = 1
-    expect((await note(0, "jelly-dev")).nextStep).toBe("Nothing to do.")
+    expect((await note(0, "example-app")).nextStep).toBe("Nothing to do.")
   })
 
   it.each([
@@ -141,33 +141,33 @@ describe("computeStatus", () => {
       deps({
         options: loadOptions({ toolsets: ["repos"], access: "read-only", unknownTools: "hide" }),
         tools: () => ({ visible: 12, unknown: ["github_a", "github_b"] }),
-        hostVersion: "2.4.0",
-        hostWarning: "OpenCode 2.4.0 is outside the supported range.",
+        hostVersion: "2.5.0",
+        hostWarning: "OpenCode 2.5.0 is outside the supported range.",
       }),
     )
     expect(status).toMatchObject({
       access: "read-only",
       toolsets: ["repos"],
       tools: { visible: 12, unknown: ["github_a", "github_b"], mode: "hide" },
-      host: { version: "2.4.0", range: ">=2.2.3 <2.4.0", tested: false },
-      hostWarning: "OpenCode 2.4.0 is outside the supported range.",
+      host: { version: "2.5.0", range: ">=2.4.1 <2.5.0", tested: false },
+      hostWarning: "OpenCode 2.5.0 is outside the supported range.",
     })
   })
 
   // S13: the shared status fields, with the S9 labels in machine form.
   it("has the shared fields: version, host with range and tested, state, unguardedAgents and nextStep", async () => {
-    const status = await computeStatus(fakeCtx({ server: "connected", label: "octocat" }).ctx, deps({ hostVersion: "2.2.5" }))
-    expect(status).toMatchObject({ version: PLUGIN_VERSION, state: "connected", host: { version: "2.2.5", range: ">=2.2.3 <2.4.0", tested: true }, unguardedAgents: [], nextStep: "Nothing to do." })
+    const status = await computeStatus(fakeCtx({ server: "connected", label: "octocat" }).ctx, deps({ hostVersion: "2.4.1" }))
+    expect(status).toMatchObject({ version: PLUGIN_VERSION, state: "connected", host: { version: "2.4.1", range: ">=2.4.1 <2.5.0", tested: true }, unguardedAgents: [], nextStep: "Nothing to do." })
     expect(PLUGIN_VERSION).toBe(JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version)
     for (const state of STATES) expect(state).toMatch(/^[a-z_]+$/)
   })
 
   // S13 and TRIAGE decision 2: an untested release inside the range works normally, and its next step is unchanged.
   it("on a release in the range that is not tested, reports the working state and leaves the next step alone", async () => {
-    const status = await computeStatus(fakeCtx({ server: "connected", label: "octocat" }).ctx, deps({ hostVersion: "2.2.99" }))
-    expect(status).toMatchObject({ state: "connected", host: { version: "2.2.99", range: ">=2.2.3 <2.4.0", tested: false }, nextStep: "Nothing to do." })
-    const outside = await computeStatus(fakeCtx({ server: "connected", label: "octocat" }).ctx, deps({ hostVersion: "2.4.0", hostWarning: "x" }))
-    expect(outside.nextStep).toBe("If GitHub misbehaves, use OpenCode 2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7, 2.3.0, 2.3.1 or 2.3.2, where it is tested.")
+    const status = await computeStatus(fakeCtx({ server: "connected", label: "octocat" }).ctx, deps({ hostVersion: "2.4.99" }))
+    expect(status).toMatchObject({ state: "connected", host: { version: "2.4.99", range: ">=2.4.1 <2.5.0", tested: false }, nextStep: "Nothing to do." })
+    const outside = await computeStatus(fakeCtx({ server: "connected", label: "octocat" }).ctx, deps({ hostVersion: "2.5.0", hostWarning: "x" }))
+    expect(outside.nextStep).toBe("If GitHub misbehaves, use OpenCode 2.4.1, where it is tested.")
   })
 
   // QA LIVE-1: an agent whose own rules already ask or deny for GitHub's tools needs no fix.
@@ -255,7 +255,7 @@ describe("computeStatus", () => {
   it("leaves out empty optional fields", async () => {
     const status = await computeStatus(fakeCtx({ server: "needs_auth" }).ctx, deps())
     expect(Object.keys(status).sort()).toEqual(["access", "host", "nextStep", "state", "tools", "toolsets", "unguardedAgents", "version"])
-    expect(status.host).toEqual({ version: "2.2.3", range: ">=2.2.3 <2.4.0", tested: true })
+    expect(status.host).toEqual({ version: "2.4.1", range: ">=2.4.1 <2.5.0", tested: true })
   })
 
   it("answers 20 concurrent calls, each with fresh data", async () => {

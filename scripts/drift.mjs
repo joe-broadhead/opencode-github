@@ -93,7 +93,7 @@ async function liveTools(toolset) {
   const initialized = await request(session, 0, "initialize", {
     protocolVersion: PROTOCOL_VERSION,
     capabilities: {},
-    clientInfo: { name: "opencode-github-drift", version: "0" },
+    clientInfo: { name: "github-plugin-drift", version: "0" },
   })
   session.protocol = initialized?.protocolVersion ?? PROTOCOL_VERSION
   const notified = await send(session, "POST", { jsonrpc: "2.0", method: "notifications/initialized" })

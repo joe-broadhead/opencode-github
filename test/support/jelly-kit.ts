@@ -92,7 +92,7 @@ export function declarationProblems(root: URL, options: DeclarationOptions): str
   const pkg = readPackage(root)
   const jelly = pkg.jelly
   if (!jelly) return ["package.json has no jelly declaration"]
-  if (!/^@joe-broadhead\/opencode-[a-z0-9-]+$/u.test(pkg.name)) problems.push(`the package is named ${pkg.name}, not @joe-broadhead/opencode-<name>`)
+  if (!/^@(?:joe-broadhead\/opencode-[a-z0-9-]+|we-the-rebel-alliance\/[a-z0-9-]+-plugin)$/u.test(pkg.name)) problems.push(`the package is named ${pkg.name}, not @we-the-rebel-alliance/<name>-plugin or @joe-broadhead/opencode-<name>`)
   if (Object.keys(pkg.dependencies ?? {}).length > 0) problems.push("the package has runtime dependencies, so its tarball does not stand alone")
 
   for (const key of Object.keys(jelly)) {

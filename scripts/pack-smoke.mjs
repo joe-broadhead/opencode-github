@@ -8,10 +8,9 @@
 // PACK_TARBALL, when set, names the tarball to check instead of packing this checkout; the release workflow sets it to
 // the tarball it publishes (scripts/release-pack.mjs). See scripts/pack-source.mjs.
 //
-// The stock binaries come from OPENCODE_BIN_2_2_3 to OPENCODE_BIN_2_2_6. When one is
-// unset, @opencode/cli and its platform package are installed into the temp folder with scripts disabled,
-// once per version. Each host runs in its own temporary profile under /tmp, on its own free port, with a
-// proxy that refuses every outbound request.
+// The stock binary comes from OPENCODE_BIN_2_4_1. When it is unset, @opencode/cli and its platform package are
+// installed into the temp folder with scripts disabled, once per version. Each host runs in its own temporary
+// profile under /tmp, on its own free port, with a proxy that refuses every outbound request.
 import { execFileSync, spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
@@ -22,10 +21,10 @@ import { packSource } from "./pack-source.mjs"
 import { loadSource } from "./source.mjs"
 
 const root = fileURLToPath(new URL("../", import.meta.url))
-const NAME = "@joe-broadhead/opencode-github"
+const NAME = "@we-the-rebel-alliance/github-plugin"
 const PLUGIN_ID = "github.platform"
 const MAX_PACKED_BYTES = 200_000
-// The assets are Jelly's mark: the SVG and its two PNGs.
+// The assets are the plugin's mark: the SVG and its two PNGs.
 const ALLOWED = /^(package\.json|README\.md|LICENSE|NOTICE|CHANGELOG\.md|assets\/icon(?:-128|-256)?\.(?:svg|png)|dist\/(index|tui)\.js|skills\/[a-z0-9-]+\/SKILL\.md)$/
 const REQUIRED = ["dist/index.js", "dist/tui.js", "NOTICE", "assets/icon.svg", "assets/icon-128.png", "assets/icon-256.png"]
 const SKILLS = ["github-code-research", "github-issue-triage", "github-pr-review"]

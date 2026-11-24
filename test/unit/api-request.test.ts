@@ -475,14 +475,14 @@ describe("callRest", () => {
       const input = rest({ method: "GET", path })
       return callRest(input, restTarget(input, GITHUB_COM), { ...deps(fetch), token: APP_TOKEN, deviceSignIn: true, ...extra })
     }
-    expect((await call("/repos/acme/web/issues", { appSlug: "jelly-dev" })).nextStep).toBe(
-      "The GitHub App you signed in with lacks the permission Issues (read), or is not installed on acme. Install it at https://github.com/apps/jelly-dev/installations/new, or ask its owner to add the permission.",
+    expect((await call("/repos/acme/web/issues", { appSlug: "example-app" })).nextStep).toBe(
+      "The GitHub App you signed in with lacks the permission Issues (read), or is not installed on acme. Install it at https://github.com/apps/example-app/installations/new, or ask its owner to add the permission.",
     )
     expect((await call("/repos/acme/web/issues")).nextStep).toBe(
       "The GitHub App you signed in with lacks the permission Issues (read), or is not installed on acme. Install the GitHub App on that account or organization, or ask its owner to add the permission.",
     )
-    expect((await call("/repos/acme/private", { appSlug: "jelly-dev" })).nextStep).toBe(
-      "GitHub answers 404 for a wrong path, for one the account cannot see, and for a repository the GitHub App you signed in with is not installed on. Check the path; if it is right, the App may not be installed on acme: install it at https://github.com/apps/jelly-dev/installations/new.",
+    expect((await call("/repos/acme/private", { appSlug: "example-app" })).nextStep).toBe(
+      "GitHub answers 404 for a wrong path, for one the account cannot see, and for a repository the GitHub App you signed in with is not installed on. Check the path; if it is right, the App may not be installed on acme: install it at https://github.com/apps/example-app/installations/new.",
     )
   })
 
@@ -504,7 +504,7 @@ describe("callRest", () => {
     })
     const call = (path: string) => {
       const input = rest({ method: "GET", path })
-      return callRest(input, restTarget(input, GITHUB_COM), { ...deps(fetch), token: APP_TOKEN, deviceSignIn: true, appSlug: "jelly-dev" })
+      return callRest(input, restTarget(input, GITHUB_COM), { ...deps(fetch), token: APP_TOKEN, deviceSignIn: true, appSlug: "example-app" })
     }
     expect((await call("/repos/acme/web")).nextStep).toBe(
       "The organization requires SAML single sign-on for this sign-in. Open https://github.com/orgs/acme/sso?authorization_request=abc to authorize it, then try again.",

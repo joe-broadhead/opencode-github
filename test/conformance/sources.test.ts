@@ -21,7 +21,7 @@ import { TOOLS_RPC_ID } from "../../src/tools-rpc.js"
 
 const root = fileURLToPath(new URL("../..", import.meta.url))
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { name: string; version: string; sources: unknown; jelly: { tools: { name: string; readOnly: boolean }[] } }
-/** The declaration as Memory's schema parses it, which is what the kit takes (source-contract#30, item 8). */
+/** The declaration as the source contract's schema parses it, which is what the kit takes (source-contract#30, item 8). */
 const checked = SOURCES_SCHEMA.check(pkg.sources)
 if (!checked.ok) throw new Error(`the sources declaration is invalid: ${checked.problems.join("; ")}`)
 const sources: Sources = checked.value
@@ -109,7 +109,6 @@ async function methods(context: SessionContext) {
     agent: { get: async () => ({ data: { permissions: [] } }) },
   }
   const api = await registerApiTool(ctx as never, {
-    access: "all",
     readOnly: false,
     endpoints: GITHUB_COM,
     service: "GitHub",
@@ -178,8 +177,7 @@ describe("the source contract's conformance kit", () => {
     expect(declarationProblems(pkg.sources, { tools })).toEqual([])
     expect(sources.rpc).toBe(TOOLS_RPC_ID)
     expect(pkg.name).toBe(PACKAGE)
-    expect(sources.items.map((item) => item.id)).toEqual(["github.activity", "github.notifications"])
-    expect(sources.items.find((item) => item.id === "github.notifications")).toMatchObject({ kind: "snapshot", output: "list", tool: "events_list" })
+    expect(sources.items.map((item) => item.id)).toEqual(["github.activity"])
   })
 
   test("github.activity keeps the contract", async () => {
@@ -224,30 +222,8 @@ describe("the source contract's conformance kit", () => {
     expect(report.ok).toBe(true)
   })
 
-  test("github.notifications keeps the contract", async () => {
-    const listed = sources.items.find((item) => item.id === "github.notifications")!
-    const report = await sourceConformance({
-      plugin: PACKAGE,
-      source: listed,
-      tools,
-      calls: {
-        snapshot: async (input, context) => (await methods(context)).events.run(input, call()),
-        probe: async (input, context) => (await methods(context)).probe.run(input, call()),
-      },
-      snapshotCases: [{ ...(listed.input ?? {}), account: ACCOUNT }],
-      cases: [],
-      account: ACCOUNT,
-      sources,
-      describe: { id: TOOLS_RPC_ID },
-    })
-    reports.push(report)
-    expect(report.problems).toEqual([])
-    expect(report.ok).toBe(true)
-    expect(report.incomplete).toBe(false)
-  })
-
   test("writes the report a release attaches", () => {
-    expect(reports.map((report) => report.source).sort()).toEqual(["github.activity", "github.notifications"])
+    expect(reports.map((report) => report.source)).toEqual(["github.activity"])
     const installed = readInstalledDescriptor(root, { version: pkg.version })
     const report = {
       contract: `${CONTRACT.name}@${CONTRACT.version}`,

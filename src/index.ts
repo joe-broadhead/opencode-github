@@ -69,7 +69,6 @@ export default Plugin.define({
       }
       const apiTool = keep(
         await registerApiTool(ctx, {
-          access: options.access,
           readOnly: options.readOnly,
           endpoints: api,
           service: options.host ? ENTERPRISE_NAME : "GitHub",

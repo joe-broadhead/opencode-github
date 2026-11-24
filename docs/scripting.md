@@ -13,7 +13,7 @@ opencode api post /api/rpc/github.platform.tools/<method> -H "x-opencode-directo
 | --- | --- | --- |
 | One per known tool of GitHub's MCP server, named as the tool: `get_me`, `issue_read`, `pull_request_read`, `get_file_contents`, `search_code`, `issue_write`, `merge_pull_request` and the others in the [toolsets table](configuration.md#toolsets) | `read` or `write` | `github_<method>`, for example `github_issue_read` |
 | `api` | `write` | `github_api`: REST or GraphQL, with the whole input |
-| `events_list` | `read` | `github_events_list`, the plugin's own read: what the signed-in user was involved in since a cursor, as Memory's events ([Events list](#events-list)) |
+| `events_list` | `read` | `github_events_list`, the plugin's own read: what the signed-in user was involved in since a cursor, as normalised events ([Events list](#events-list)) |
 | `probe` | `read` | `github_probe`, the source contract's: who is signed in, `{ source, account, owner, trust }`, and nothing it reads ([Events list](#events-list)) |
 | `describe` | none | none: lists every method with its class, its permission action, whether it can run now (`available`, and when not, the code in `reason` and for `TOOL_UNAVAILABLE` a `detail`), and each one's input as JSON Schema; given a session, it also gives each method's resolved `permission` |
 
@@ -146,7 +146,7 @@ project) and an `upload` each need that rule in the agent's or the session's rul
 
 ## Events list
 
-`events_list` runs the plugin's own `github_events_list`, Memory's source of GitHub events
+`events_list` runs the plugin's own `github_events_list`, the plugin's source of GitHub events
 ([configuration](configuration.md#events-list)). It asserts `github_events_list`, then makes only its three GET
 requests through the `api` method's spec, each resolving and asserting `github_events_list` (not `github_api`) on its
 own `GET /path` first, so an allow for the tool is enough in an agent without a base allow. Its account is the signed-in
@@ -194,13 +194,12 @@ These fields have the same names and meanings in every plugin of this family:
 | Field | Value |
 | --- | --- |
 | `version` | The plugin's version. |
-| `host` | `{ version, range, tested }`: the OpenCode release, the supported range `>=2.2.3 <2.4.0`, and whether this release is one the plugin is tested on (2.2.3, 2.2.4, 2.2.5, 2.2.6, 2.2.7, 2.3.0, 2.3.1 or 2.3.2). |
+| `host` | `{ version, range, tested }`: the OpenCode release, the supported range `>=2.4.1 <2.5.0`, and whether this release is one the plugin is tested on (2.4.1). |
 | `state` | `connected`, `sign_in_required`, `connecting`, `failed`, `disabled`, `not_configured` or `conflict`. |
 | `unguardedAgents` | The agents without default rules, always present; `[]` when there are none. |
 | `nextStep` | The Next step row; `Nothing to do.` when nothing is needed. |
 
-GitHub's own fields sit beside them: `account`, `access`, `deprecation` (while the old `readOnly` option is set),
-`toolsets`, `tools` (`visible`, `unknown`, `mode`),
+GitHub's own fields sit beside them: `account`, `access`, `toolsets`, `tools` (`visible`, `unknown`, `mode`),
 `permissionsBlock` (the rules to copy, while agents are listed), `unmatchedRules` (`github_api` rule resources with an
 upper-case owner or repo name, which never match), `shadowedSkills` (`{ id, path }` for each of the plugin's skills
 that a same-id skill at another path replaces), `hostWarning` (outside the range, with

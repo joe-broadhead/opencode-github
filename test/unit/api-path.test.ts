@@ -67,7 +67,6 @@ async function setUp(endpoints: Endpoints) {
     },
   } as unknown as Ctx
   await registerApiTool(ctx, {
-    access: "all",
     readOnly: false,
     endpoints,
     service: "GitHub",

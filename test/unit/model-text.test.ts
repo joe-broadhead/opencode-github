@@ -31,9 +31,9 @@ const SKILLS = readdirSync(join(ROOT, "skills")).map((name) => [`skills/${name}/
 
 describe("the model-facing text at access all", () => {
   const all = {
-    "the Code Mode namespace": namespaceDescription({ enterprise: false, access: "all" }),
+    "the Code Mode namespace": namespaceDescription({ enterprise: false }),
     "github_api's description": apiDescription(false),
-    "the Jelly summary": (JSON.parse(read("package.json")) as { jelly?: { summary?: string } }).jelly?.summary ?? "",
+    "the declared summary": (JSON.parse(read("package.json")) as { jelly?: { summary?: string } }).jelly?.summary ?? "",
     ...Object.fromEntries(SKILLS),
   }
 
@@ -41,14 +41,12 @@ describe("the model-facing text at access all", () => {
     for (const [claim, pattern] of STALE) expect({ claim, hit: pattern.exec(atAll(text))?.[0] ?? null }).toEqual({ claim, hit: null })
   })
 
-  it("says what a change does under each access value, in the namespace the model reads", () => {
-    expect(namespaceDescription({ enterprise: false, access: "all" })).toContain("At the default `access` `all`, every tool runs without asking, changes included.")
-    expect(namespaceDescription({ enterprise: false, access: "ask-changes" })).toContain("At `access` `ask-changes`, reads run without asking and every change asks first.")
-    expect(namespaceDescription({ enterprise: false, access: "read-only" })).toContain('access: "all"')
-  })
-
-  it("never says a change asks at the default, the one value the namespace states as a fact", () => {
-    const text = namespaceDescription({ enterprise: false, access: "all" })
-    expect(text).not.toMatch(/asks first|asks the user|every change asks/)
+  it("keeps the namespace line within the fixed-context budget", () => {
+    for (const enterprise of [false, true]) {
+      const text = namespaceDescription({ enterprise })
+      expect(text.length).toBeLessThanOrEqual(400)
+      expect(text).not.toContain("\n")
+    }
   })
 })
+

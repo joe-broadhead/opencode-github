@@ -7,7 +7,7 @@ import { mkdirSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { scratchDir } from "./scratch.js"
 
-/** A directory whose node_modules holds another @opencode/sdk, such as 2.2.4 installed outside the lockfile. */
+/** A directory whose node_modules holds another @opencode/sdk, installed outside the lockfile. */
 export const SDK_OVERRIDE = process.env.HOST_SDK_DIR ? resolve(process.env.HOST_SDK_DIR) : undefined
 
 export const ROOT = scratchDir("github-host-test-")

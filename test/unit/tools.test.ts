@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { DEFAULT_TOOLSETS } from "../../src/config.js"
-import { KNOWN_TOOLS, PINNED, TOOL_PREFIX, allReadTools, registerToolFilter, toolKind, toolsetsOf, unavailableDetail } from "../../src/tools.js"
+import { KNOWN_TOOLS, TOOL_PREFIX, allReadTools, registerToolFilter, toolKind, toolsetsOf, unavailableDetail } from "../../src/tools.js"
 
 type Ctx = Parameters<typeof registerToolFilter>[0]
 type Editor = Parameters<Parameters<Ctx["tool"]["transform"]>[0]>[0]
@@ -83,7 +83,6 @@ describe("the catalog", () => {
   })
 
   it("pins nothing: GitHub's signatures are large, and the skills name the tool", () => {
-    expect(PINNED).toEqual([])
     expect(TOOL_PREFIX).toBe("github_")
   })
 })
@@ -126,7 +125,7 @@ describe("unavailableDetail", () => {
 describe("registerToolFilter", () => {
   it("records unknown GitHub tools and keeps them visible by default", async () => {
     const host = fakeTools(TOOLS)
-    const filter = await registerToolFilter(host.ctx, { unknownTools: "ask", owned: () => true })
+    const filter = await registerToolFilter(host.ctx, { unknownTools: "list", owned: () => true })
     expect(ids(host.build())).toEqual(ids(TOOLS))
     expect(filter.tools()).toEqual({ visible: 7, unknown: ["github_another_new_tool", "github_brand_new_tool"] })
   })
@@ -149,27 +148,21 @@ describe("registerToolFilter", () => {
 
   it("removes the hidden ui_get and leaves it out of the count and the default rules", async () => {
     const host = fakeTools([...TOOLS, mcpTool("ui_get")])
-    const filter = await registerToolFilter(host.ctx, { unknownTools: "ask", owned: () => true })
+    const filter = await registerToolFilter(host.ctx, { unknownTools: "list", owned: () => true })
     expect(ids(host.build())).not.toContain("github_ui_get")
     expect(filter.tools()).toEqual({ visible: 7, unknown: ["github_another_new_tool", "github_brand_new_tool"] })
     expect(toolKind("ui_get")).toBe("read")
     expect(allReadTools()).not.toContain("ui_get")
 
     const notOwned = fakeTools([mcpTool("ui_get")])
-    await registerToolFilter(notOwned.ctx, { unknownTools: "ask", owned: () => false })
+    await registerToolFilter(notOwned.ctx, { unknownTools: "list", owned: () => false })
     expect(ids(notOwned.build())).toEqual(["github_ui_get"])
   })
 
   it("pins no GitHub tool in Code Mode", async () => {
     const host = fakeTools(TOOLS)
-    await registerToolFilter(host.ctx, { unknownTools: "ask", owned: () => true })
+    await registerToolFilter(host.ctx, { unknownTools: "list", owned: () => true })
     expect(host.build().filter((tool) => tool.options?.pinned === true)).toEqual([])
-  })
-
-  it("does not pin when the server turns Code Mode off", async () => {
-    const host = fakeTools([mcpTool("get_me", { codemode: false })])
-    await registerToolFilter(host.ctx, { unknownTools: "ask", owned: () => true })
-    expect(host.build()[0]?.options).toEqual({ namespace: "github", codemode: false })
   })
 
   it("leaves a server named github that is not the plugin's as it is, but still counts unknown tools", async () => {

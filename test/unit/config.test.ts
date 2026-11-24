@@ -22,17 +22,15 @@ describe("loadOptions", () => {
         access: "all",
         readOnly: false,
         lockdown: false,
-        unknownTools: "ask",
+        unknownTools: "list",
         scopes: ["repo", "read:org"],
         allowUntestedHost: false,
       })
     }
   })
 
-  // "ask" is the older name of "list": it never made a tool ask. Both keep unknown tools listed.
-  it("takes unknownTools \"list\" as the same value as \"ask\"", () => {
-    expect(loadOptions({ unknownTools: "list" }).unknownTools).toBe("ask")
-    expect(loadOptions({ unknownTools: "ask" }).unknownTools).toBe("ask")
+  it("takes unknownTools list or hide, and nothing else", () => {
+    expect(loadOptions({ unknownTools: "list" }).unknownTools).toBe("list")
     expect(loadOptions({ unknownTools: "hide" }).unknownTools).toBe("hide")
     expect(() => loadOptions({ unknownTools: "show" })).toThrow(/OPTIONS_INVALID|Invalid plugin option/)
   })
@@ -50,18 +48,6 @@ describe("loadOptions", () => {
     expect(loadOptions(options)).toEqual({ ...options, readOnly: false })
   })
 
-  // R18: the old switch is the same one, mapped onto access, with a note for status.
-  it("maps the deprecated readOnly option onto access, with a note", () => {
-    expect(loadOptions({ readOnly: true })).toMatchObject({ access: "read-only", readOnly: true })
-    expect(loadOptions({ readOnly: true }).deprecation).toContain('maps to access "read-only"')
-    expect(loadOptions({ readOnly: false })).toMatchObject({ access: "all", readOnly: false })
-    expect(loadOptions({ readOnly: false }).deprecation).toContain('maps to access "all"')
-    // An explicit access wins, and the old option adds no note.
-    expect(loadOptions({ readOnly: true, access: "all" })).toMatchObject({ access: "all", readOnly: false })
-    expect(loadOptions({ readOnly: true, access: "all" }).deprecation).toBeUndefined()
-    expect(loadOptions({ access: "all" }).deprecation).toBeUndefined()
-  })
-
   it.each(["all", "ask-changes", "read-only"] as const)("accepts access %s", (access) => {
     expect(loadOptions({ access })).toMatchObject({ access, readOnly: access === "read-only" })
   })
@@ -76,7 +62,7 @@ describe("loadOptions", () => {
     [{ toolsets: ["context", "nope"] }, 'Invalid plugin option "toolsets.1"'],
     [{ toolsets: [] }, 'Invalid plugin option "toolsets": list at least one toolset.'],
     [{ toolsets: ["repos", "repos"] }, 'Invalid plugin option "toolsets": list each toolset once.'],
-    [{ readOnly: "yes" }, 'Invalid plugin option "readOnly"'],
+    [{ readOnly: true }, 'Invalid plugin option "readOnly": this option does not exist.'],
     [{ access: "write" }, 'Invalid plugin option "access"'],
     [{ lockdown: 1 }, 'Invalid plugin option "lockdown"'],
     [{ unknownTools: "allow" }, 'Invalid plugin option "unknownTools"'],
@@ -93,7 +79,7 @@ describe("loadOptions", () => {
     const error = failure(raw)
     expect(error.code).toBe("OPTIONS_INVALID")
     expect(error.message).toContain(message)
-    expect(error.nextStep).toBe("Fix the options for github:joe-broadhead/opencode-github#v0.0.10 in opencode.json.")
+    expect(error.nextStep).toBe("Fix the options for github:we-the-rebel-alliance/github-plugin in opencode.json.")
     expect(error.message.endsWith(`Next step: ${error.nextStep}`)).toBe(true)
   })
 
@@ -137,7 +123,7 @@ describe("constants", () => {
   it("has no default client ID, so only token sign-in is offered unless clientId is set", () => {
     expect(loadOptions({}).clientId).toBeUndefined()
     expect(loadOptions({ clientId: "Ov23liExample" }).clientId).toBe("Ov23liExample")
-    expect(loadOptions({ clientId: "Iv23liExample", appSlug: "jelly-dev" }).appSlug).toBe("jelly-dev")
+    expect(loadOptions({ clientId: "Iv23liExample", appSlug: "example-app" }).appSlug).toBe("example-app")
   })
 
   it("defaults to the read-only toolsets that repo and read:org cover: 49 reads once ui_get is hidden", () => {

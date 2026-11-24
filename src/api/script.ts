@@ -4,7 +4,7 @@
 // asserts it, so a read, a write, a download and an upload each need a prior explicit allow for
 // that resource (the default block allows the reads): an allow scoped to GETs cannot POST, and a
 // saved approval is not a grant.
-// `readOnly: true` still refuses every write, whoever calls it.
+// `access: "read-only"` still refuses every write, whoever calls it.
 import * as z from "zod"
 import { GitHubPluginError } from "../errors.js"
 import type { JsonSchema, OwnedMethod } from "@we-the-rebel-alliance/source-contract/tools-rpc"

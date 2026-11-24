@@ -248,7 +248,7 @@ async function send(
     try {
       response = await deps.fetch(current.href, {
         method,
-        headers: { "User-Agent": "opencode-github", ...headers, ...auth },
+        headers: { "User-Agent": "github-plugin", ...headers, ...auth },
         ...(body !== undefined ? { body } : {}),
         redirect: "manual",
         ...(deps.signal ? { signal: deps.signal } : {}),

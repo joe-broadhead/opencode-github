@@ -21,13 +21,13 @@ const UNAVAILABLE = "GitHub status unavailable. Run /github-status for details."
 const row = (label: string, value: string) => `${label.padEnd(28)} ${value}`
 
 const needsAuth: Status = {
-  version: "0.0.2",
+  version: "0.0.0",
   state: "sign_in_required",
   access: "read-only",
   toolsets: ["context", "repos", "issues", "pull_requests"],
-  tools: { visible: 26, unknown: [], mode: "ask" },
+  tools: { visible: 26, unknown: [], mode: "list" },
   unguardedAgents: [],
-  host: { version: "2.2.3", range: ">=2.2.3 <2.4.0", tested: true },
+  host: { version: "2.4.1", range: ">=2.4.1 <2.5.0", tested: true },
   nextStep: "Run /connect and choose GitHub.",
 }
 
@@ -110,7 +110,7 @@ describe("GitHub TUI status view", () => {
     expect(frame).toContain(row("Toolsets", "context, repos, issues, pull_requests"))
     expect(frame).toContain(row("Host", "github.com"))
     expect(frame).toContain(row("Tools", "26 available"))
-    expect(frame).toContain(row("OpenCode", "2.2.3 (tested)"))
+    expect(frame).toContain(row("OpenCode", "2.4.1 (tested)"))
     expect(frame).toContain(row("Next step", "Run /connect and choose GitHub"))
     expect(frame).toContain(row("Agents without default rules", "none"))
     expect(frame).not.toContain("rules below")
@@ -149,14 +149,14 @@ describe("GitHub TUI status view", () => {
       status: {
         ...connected,
         access: "all",
-        tools: { visible: 27, unknown: ["github_new_a", "github_new_b"], mode: "ask" },
+        tools: { visible: 27, unknown: ["github_new_a", "github_new_b"], mode: "list" },
         unguardedAgents: ["reviewer"],
         permissionsBlock: [
           { action: "github_*", resource: "*", effect: "ask" },
           { action: "github_get_me", resource: "*", effect: "allow" },
         ],
-        host: { version: "2.4.0", range: ">=2.2.3 <2.4.0", tested: false },
-        hostWarning: "OpenCode 2.4.0 is outside the tested range.",
+        host: { version: "2.5.0", range: ">=2.4.1 <2.5.0", tested: false },
+        hostWarning: "OpenCode 2.5.0 is outside the tested range.",
       } satisfies Status,
     })
     expect(frame).toContain(row("Access", "every tool runs without asking, reads and new tools included"))
@@ -165,7 +165,7 @@ describe("GitHub TUI status view", () => {
     expect(frame).not.toContain("rules below")
     expect(frame).toContain('{"action":"github_*","resource":"*","effect":"ask"},')
     expect(frame).toContain('{"action":"github_get_me","resource":"*","effect":"allow"}')
-    expect(frame).toContain(row("OpenCode", "2.4.0 (untested: OpenCode 2.4.0 is outside the tested range.)"))
+    expect(frame).toContain(row("OpenCode", "2.5.0 (untested: OpenCode 2.5.0 is outside the tested range.)"))
     const order = ["Connection", "Account", "Access", "Tools ", "Agents without default rules", "github_get_me", "OpenCode", "Next step"].map((text) => frame.indexOf(text))
     expect(order.every((index) => index >= 0)).toBe(true)
     expect([...order].sort((a, b) => a - b)).toEqual(order)
@@ -174,7 +174,7 @@ describe("GitHub TUI status view", () => {
 
   test("on GitHub Enterprise Server, says only github_api works", async () => {
     const view = await open()
-    const frame = await answer(view, { status: { ...connected, enterprise: "ghe.example.com", tools: { visible: 0, unknown: [], mode: "ask" } } satisfies Status })
+    const frame = await answer(view, { status: { ...connected, enterprise: "ghe.example.com", tools: { visible: 0, unknown: [], mode: "list" } } satisfies Status })
     expect(frame).toContain(row("Host", "ghe.example.com (GitHub Enterprise Server)"))
     expect(frame).toContain(row("Tools", "github_api only. GitHub's hosted MCP tools do not support GitHub"))
   })

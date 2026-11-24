@@ -1,6 +1,6 @@
 // One typed code table, and the docs that must match it exactly. A code that is thrown or returned anywhere must be in
-// the table, every code in the table must be raised, and the README's Troubleshooting table, the configuration guide's
-// Errors table and the scripting doc's refusal table must not drift from it in either direction.
+// the table, every code in the table must be raised, and the configuration guide's Errors table and the scripting
+// doc's refusal table must not drift from it in either direction.
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -42,7 +42,6 @@ function tableCodes(markdown: string): string[] {
     .flatMap((cell) => [...cell.matchAll(/`([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*)`/g)].map((code) => code[1]!))
 }
 
-const TROUBLESHOOTING = /## Troubleshooting([\s\S]*?)## Uninstall/.exec(read("README.md"))?.[1] ?? ""
 const CONFIGURATION_ERRORS = /## Errors([\s\S]*?)A script's calls through the tools RPC/.exec(read("docs/configuration.md"))?.[1] ?? ""
 const SCRIPTING = read("docs/scripting.md")
 
@@ -61,10 +60,6 @@ describe("codes", () => {
 
   it("every code in the plugin's table is raised somewhere", () => {
     expect(PLUGIN_CODES.filter((code) => !raising.includes(`"${code}"`))).toEqual([])
-  })
-
-  it("the README's Troubleshooting table lists exactly the plugin's codes", () => {
-    expect(tableCodes(TROUBLESHOOTING).sort()).toEqual([...PLUGIN_CODES].sort())
   })
 
   it("the configuration guide's Errors table lists exactly the plugin's codes", () => {

@@ -159,7 +159,7 @@ export async function fetchInstallationCount(token: string, input: { readonly si
   try {
     const response = await input.fetch(installationsUrl(input.endpoints ?? GITHUB_COM), {
       method: "GET",
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "opencode-github" },
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "github-plugin" },
       redirect: "error",
       signal: input.signal ? AbortSignal.any([input.signal, timeout]) : timeout,
     })
@@ -185,7 +185,7 @@ export async function fetchLogin(token: string, input: { readonly signal?: Abort
         Authorization: `Bearer ${token}`,
         Accept: "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "opencode-github",
+        "User-Agent": "github-plugin",
       },
       redirect: "error",
       signal,

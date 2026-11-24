@@ -16,7 +16,7 @@ const EFFECTS = ["allow", "ask", "deny"] as const
 /** What the generated default rules allow. The family's one option for restricting a plugin. */
 export const ACCESS = ["all", "ask-changes", "read-only"] as const
 export type Access = (typeof ACCESS)[number]
-const UNKNOWN_TOOL_MODES = ["ask", "hide"] as const
+const UNKNOWN_TOOL_MODES = ["list", "hide"] as const
 
 export type Rule = { readonly action: string; readonly resource: string; readonly effect: (typeof EFFECTS)[number] }
 export type SkillPath = { readonly id: string; readonly path: string }
@@ -30,8 +30,6 @@ export type Status = {
   readonly account?: string
   /** What the default rules allow: `all` (the default), `ask-changes` or `read-only`. */
   readonly access: Access
-  /** Present when the deprecated `readOnly` option set the access: what to write instead. */
-  readonly deprecation?: string
   readonly toolsets: readonly string[]
   /** The github server's tools that agents can use, the ones this plugin does not know yet, and whether those are hidden. */
   readonly tools: { readonly visible: number; readonly unknown: readonly string[]; readonly mode: (typeof UNKNOWN_TOOL_MODES)[number] }
@@ -66,7 +64,6 @@ export const STATUS_SCHEMA = object(
     state: { enum: STATES },
     account: text,
     access: { enum: ACCESS },
-    deprecation: text,
     toolsets: texts,
     tools: object({ visible: { type: "integer", minimum: 0 }, unknown: texts, mode: { enum: UNKNOWN_TOOL_MODES } }, ["visible", "unknown", "mode"]),
     unguardedAgents: texts,
@@ -112,7 +109,6 @@ export function isStatus(value: unknown): value is Status {
     (STATES as readonly unknown[]).includes(value.state) &&
     optional(value.account, isText) &&
     (ACCESS as readonly unknown[]).includes(value.access) &&
-    optional(value.deprecation, isText) &&
     isTexts(value.toolsets) &&
     isRecord(tools) &&
     only(tools, ["visible", "unknown", "mode"]) &&
@@ -193,7 +189,6 @@ export function statusRows(status: Status): StatusRow[] {
     { label: "Connection", value: STATE_LABELS[status.state] },
     { label: "Account", value: status.account ?? NONE },
     { label: "Access", value: ACCESS_TEXT[status.access] },
-    ...(status.deprecation ? [{ label: "Note", value: status.deprecation }] : []),
     ...(status.enterprise ? [] : [{ label: "Toolsets", value: status.toolsets.join(", ") }]),
     { label: "Host", value: status.enterprise ? `${status.enterprise} (GitHub Enterprise Server)` : "github.com" },
     ...(status.unmatchedRules?.length ? [{ label: "Rules that never match", value: status.unmatchedRules.join("; ") }] : []),
