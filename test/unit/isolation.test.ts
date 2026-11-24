@@ -38,9 +38,10 @@ describe("the tested releases", () => {
     const files = ["scripts", "test", ".github"].flatMap((dir) =>
       (readdirSync(join(REPO, dir), { recursive: true }) as string[]).map((file) => join(dir, file)).filter((file) => /\.(ts|mjs|yml)$/.test(file)),
     )
-    const lists = files.filter((file) => /\[\s*"2\.2\.\d+"\s*,\s*"2\.2\.\d+"/.test(readFileSync(join(REPO, file), "utf8")))
+    const lists = files.filter((file) => /\[\s*"2\.\d+\.\d+"\s*(?:,\s*"2\.\d+\.\d+"\s*)*\]/.test(readFileSync(join(REPO, file), "utf8")))
     expect(lists).toEqual(["test/unit/host-version.test.ts"])
     const readme = readFileSync(join(REPO, "README.md"), "utf8")
-    expect(readme).toContain(`tested on ${TESTED_HOSTS.slice(0, -1).join(", ")} and ${TESTED_HOSTS.at(-1)}`)
+    const named = TESTED_HOSTS.length === 1 ? TESTED_HOSTS[0] : `${TESTED_HOSTS.slice(0, -1).join(", ")} and ${TESTED_HOSTS.at(-1)}`
+    expect(readme).toContain(`tested on ${named}`)
   })
 })

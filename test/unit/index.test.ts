@@ -17,7 +17,7 @@ function fakeContext(input: { version?: string; options?: Record<string, unknown
   const transform = (name: string) => async () => registration(name)
   let streams = 0
   const ctx = {
-    app: { name: "opencode", version: input.version ?? "2.2.3", channel: "latest" },
+    app: { name: "opencode", version: input.version ?? "2.4.1", channel: "latest" },
     location: LOCATION,
     options: input.options ?? {},
     agent: { transform: transform("agent"), list: async () => ({ location: LOCATION, data: [] }) },

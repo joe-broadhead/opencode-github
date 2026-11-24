@@ -4,9 +4,8 @@
 // to the tests. GitHub is the loopback fake behind the fetch router, and any other request
 // fails the host's close().
 //
-// Host version: the SDK in devDependencies (2.2.3). HOST_SDK_DIR names a directory whose
-// node_modules holds another @opencode/sdk (for example 2.2.4, installed outside the
-// lockfile); the host then runs that SDK and reports its version.
+// Host version: the SDK in devDependencies (2.4.1). HOST_SDK_DIR names a directory whose
+// node_modules holds another @opencode/sdk; the host then runs that SDK and reports its version.
 import { ROOT, SDK_OVERRIDE } from "./isolate.js"
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs"
 import { join } from "node:path"
@@ -25,21 +24,13 @@ const manifest = JSON.parse(readFileSync(join(SDK, "package.json"), "utf8")) as 
 export const SDK_VERSION = manifest.version
 
 /**
- * From OpenCode 2.3.1, `experimental.automation` replaces `experimental.schedule`, and a code action no longer runs when
- * it is created: it runs when the scheduler finds it due.
- */
-export const AUTOMATIONS = ((major, minor, patch) => major > 2 || (major === 2 && (minor > 3 || (minor === 3 && patch >= 1))))(
-  ...(SDK_VERSION.split(".").map(Number) as [number, number, number]),
-)
-
-/**
- * The SDK's host. From 2.3.1 it is the same embedded host, with its own Automation service also running the scheduler,
- * as `opencode serve` does (only a server process starts it): `PromiseSdk.create` is what `OpenCode.create` calls, here
- * with the SDK's `overrides`. The modules sit next to the SDK, so they are the instances its bundle imports.
+ * The SDK's embedded host, with its own Automation service also running the scheduler, as `opencode serve` does (only
+ * a server process starts it): `PromiseSdk.create` is what `OpenCode.create` calls, here with the SDK's `overrides`.
+ * Without the fork, an automation's code action is created but never runs (handoff §3, "the embedded host never runs
+ * automations"). The modules sit next to the SDK, so they are the instances its bundle imports.
  */
 async function createSdk(options: Parameters<(typeof import("@opencode/sdk"))["OpenCode"]["create"]>[0]): Promise<Client> {
   const load = (...path: string[]) => import(pathToFileURL(join(...path)).href)
-  if (!AUTOMATIONS) return ((await load(SDK, manifest.exports["."].import)) as typeof import("@opencode/sdk")).OpenCode.create(options) as Promise<Client>
   const modules = join(SDK, "..", "..")
   const { PromiseSdk } = await load(SDK, "dist", "promise.js")
   const { Automation } = await load(modules, "@opencode", "core", "dist", "automation.js")
@@ -115,9 +106,8 @@ export async function startHost(input: HostInput = {}) {
     ...(sdk ? {} : { plugins: [{ package: REPO, options: input.options ?? {} }] }),
     // Keep the built-in local providers from probing their default ports.
     providers: { lmstudio: { settings: { baseURL: "" } }, ollama: { settings: { baseURL: "" } }, vllm: { settings: { baseURL: "" } } },
-    // A schedule's check program, or on 2.3.1 and later an automation's code action, is how a host test runs Code
-    // Mode with nobody present to answer a prompt.
-    experimental: AUTOMATIONS ? { automations: true } : { schedules: true },
+    // An automation's code action is how a host test runs Code Mode with nobody present to answer a prompt.
+    experimental: { automations: true },
     ...input.config?.(fake.origin),
   }
   const plugins = sdk ? [(await import(pathToFileURL(join(REPO, "dist", "index.js")).href)).default as Plugin.Plugin, probe] : [probe]
@@ -270,38 +260,21 @@ export async function attempt(
 /** How OpenCode answered a program run with nobody present: it ran and returned, or its message. */
 export type Unattended = { readonly ok: true } | { readonly ok: false; readonly error: string }
 
-/** The part of the `experimental.automation` client of 2.3.1 and later used here; the checks compile against 2.2.3. */
-interface Automations {
-  create(input: { sessionID: string; name: string; trigger: { type: "at"; at: string }; action: { type: "code"; code: string } }): Promise<{ id: string }>
-  get(input: { automationID: string }): Promise<{ lastOutcome?: string; lastOutput?: string }>
-  delete(input: { automationID: string }): Promise<unknown>
-}
-
-/** A schedule check returned a boolean or `{ wake }`; an automation returns nothing, so the program is wrapped. */
+/** An automation's code action returns nothing, so the program is wrapped to demand a boolean or `{ wake }`. */
 const asCheck = (code: string) =>
   `const checked = await (async () => {\n${code}\n})()\nif (typeof checked !== "boolean" && !(typeof checked === "object" && checked !== null && typeof checked.wake === "boolean")) throw new Error("A code check must return a boolean or { wake, state?, message? }")`
 
 /**
  * Runs a Code Mode program once with nobody present to answer a prompt, as the session's agent and under its rules,
- * with no model, and answers as a schedule's `if: { code }` check did at creation up to 2.3.0: `ok` when the program
- * returned a boolean or `{ wake }`, else OpenCode's message (a refusal, or what the program threw). Up to 2.3.0 it is
- * that check, and the schedule is deleted at once. From 2.3.1 it is an automation's code action, due at once:
- * creation refuses what the rules do not allow, as the check did, and the run's outcome is read back before the
- * automation is deleted. A run that never comes throws, so it is never read as a refusal.
+ * with no model, as an automation's code action due at once: `ok` when the program returned a boolean or `{ wake }`,
+ * else OpenCode's message (a refusal, or what the program threw). Creation refuses what the rules do not allow, and
+ * the run's outcome is read back before the automation is deleted. A run that never comes throws, so it is never read
+ * as a refusal.
  */
 export async function unattended(host: Host, sessionID: string, code: string): Promise<Unattended> {
   const name = "github-host-test"
   const refused = (error: unknown): Unattended => ({ ok: false, error: error instanceof Error ? error.message : String(error) })
-  if (!AUTOMATIONS) {
-    try {
-      const schedule = await host.client.experimental.schedule.create({ sessionID, name, when: { in: "6 hours" }, prompt: "Deleted by the host test before it can run.", if: { code } })
-      await host.client.experimental.schedule.delete({ scheduleID: schedule.id })
-      return { ok: true }
-    } catch (error) {
-      return refused(error)
-    }
-  }
-  const automations = (host.client.experimental as unknown as { automation: Automations }).automation
+  const automations = host.client.experimental.automation
   let automationID: string
   try {
     automationID = (await automations.create({ sessionID, name, trigger: { type: "at", at: "in 1 millis" }, action: { type: "code", code: asCheck(code) } })).id

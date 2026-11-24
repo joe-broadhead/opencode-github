@@ -96,7 +96,7 @@ for (const version of STOCK_VERSIONS)
 
     test("never makes ui_get or an unknown tool a method, though GitHub lists them", async () => {
       // The status RPC counts what the server lists: the two reads, the two writes and the unknown tool (ui_get is removed).
-      expect((await status(host)).tools).toEqual({ visible: 5, unknown: ["github_brand_new_tool"], mode: "ask" })
+      expect((await status(host)).tools).toEqual({ visible: 5, unknown: ["github_brand_new_tool"], mode: "list" })
       const from = fake.calls().length
       for (const name of ["ui_get", "brand_new_tool"]) {
         const refused = await call("build", name, {})

@@ -1,20 +1,20 @@
 {
-  "name": "@joe-broadhead/opencode-github",
-  "version": "0.0.11",
+  "name": "@we-the-rebel-alliance/github-plugin",
+  "version": "0.0.0",
   "private": true,
-  "description": "Unofficial OpenCode plugin for GitHub",
+  "description": "GitHub's issues, pull requests, code and Actions in OpenCode, through its hosted MCP server and API.",
   "keywords": [
     "opencode",
     "opencode-plugin",
     "github"
   ],
-  "homepage": "https://github.com/joe-broadhead/opencode-github#readme",
+  "homepage": "https://github.com/we-the-rebel-alliance/github-plugin#readme",
   "bugs": {
-    "url": "https://github.com/joe-broadhead/opencode-github/issues"
+    "url": "https://github.com/we-the-rebel-alliance/github-plugin/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/joe-broadhead/opencode-github.git"
+    "url": "git+https://github.com/we-the-rebel-alliance/github-plugin.git"
   },
   "license": "MIT",
   "type": "module",
@@ -63,15 +63,16 @@
   "devDependencies": {
     "@babel/core": "7.29.7",
     "@babel/preset-typescript": "7.27.1",
-    "@opencode/client": "2.2.3",
-    "@opencode/plugin": "2.2.3",
-    "@opencode/sdk": "2.2.3",
+    "@opencode/client": "2.4.1",
+    "@opencode/plugin": "2.4.1",
+    "@opencode/sdk": "2.4.1",
     "@opentui/core": "0.8.0",
     "@opentui/solid": "0.8.0",
     "@types/bun": "1.4.4",
     "@types/node": "24.19.2",
-    "@we-the-rebel-alliance/source-contract": "github:we-the-rebel-alliance/source-contract#v0.3.0",
+    "@we-the-rebel-alliance/source-contract": "github:we-the-rebel-alliance/source-contract#2fd55cdc0c6c1067927fefc403a88bfd18c9a971",
     "babel-preset-solid": "1.9.16",
+    "effect": "4.1.0",
     "esbuild": "0.28.2",
     "solid-js": "1.9.18",
     "typescript": "5.9.3",
@@ -79,7 +80,7 @@
     "zod": "4.6.7"
   },
   "opencode": {
-    "host": ">=2.2.3 <2.4.0",
+    "host": ">=2.4.1 <2.5.0",
     "icons": [
       {
         "src": "assets/icon.svg",
@@ -150,37 +151,6 @@
           "class": "free"
         },
         "maxBytes": 900000,
-        "urlHosts": [
-          "github.com"
-        ]
-      },
-      {
-        "id": "github.notifications",
-        "kind": "snapshot",
-        "tool": "events_list",
-        "input": {
-          "source": "github",
-          "list": "notifications"
-        },
-        "output": "list",
-        "accounts": {
-          "named": false
-        },
-        "permission": {
-          "tool": "github_events_list",
-          "rules": [
-            {
-              "action": "github_events_list",
-              "resource": "GET /notifications"
-            }
-          ]
-        },
-        "private": true,
-        "cost": {
-          "class": "free"
-        },
-        "maxAgeSec": 900,
-        "maxBytes": 65536,
         "urlHosts": [
           "github.com"
         ]
@@ -862,7 +832,7 @@
           "description": "Whether GitHub tools this plugin does not know are listed. Listed ones follow the access rules.",
           "choices": [
             {
-              "value": "ask",
+              "value": "list",
               "label": "List them",
               "description": "Tools GitHub adds that this plugin does not know stay listed and follow the access rules."
             },
@@ -872,7 +842,7 @@
               "description": "Tools GitHub adds that this plugin does not know are left out of the tool list."
             }
           ],
-          "default": "ask"
+          "default": "list"
         },
         {
           "key": "lockdown",
