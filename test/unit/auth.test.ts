@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { registerAuth } from "../../src/auth.js"
 import { endpoints, GITHUB_COM, loadOptions } from "../../src/config.js"
-import { DEVICE_METHOD_ID, HOST_OWNS_REFRESH, type IntegrationEditor, signIn, TOKEN_METHOD_ID } from "../../src/sign-in.js"
+import { DEVICE_METHOD_ID, type IntegrationEditor, signIn, TOKEN_METHOD_ID } from "../../src/sign-in.js"
 
 type Ctx = Parameters<typeof registerAuth>[0]
 type Editor = Parameters<Parameters<Ctx["integration"]["transform"]>[0]>[0]
@@ -587,19 +587,6 @@ describe("GitHub App device sign-in", () => {
     await auth.dispose()
   })
 
-  it("asks for a new sign-in on a copy whose renewal another host owns, without a request to GitHub", async () => {
-    const { host, auth } = await signedOutHost()
-    const { credential, calls } = await appSignIn(host, 1)
-    const before = calls.length
-    // An agent's copy: the access token, the host-owned marker for refresh, a near expiry, and no client or secret.
-    const copy: Credential = { ...credential, refresh: HOST_OWNS_REFRESH, expires: Date.now() + 60_000 }
-    await expect(resolve(host, copy)).rejects.toThrow("SIGN_IN_REJECTED: GitHub rejected the saved sign-in. Next step: Run /connect and choose GitHub to sign in again.")
-    // Even a copy that would never expire is not renewed here.
-    await expect(host.implementation(DEVICE_METHOD_ID).refresh!({ ...copy, expires: 0 })).rejects.toThrow(/^SIGN_IN_REJECTED: /)
-    expect(calls.length).toBe(before)
-    await auth.dispose()
-  })
-
   it("names GitHub Enterprise in the same answer, with no request", async () => {
     let refresh: ((credential: Credential) => Promise<Credential>) | undefined
     const editor = {
@@ -612,7 +599,7 @@ describe("GitHub App device sign-in", () => {
     const options = loadOptions({ host: "ghe.example.com", clientId: "Iv1.enterprise" })
     signIn({ clientId: options.clientId!, scopes: options.scopes, endpoints: endpoints(options), service: "GitHub Enterprise" }, new AbortController().signal).attach(editor, "github-enterprise")
     const calls = stubFetch({})
-    const copy: Credential = { type: "oauth", methodID: DEVICE_METHOD_ID as Credential["methodID"], access: "ghu_" + "A".repeat(36), refresh: HOST_OWNS_REFRESH, expires: Date.now() + 60_000 }
+    const copy: Credential = { type: "oauth", methodID: DEVICE_METHOD_ID as Credential["methodID"], access: "ghu_" + "A".repeat(36), refresh: "ghr_" + "X".repeat(40), expires: Date.now() + 60_000, metadata: { refreshExpires: Date.now() - 1 } }
     await expect(refresh!(copy)).rejects.toThrow("Run /connect and choose GitHub Enterprise to sign in again.")
     expect(calls).toEqual([])
   })

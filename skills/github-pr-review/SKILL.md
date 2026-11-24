@@ -1,9 +1,9 @@
 ---
 name: github-pr-review
-description: Review or summarise a GitHub pull request from its description, changed files, diff, earlier reviews and CI checks, and find out why CI failed, now or on an earlier run, without changing anything unless asked. Use when the user asks to review, summarise or check a GitHub pull request (a URL, OWNER/REPO#123 or a number), or why its CI or a check failed.
+description: Review or summarise a GitHub pull request (URL, OWNER/REPO#123 or number) from its diff, reviews and checks, and find why CI failed. Use when the user asks for a review or a CI failure; changes only when asked.
 ---
 
-If GitHub's tools are absent, run `/connect` and choose GitHub (GitHub Enterprise for a configured Enterprise Server), or on Jelly call jelly_connection_request.
+If GitHub's tools are absent, run `/connect` and choose GitHub (GitHub Enterprise for a configured Enterprise Server).
 
 # Review a GitHub pull request
 

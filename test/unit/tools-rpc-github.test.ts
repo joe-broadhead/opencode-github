@@ -89,7 +89,6 @@ async function setUp(
     },
   }
   const api = await registerApiTool(ctx as never, {
-    access: "all",
     readOnly: false,
     endpoints: GITHUB_COM,
     service: "GitHub",
@@ -175,7 +174,6 @@ describe("GitHub's tools RPC", () => {
 
 describe("the source tools RPC", () => {
   const ACTIVITY = { source: "github", since: "2026-11-09" }
-  const NOTIFICATIONS = { source: "github", list: "notifications" }
   const SEARCH = () => Response.json({ total_count: 0, items: [], incomplete_results: false })
   const UNAUTHORIZED = () => Response.json({ message: "Bad credentials" }, { status: 401 })
   const NEXT = "Run /connect and choose GitHub to sign in again."
@@ -205,7 +203,7 @@ describe("the source tools RPC", () => {
         if (++resolveCount >= rejectAt) throw new Error("credential resolution failed", { cause: signInAgain("GitHub") })
       },
     })
-    for (const [method, input] of [["probe", {}], ["events_list", ACTIVITY], ["events_list", NOTIFICATIONS]] as const) {
+    for (const [method, input] of [["probe", {}], ["events_list", ACTIVITY]] as const) {
       resolveCount = 0
       const response = await h.call(method, input)
       expect(response).toMatchObject(SIGN_IN)
@@ -216,15 +214,14 @@ describe("the source tools RPC", () => {
     expect(h.requests).toEqual([])
   })
 
-  it.each([401, 403, 404, 422])("keeps the notifications scope fallback for HTTP %s without probing or widening permissions", async (status) => {
+  it.each([401, 403, 404, 422])("keeps the notifications scope fallback on the activity feed for HTTP %s without probing or widening permissions", async (status) => {
     const h = await setUp({
       sources: true,
       agents: { build: [rule(EVENTS_ACTION, "allow")] },
       answers: { "/search/issues": SEARCH, "/search/commits": SEARCH, "/notifications": () => Response.json({}, { status }) },
     })
     expect(await h.call("events_list", ACTIVITY)).toMatchObject({ events: [], more: false })
-    expect(await h.call("events_list", NOTIFICATIONS)).toMatchObject({ data: { items: [], editable: false } })
-    expect(h.requests.map(({ url }) => new URL(url).pathname)).toEqual(["/search/issues", "/search/issues", "/search/commits", "/notifications", "/notifications"])
+    expect(h.requests.map(({ url }) => new URL(url).pathname)).toEqual(["/search/issues", "/search/issues", "/search/commits", "/notifications"])
   })
 
   it("does not treat a transient or scope failure on a required read as rejected auth", async () => {

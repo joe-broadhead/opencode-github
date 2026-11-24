@@ -9,7 +9,7 @@ import { createHash } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
 
 const COPIES = [
-  { path: "test/support/jelly-kit.ts", optional: false, sha256: "de4bed563f37e39a596ba50908cac32f596a1d616b068daa327c2942e3f0aed5", part: (text) => text },
+  { path: "test/support/jelly-kit.ts", optional: false, sha256: "ab2fe38c9de20e683d7d1003ca08ed5b13aa8af8c09ae7008365d63201f01cde", part: (text) => text },
   // Jelly's setting rules, restated without zod (the file's header says what it restates and how to update it).
   { path: "test/support/jelly-settings.ts", optional: false, sha256: "966aeac7eddce490da51e8e46780f1fbcfaf9b3e892bd62f2c3952c2a6111383", part: (text) => text },
   // The release kit, whole: one version in every plugin (CONTRIBUTING.md, Releasing). Change it in every plugin at once.
@@ -25,7 +25,7 @@ const COPIES = [
   { path: "scripts/publish-release.mjs", optional: false, sha256: "9615e2eaab236a8ba01c133be87a2428d17a5612716a4df05c788ff1be7668a1", part: (text) => text },
   { path: "scripts/release-commit.mjs", optional: false, sha256: "fb08f19a3bf659eeff960944fa4eb53b4cf74f94c4e12e123c2d104185667f44", part: (text) => text },
   { path: "scripts/release-github.mjs", optional: false, sha256: "44b7c768be3fb0e8f0f42f17a47c582df873ae9cf4074449d588692a2b9e2de7", part: (text) => text },
-  { path: "scripts/release-kit.test.mjs", optional: false, sha256: "57ef690684bbe020913db40611c089565513194ef57ac5e30ff7116e6569c411", part: (text) => text },
+  { path: "scripts/release-kit.test.mjs", optional: false, sha256: "8ddaee0635335dfebe98c7e93bbea963e2e3660dcb05164614e92c437b885c8e", part: (text) => text },
   { path: "scripts/release-pack.mjs", optional: false, sha256: "47400eb783dbdcb710efa7073619ac577c044434681113daf782271538cf8e22", part: (text) => text },
   { path: "scripts/release-rules.mjs", optional: false, sha256: "7a9f985fe5ccb3c1c30c6727d6390329b07fdb30d25bf8de5838dcbb36883c63", part: (text) => text },
   { path: "scripts/release-version.mjs", optional: false, sha256: "24c2b5f9caca6f381cbadd069178a4c3522c09a8f7a6acb06ce1b347f1c4994b", part: (text) => text },

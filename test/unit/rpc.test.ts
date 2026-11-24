@@ -5,13 +5,13 @@ import { GithubRpc, STATES, STATUS_SCHEMA, type Status, formatRules, formatStatu
 import { jargonIn } from "./jargon.js"
 
 const status = (overrides: Partial<Status> = {}): Status => ({
-  version: "0.0.2",
+  version: "0.0.0",
   state: "sign_in_required",
   access: "read-only",
   toolsets: ["context", "repos", "issues", "pull_requests"],
-  tools: { visible: 26, unknown: [], mode: "ask" },
+  tools: { visible: 26, unknown: [], mode: "list" },
   unguardedAgents: [],
-  host: { version: "2.2.3", range: ">=2.2.3 <2.4.0", tested: true },
+  host: { version: "2.4.1", range: ">=2.4.1 <2.5.0", tested: true },
   nextStep: "Run /connect and choose GitHub.",
   ...overrides,
 })
@@ -42,18 +42,18 @@ describe("isStatus and the JSON Schema", () => {
 
   it("accepts the optional fields and rejects unknown, missing or wrong ones", () => {
     expect(
-      isStatus(status({ account: "octocat", host: { version: "2.4.0", range: ">=2.2.3 <2.4.0", tested: false }, hostWarning: "w", unguardedAgents: ["a"], permissionsBlock: defaultRules(), enterprise: "ghe.example.com" })),
+      isStatus(status({ account: "octocat", host: { version: "2.5.0", range: ">=2.4.1 <2.5.0", tested: false }, hostWarning: "w", unguardedAgents: ["a"], permissionsBlock: defaultRules(), enterprise: "ghe.example.com" })),
     ).toBe(true)
     expect(isStatus({ ...status(), profileFingerprint: "x" })).toBe(false)
     expect(isStatus(status({ state: "busy" as Status["state"] }))).toBe(false)
     const { nextStep: _nextStep, ...missing } = status()
     expect(isStatus(missing)).toBe(false)
-    expect(isStatus(status({ tools: { visible: -1, unknown: [], mode: "ask" } }))).toBe(false)
+    expect(isStatus(status({ tools: { visible: -1, unknown: [], mode: "list" } }))).toBe(false)
     expect(isStatus(status({ permissionsBlock: [{ action: "x", resource: "*", effect: "maybe" as "ask" }] }))).toBe(false)
     expect(isStatus(status({ shadowedSkills: [{ id: "github-pr-review", path: "/x/SKILL.md" }] }))).toBe(true)
     expect(isStatus(status({ shadowedSkills: [{ id: "github-pr-review" } as unknown as { id: string; path: string }] }))).toBe(false)
-    expect(isStatus(status({ host: { version: "2.2.3", range: ">=2.2.3 <2.4.0", tested: true, extra: 1 } as unknown as Status["host"] }))).toBe(false)
-    expect(isStatus(status({ host: { version: "2.2.3", range: ">=2.2.3 <2.4.0" } as unknown as Status["host"] }))).toBe(false)
+    expect(isStatus(status({ host: { version: "2.4.1", range: ">=2.4.1 <2.5.0", tested: true, extra: 1 } as unknown as Status["host"] }))).toBe(false)
+    expect(isStatus(status({ host: { version: "2.4.1", range: ">=2.4.1 <2.5.0" } as unknown as Status["host"] }))).toBe(false)
     const { version: _version, ...unversioned } = status()
     expect(isStatus(unversioned)).toBe(false)
     expect(isStatus(null)).toBe(false)
@@ -61,7 +61,7 @@ describe("isStatus and the JSON Schema", () => {
 
   it("states the same fields and required fields in its JSON Schema", () => {
     expect(Object.keys(STATUS_SCHEMA.properties).sort()).toEqual(
-      ["access", "account", "deprecation", "enterprise", "host", "hostWarning", "nextStep", "permissionsBlock", "shadowedSkills", "state", "tools", "toolsets", "unguardedAgents", "unmatchedRules", "version"],
+      ["access", "account", "enterprise", "host", "hostWarning", "nextStep", "permissionsBlock", "shadowedSkills", "state", "tools", "toolsets", "unguardedAgents", "unmatchedRules", "version"],
     )
     expect([...STATUS_SCHEMA.required].sort()).toEqual(["access", "host", "nextStep", "state", "tools", "toolsets", "unguardedAgents", "version"])
     expect(STATUS_SCHEMA.additionalProperties).toBe(false)
@@ -80,7 +80,7 @@ describe("formatStatus", () => {
         "Host: github.com",
         "Tools: 26 available",
         "Agents without default rules: none",
-        "OpenCode: 2.2.3 (tested)",
+        "OpenCode: 2.4.1 (tested)",
         "Next step: Nothing to do.",
       ].join("\n"),
     )
@@ -106,16 +106,16 @@ describe("formatStatus", () => {
   })
 
   it("names unknown tools, writes and an untested OpenCode when they apply", () => {
-    const range = ">=2.2.3 <2.4.0"
-    const text = formatStatus(status({ access: "all", tools: { visible: 1, unknown: ["github_a", "github_b"], mode: "hide" }, host: { version: "2.4.0", range, tested: false }, hostWarning: "Untested OpenCode." }))
+    const range = ">=2.4.1 <2.5.0"
+    const text = formatStatus(status({ access: "all", tools: { visible: 1, unknown: ["github_a", "github_b"], mode: "hide" }, host: { version: "2.5.0", range, tested: false }, hostWarning: "Untested OpenCode." }))
     expect(text).toContain("Access: every tool runs without asking, reads and new tools included")
     expect(text).toContain("Tools: 1 available, 2 unknown (hidden): github_a, github_b")
-    expect(text).toContain("OpenCode: 2.4.0 (untested: Untested OpenCode.)")
+    expect(text).toContain("OpenCode: 2.5.0 (untested: Untested OpenCode.)")
     // QA INSTALL-4: a release in the range that is not tested says so, with the range.
-    expect(formatStatus(status({ host: { version: "2.2.99", range, tested: false } }))).toContain("OpenCode: 2.2.99 (untested; supported range >=2.2.3 <2.4.0)")
-    expect(formatStatus(status({ host: { version: "2.2.5", range, tested: true } }))).toContain("OpenCode: 2.2.5 (tested)")
-    expect(formatStatus(status({ access: "all", tools: { visible: 3, unknown: ["github_a"], mode: "ask" } }))).toContain("(allowed by github_*): github_a")
-    expect(formatStatus(status({ access: "ask-changes", tools: { visible: 3, unknown: ["github_a"], mode: "ask" } }))).toContain("(they ask first): github_a")
+    expect(formatStatus(status({ host: { version: "2.4.99", range, tested: false } }))).toContain("OpenCode: 2.4.99 (untested; supported range >=2.4.1 <2.5.0)")
+    expect(formatStatus(status({ host: { version: "2.4.1", range, tested: true } }))).toContain("OpenCode: 2.4.1 (tested)")
+    expect(formatStatus(status({ access: "all", tools: { visible: 3, unknown: ["github_a"], mode: "list" } }))).toContain("(allowed by github_*): github_a")
+    expect(formatStatus(status({ access: "ask-changes", tools: { visible: 3, unknown: ["github_a"], mode: "list" } }))).toContain("(they ask first): github_a")
   })
 
   // TRIAGE decision 1: the agents row lists names only, followed by the rules block; the fix is the next step.

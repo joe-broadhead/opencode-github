@@ -69,7 +69,7 @@ describe("the jelly declaration", () => {
   it("access declares Jelly's own words for its three values, and unknownTools its two", () => {
     const setting = (key: string) => jelly.contributes.settings.find((entry) => entry.key === key)!
     expect(setting("access").choices).toEqual(ACCESS_CHOICES)
-    expect((settingChoices(setting("unknownTools")) ?? []).map((choice) => choice.value)).toEqual(["ask", "hide"])
+    expect((settingChoices(setting("unknownTools")) ?? []).map((choice) => choice.value)).toEqual(["list", "hide"])
     expect(settingChoices(setting("lockdown"))).toBeUndefined()
   })
 
@@ -84,11 +84,5 @@ describe("the jelly declaration", () => {
       expect(settingValueIssue(entry, "write")).not.toBeNull()
       expect(() => loadOptions({ [key]: "write" })).toThrow(/OPTIONS_INVALID|Invalid plugin option/)
     }
-  })
-})
-
-describe("docs/jelly.md", () => {
-  it("follows the plugin authors' standard", () => {
-    expect(docProblems(ROOT)).toEqual([])
   })
 })

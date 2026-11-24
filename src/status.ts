@@ -23,7 +23,7 @@ type StatusContext = {
 }
 
 export type StatusDeps = {
-  readonly options: Pick<Options, "access" | "readOnly" | "toolsets" | "unknownTools" | "deprecation" | "appSlug">
+  readonly options: Pick<Options, "access" | "readOnly" | "toolsets" | "unknownTools" | "appSlug">
   /** Where GitHub is, for a GitHub App's install link. */
   readonly endpoints: Endpoints
   /** For the installation check; the global fetch unless a test sets one. */
@@ -77,7 +77,6 @@ export async function computeStatus(ctx: StatusContext, deps: StatusDeps): Promi
     state,
     ...(account ? { account } : {}),
     access: deps.options.access,
-    ...(deps.options.deprecation ? { deprecation: deps.options.deprecation } : {}),
     toolsets: [...deps.options.toolsets],
     tools: { visible: tools.visible, unknown: [...tools.unknown], mode: deps.options.unknownTools },
     unguardedAgents: unguarded,
@@ -129,7 +128,8 @@ function skillStep(shadowed: readonly SkillPath[]): string | undefined {
 
 /** Only outside the supported range (allowUntestedHost); an untested release inside it leaves the next step alone (S13). */
 function hostStep(outsideRange: boolean): string | undefined {
-  return outsideRange ? `If GitHub misbehaves, use OpenCode ${TESTED_HOSTS.slice(0, -1).join(", ")} or ${TESTED_HOSTS.at(-1)}, where it is tested.` : undefined
+  if (!outsideRange) return undefined
+  return `If GitHub misbehaves, use OpenCode ${TESTED_HOSTS.join(" or ")}, where it is tested.`
 }
 
 type ServerState = "connected" | "pending" | "disabled" | "failed" | "needs_auth"

@@ -95,21 +95,12 @@ const OptionsSchema = z.strictObject({
     .default([...DEFAULT_TOOLSETS]),
   /** What the generated default rules allow: everything, changes ask, or read-only. */
   access: z.enum(ACCESS).optional(),
-  /**
-   * Deprecated: `true` means `access: "read-only"` and `false` means `access: "all"`. Kept so an existing config keeps
-   * working; status says so.
-   */
-  readOnly: z.boolean().optional(),
   lockdown: z.boolean().default(false),
   /**
-   * Whether GitHub tools the plugin does not know are listed: `"list"` or `"ask"` (the same value, and the default)
-   * keeps them, and the `github_*` rule and `access` decide them; `"hide"` removes them. `"ask"` is the older name: it
-   * never made a tool ask.
+   * Whether GitHub tools the plugin does not know are listed: `"list"` (the default) keeps them, and the `github_*`
+   * rule and `access` decide them; `"hide"` removes them.
    */
-  unknownTools: z
-    .enum(["list", "ask", "hide"])
-    .default("ask")
-    .transform((value) => (value === "list" ? "ask" : value)),
+  unknownTools: z.enum(["list", "hide"]).default("list"),
   /**
    * An OAuth App or a GitHub App for device sign-in, set by the user or an organisation; without it only token sign-in
    * is offered.
@@ -139,15 +130,11 @@ const OptionsSchema = z.strictObject({
 type ParsedOptions = z.output<typeof OptionsSchema>
 
 export type Options = ParsedOptions & {
-  /** The one switch the default rules follow: `access`, or the deprecated `readOnly` mapped onto it. */
+  /** The one switch the default rules follow. */
   readonly access: Access
   /** Read-only means every change is refused and GitHub's own server lists no write tools: `access === "read-only"`. */
   readonly readOnly: boolean
-  /** The note status shows when the deprecated `readOnly` option set the access. */
-  readonly deprecation?: string
 }
-
-
 
 export function loadOptions(raw: unknown): Options {
   const result = OptionsSchema.safeParse(raw ?? {})
@@ -158,18 +145,9 @@ export function loadOptions(raw: unknown): Options {
     throw new GitHubPluginError(
       "OPTIONS_INVALID",
       path ? `Invalid plugin option "${path}": ${message}.` : `Invalid plugin options: ${message}.`,
-      "Fix the options for github:joe-broadhead/opencode-github#v0.0.10 in opencode.json.",
+      "Fix the options for github:we-the-rebel-alliance/github-plugin in opencode.json.",
     )
   }
-  const { readOnly, ...rest } = result.data
-  // The old option is the same switch: `readOnly: true` is read-only and `readOnly: false` is everything allowed.
-  const access: Access = rest.access ?? (readOnly === true ? "read-only" : "all")
-  return {
-    ...rest,
-    access,
-    readOnly: access === "read-only",
-    ...(readOnly === undefined || rest.access !== undefined
-      ? {}
-      : { deprecation: `The readOnly option is deprecated: it maps to access "${access}". Set the access option instead, and remove readOnly.` }),
-  }
+  const access: Access = result.data.access ?? "all"
+  return { ...result.data, access, readOnly: access === "read-only" }
 }

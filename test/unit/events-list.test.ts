@@ -18,11 +18,9 @@ import { type Rule, defaultRules, effectOf } from "../../src/permissions.js"
 import {
   EVENTS_ACTION,
   EVENTS_INPUT,
-  EVENTS_METHOD_OUTPUT,
   EVENTS_OUTPUT,
   EVENTS_READS,
   NAMESPACE,
-  NOTIFICATIONS_LIST,
   NOTIFICATION_RETENTION_MS,
   PAGE_BYTES,
   PROBE_ACTION,
@@ -31,10 +29,8 @@ import {
   SOURCE,
   commitItem,
   eventsMethod,
-  isNotificationsList,
   issueItem,
   listEvents,
-  listNotifications,
   loginOf,
   notificationItem,
   orderKey,
@@ -43,7 +39,6 @@ import {
   registerEventsTool,
   runEvents,
   runProbe,
-  runSource,
 } from "../../src/source-events.js"
 
 const NOW = Date.parse("2026-11-08T12:00:00Z")
@@ -213,7 +208,7 @@ describe("GitHub's answers as events", () => {
 })
 
 describe("events_list", () => {
-  /** What every walk checks beyond contract 1: the bound cursor, the table's codes and the declared maxBytes. */
+  /** What every walk checks beyond the events contract: the bound cursor, the table's codes and the declared maxBytes. */
   const FINAL = { account: LOGIN, binding: { plugin: NAMESPACE }, codes: true, maxBytes: PAGE_BYTES } as const
 
   it("keeps the events_list contract over a synthetic GitHub", async () => {
@@ -258,7 +253,7 @@ describe("events_list", () => {
 
   it("names the account and owner as the sign-in records them: the account lowercase, the owner as GitHub spells the login", async () => {
     const result = (await list(github({ login: "Octo-Person" }))({ since: "2999-01-01" })) as EventsListResult
-    expect(result).toMatchObject({ account: "octo-person", owner: { id: "github:Octo-Person", label: "Octo-Person" }, plugin: "@joe-broadhead/opencode-github" })
+    expect(result).toMatchObject({ account: "octo-person", owner: { id: "github:Octo-Person", label: "Octo-Person" }, plugin: "@we-the-rebel-alliance/github-plugin" })
   })
 
   it("lists an event once it is 5 minutes old", async () => {
@@ -339,34 +334,6 @@ describe("events_list", () => {
     expect(fake.calls).toEqual([])
   })
 
-  it("reads a cursor of 0.0.2 for this sign-in, and refuses only a cursor no release wrote, or another sign-in's", async () => {
-    const owner = createHash("sha256").update(OWNER.id).digest("hex").slice(0, 16)
-    const positions = { i: [Date.parse(SINCE), ""], c: [Date.parse(SINCE), ""], n: [Date.parse(SINCE), ""] }
-    // Contract 1's cursor, as 0.0.2 wrote it: account default and the owner's hash. It lists what came after.
-    const legacy = encodeCursor(SOURCE, { a: "default", o: owner, p: positions })
-    const read = (await listEvents(github().get, github().identity, { account: "default", cursor: legacy, limit: PAGE.max }, NOW)) as EventsListResult
-    expect(read.events.map((event) => event.external_id)).toEqual(EXPECTED)
-    const refused = async (cursor: string) => {
-      const fake = github()
-      const error = await listEvents(fake.get, fake.identity, { account: LOGIN, cursor }, NOW).catch((caught: unknown) => caught)
-      expect(error).toBeInstanceOf(GitHubPluginError)
-      expect((error as GitHubPluginError).code).toBe("CURSOR_INVALID")
-      expect((error as GitHubPluginError).nextStep).toBe("Call events_list without a cursor, with since, to start again.")
-      expect(fake.calls).toEqual([])
-    }
-    // Another sign-in's 0.0.2 cursor, and one that names an account 0.0.2 never wrote.
-    await refused(encodeCursor(SOURCE, { a: "default", o: "0".repeat(16), p: positions }))
-    await refused(encodeCursor(SOURCE, { a: LOGIN, o: owner, p: positions }))
-    const bound = (state: Record<string, unknown>) => encodeBoundCursor({ plugin: NAMESPACE, source: SOURCE, account: LOGIN }, { a: LOGIN, o: owner, ...state })
-    const streams = { i: [Date.parse(SINCE), ""], p: [Date.parse(SINCE), ""], c: [Date.parse(SINCE), ""], n: [Date.parse(SINCE), ""] }
-    // 0.0.5's shape is read; with a read's cut but no lookback, no release wrote it.
-    expect(((await listEvents(github().get, github().identity, { account: LOGIN, cursor: bound({ p: streams }), limit: PAGE.max }, NOW)) as EventsListResult).events.map((event) => event.external_id)).toEqual(EXPECTED)
-    await refused(bound({ p: streams, u: NOW }))
-    // Format 1 always holds its lookback, and there is no format 2.
-    await refused(bound({ k: 1, p: [["0", ""], ["0", ""], ["0", ""], ["0", ""]] }))
-    await refused(bound({ k: 2, p: [["0", ""], ["0", ""], ["0", ""], ["0", ""]], l: ["0", []] }))
-  })
-
   it("refuses an event whose title or text holds a secret for good, and moves the cursor past it", async () => {
     const leaky = github()
     const get: typeof leaky.get = async (path, query) => {
@@ -423,7 +390,7 @@ describe("GitHub's notification answers, read whole", () => {
   it("gives every events_list read path the 32 MB limit, so none is left on the agent's cap", () => {
     const source = readFileSync(new URL("../../src/source-events.ts", import.meta.url), "utf8")
     const reads = source.split("\n").filter((line) => line.includes("list(get,"))
-    expect(reads).toHaveLength(3)
+    expect(reads).toHaveLength(2)
     expect(reads.every((line) => line.includes("EVENTS_MAX_BYTES"))).toBe(true)
   })
 })
@@ -618,154 +585,6 @@ describe("probe", () => {
   })
 })
 
-describe("the notifications list", () => {
-  /** Newest first, as GitHub's inbox answers: read and unread, and an issue notification the events feed leaves to its issue stream. */
-  const INBOX = [
-    { id: "9001", reason: "review_requested", updated_at: "2026-11-08T11:00:00Z", subject: { title: "Add the parser", type: "PullRequest" }, repository: { full_name: "octo/app", html_url: "https://github.com/octo/app" } },
-    { id: "9002", reason: "subscribed", updated_at: "2026-11-08T10:00:00Z", subject: { title: "v2.0.0", type: "Release" }, repository: { full_name: "octo/lib", html_url: "https://github.com/octo/lib" } },
-    { id: "9003", reason: "mention", updated_at: "2026-11-08T09:00:00Z", subject: { title: "Deploy broke: password=hunter2 in the URL", type: "Issue" }, repository: { full_name: "octo/app", html_url: "https://github.com/octo/app" } },
-    { id: "9004", reason: "team_mention", updated_at: "2026-11-08T08:00:00Z", subject: { type: "Discussion" }, repository: { full_name: "octo/app", html_url: "https://github.com/octo/app" } },
-    { id: "9005", updated_at: "2026-11-08T07:00:00Z", subject: { title: "A title with no reason", type: "CheckSuite" }, repository: { full_name: "octo/app", html_url: "https://github.com/octo/app" } },
-  ]
-
-  it("lists the latest notifications as the contract's list output, newest first", async () => {
-    const fake = github({ inbox: INBOX as typeof NOTIFICATIONS })
-    const result = await listNotifications(fake.get, fake.identity, { source: SOURCE, list: NOTIFICATIONS_LIST, account: LOGIN }, NOW)
-    expect(result).toMatchObject({ account: LOGIN, asOf: new Date(NOW).toISOString(), trust: "untrusted", data: { editable: false } })
-    // The secret is left out; an issue notification and a read one are listed, unlike the activity feed's; a subject
-    // with no title falls back to its type.
-    expect(result.data.items).toEqual([
-      { id: "9001", text: "Add the parser", note: "octo/app, review requested" },
-      { id: "9002", text: "v2.0.0", note: "octo/lib, subscribed" },
-      { id: "9004", text: "Discussion", note: "octo/app, team mention" },
-      { id: "9005", text: "A title with no reason", note: "octo/app" },
-    ])
-    // One GET, GitHub's inbox as it is: every notification, read or unread, and not only threads the person joins.
-    expect(fake.calls.map((call) => call.path)).toEqual(["/notifications"])
-    expect(fake.calls[0]!.query).toEqual({ all: true, per_page: 50 })
-    // The output is the contract's list: ids, texts of at most 200, no other key.
-    expect(checkOutput("list", result.data, undefined).ok).toBe(true)
-  })
-
-  it("sorts newest first before the 50 cap, so the newest 50 are listed whatever order GitHub answers in", async () => {
-    // 60 notifications, oldest first in the answer: the newest 50 are listed, and the 10 oldest are not.
-    const base = Date.parse("2026-11-08T12:00:00Z")
-    const oldestFirst = Array.from({ length: 60 }, (_, index) => ({
-      id: `8${index}`,
-      reason: "subscribed",
-      updated_at: new Date(base - (59 - index) * 60_000).toISOString(),
-      subject: { title: `Notification ${index}`, type: "Release" },
-      repository: { full_name: "octo/app" },
-    }))
-    const fake = github({ inbox: oldestFirst as typeof NOTIFICATIONS, unordered: true })
-    const result = await listNotifications(fake.get, fake.identity, { list: NOTIFICATIONS_LIST }, NOW)
-    expect(result.data.items).toHaveLength(50)
-    // The newest first, and the ten oldest are the ones left out.
-    expect(result.data.items[0]!.id).toBe("859")
-    expect(result.data.items.at(-1)!.id).toBe("810")
-    expect(result.data.items.some((item) => item.id === "89")).toBe(false)
-  })
-
-  it("returns no more than the list's 50 items", async () => {
-    const many = Array.from({ length: 80 }, (_, index) => ({ id: `7${index}`, reason: "subscribed", updated_at: `2026-11-08T${String(index % 12).padStart(2, "0")}:00:00Z`, subject: { title: `Notification ${index}`, type: "Release" }, repository: { full_name: "octo/app" } }))
-    const fake = github({ inbox: many as typeof NOTIFICATIONS })
-    const result = await listNotifications(fake.get, fake.identity, { list: NOTIFICATIONS_LIST }, NOW)
-    expect(result.data.items).toHaveLength(50)
-    // Asked for 50, GitHub answers at most that; the cap holds even if it answers more.
-    expect(fake.calls[0]!.query["per_page"]).toBe(50)
-  })
-
-  it("matches the family: a title with a secret is left out, and so is a notification it cannot render", async () => {
-    const weird = [
-      { id: "1", reason: "subscribed", updated_at: "2026-11-08T10:00:00Z", subject: { title: "ghp_" + "a".repeat(36), type: "Release" }, repository: {} },
-      { reason: "subscribed", updated_at: "2026-11-08T09:00:00Z", subject: { title: "No id", type: "Release" } },
-      { id: "3", subject: { title: "No time", type: "Release" } },
-      "not an object",
-      { id: "4", reason: "subscribed", updated_at: "2026-11-08T08:00:00Z", subject: {} },
-    ]
-    const fake = github({ inbox: weird as typeof NOTIFICATIONS })
-    const result = await listNotifications(fake.get, fake.identity, { list: NOTIFICATIONS_LIST }, NOW)
-    expect(result.data.items).toEqual([])
-  })
-
-  it("answers an empty list where the sign-in may not read notifications", async () => {
-    for (const notifications of ["forbidden", "gone"] as const) {
-      const fake = github({ notifications })
-      const result = await listNotifications(fake.get, fake.identity, { list: NOTIFICATIONS_LIST }, NOW)
-      expect(result.data.items).toEqual([])
-    }
-  })
-
-  it("answers TOO_LARGE for an answer over the 32 MB it reads whole, as the activity feed's notifications do", async () => {
-    const fake = github({ cutNotifications: true })
-    expect(await code(listNotifications(fake.get, fake.identity, { list: NOTIFICATIONS_LIST }, NOW))).toBe("TOO_LARGE")
-  })
-
-  it("refuses a list it does not have, another source, and another account, before GitHub is called", async () => {
-    const fake = github()
-    expect(await code(listNotifications(fake.get, fake.identity, { list: "bookmarks" }, NOW))).toBe("SOURCE_UNKNOWN")
-    expect(await code(listNotifications(fake.get, fake.identity, { source: "gitlab", list: NOTIFICATIONS_LIST }, NOW))).toBe("SOURCE_UNKNOWN")
-    expect(await code(listNotifications(fake.get, fake.identity, { list: NOTIFICATIONS_LIST, account: "someone-else" }, NOW))).toBe("ACCOUNT_MISMATCH")
-    expect(await code(listNotifications(fake.get, async () => undefined, { list: NOTIFICATIONS_LIST }, NOW))).toBe("AUTH_REQUIRED")
-    expect(fake.calls).toEqual([])
-  })
-
-  it("screens the whole title before it cuts, so a secret straddling the cut is still left out", async () => {
-    // 195 characters, then a secret that starts at 196: cut first, the answer would hold " password=hu".
-    const title = "x".repeat(195) + " password=hunter2 and more"
-    const fake = github({ inbox: [{ id: "1", reason: "subscribed", updated_at: "2026-11-08T10:00:00Z", subject: { title, type: "Issue" }, repository: { full_name: "octo/app" } }] as typeof NOTIFICATIONS })
-    const result = await listNotifications(fake.get, fake.identity, { list: NOTIFICATIONS_LIST }, NOW)
-    expect(result.data.items).toEqual([])
-    // The same title without the secret is cut to 200, and screened whole.
-    const long = github({ inbox: [{ id: "2", reason: "subscribed", updated_at: "2026-11-08T10:00:00Z", subject: { title: "y".repeat(240), type: "Issue" }, repository: { full_name: "octo/app" } }] as typeof NOTIFICATIONS })
-    const cut = await listNotifications(long.get, long.identity, { list: NOTIFICATIONS_LIST }, NOW)
-    expect(cut.data.items[0]!.text).toBe("y".repeat(200))
-  })
-
-  it("sorts newest first and lists one notification once, whatever order GitHub answers in", async () => {
-    const shuffled = [
-      { id: "1", reason: "subscribed", updated_at: "2026-11-08T09:00:00Z", subject: { title: "Older", type: "Issue" }, repository: {} },
-      { id: "2", reason: "subscribed", updated_at: "2026-11-08T11:00:00Z", subject: { title: "Newest", type: "Issue" }, repository: {} },
-      { id: "1", reason: "subscribed", updated_at: "2026-11-08T09:00:00Z", subject: { title: "Older again", type: "Issue" }, repository: {} },
-      { id: "3", reason: "subscribed", updated_at: "2026-11-08T10:00:00Z", subject: { title: "Middle", type: "Issue" }, repository: {} },
-    ]
-    const fake = github({ inbox: shuffled as typeof NOTIFICATIONS })
-    const result = await listNotifications(fake.get, fake.identity, { list: NOTIFICATIONS_LIST }, NOW)
-    expect(result.data.items.map((item) => item.text)).toEqual(["Newest", "Middle", "Older"])
-  })
-
-  it("stays inside the source's 64 KB by dropping whole items, and says it shortened the list", async () => {
-    // 50 maximal items of three-byte characters: the id at 128 characters, the text at 200 and the note at 200, so 50
-    // of them cannot fit 64 KB.
-    const huge = Array.from({ length: 50 }, (_, index) => ({
-      id: `9${index}${"字".repeat(128)}`,
-      reason: "subscribed",
-      updated_at: "2026-11-08T10:00:00Z",
-      subject: { title: "字".repeat(200), type: "Issue" },
-      repository: { full_name: "字".repeat(200) },
-    }))
-    const fake = github({ inbox: huge as typeof NOTIFICATIONS })
-    const result = (await listNotifications(fake.get, fake.identity, { list: NOTIFICATIONS_LIST }, NOW)) as { shortened?: boolean; data: { items: { text: string }[] } }
-    expect(result.shortened).toBe(true)
-    expect(result.data.items.length).toBeGreaterThan(0)
-    expect(result.data.items.length).toBeLessThan(50)
-    // Whole items, never cut bytes: every text is still 200 characters.
-    for (const item of result.data.items) expect([...item.text]).toHaveLength(200)
-    expect(new TextEncoder().encode(JSON.stringify(result)).length).toBeLessThanOrEqual(65_536)
-    expect(checkOutput("list", result.data, undefined).ok).toBe(true)
-    // A normal page is not marked.
-    const normal = (await listNotifications(github({ inbox: INBOX as typeof NOTIFICATIONS }).get, fake.identity, { list: NOTIFICATIONS_LIST }, NOW)) as { shortened?: boolean }
-    expect(normal.shortened).toBeUndefined()
-  })
-
-  it("is what events_list does with a list, and nothing else changes", () => {
-    expect(isNotificationsList({ list: NOTIFICATIONS_LIST })).toBe(true)
-    expect(isNotificationsList({ list: "bookmarks" })).toBe(true)
-    expect(isNotificationsList({ since: SINCE })).toBe(false)
-    expect(isNotificationsList(undefined)).toBe(false)
-  })
-})
-
 describe("the tool and the tools RPC methods", () => {
   function deps() {
     const fake = github()
@@ -823,12 +642,8 @@ describe("the tool and the tools RPC methods", () => {
   it("are owned methods with their schemas, and allowed by the default rules at every access", async () => {
     const { deps: d } = deps()
     const method = eventsMethod(d)
-    expect(method).toMatchObject({ name: "events_list", action: "github_events_list", class: "read", output: EVENTS_METHOD_OUTPUT })
-    // `list` is the tools RPC method's alone: a model's tool schema is the events one.
-    const rpcInput = method.input as { properties: Record<string, unknown> }
-    expect(rpcInput.properties["list"]).toMatchObject({ enum: [NOTIFICATIONS_LIST] })
-    expect("list" in EVENTS_INPUT.properties).toBe(false)
-    expect(EVENTS_METHOD_OUTPUT.anyOf[0]).toBe(EVENTS_OUTPUT)
+    expect(method).toMatchObject({ name: "events_list", action: "github_events_list", class: "read", output: EVENTS_OUTPUT })
+    expect("list" in (method.input as { properties: Record<string, unknown> }).properties).toBe(false)
     expect(probeMethod(d)).toMatchObject({ name: "probe", action: "github_probe", class: "read" })
     for (const access of ["all", "ask-changes", "read-only"] as const) {
       expect(effectOf(defaultRules(access), "github_events_list", "*")).toBe("allow")
@@ -861,7 +676,6 @@ describe("a sign-in GitHub refuses, on a source read", () => {
   it("is AUTH_REQUIRED when the renewal is refused, with the sign-in's next step", async () => {
     expect(await refusal(probeEvents(github().get, refused, {}))).toEqual(SIGN_IN)
     expect(await refusal(listEvents(github().get, refused, { since: SINCE }, NOW))).toEqual(SIGN_IN)
-    expect(await refusal(listNotifications(github().get, refused, { list: NOTIFICATIONS_LIST }, NOW))).toEqual(SIGN_IN)
   })
 
   it("is AUTH_REQUIRED when GitHub rejects the token with 401", async () => {
@@ -908,7 +722,6 @@ describe("a sign-in GitHub refuses, on a source read", () => {
     const call = { sessionID: "ses_1", agent: "build", messageID: "msg_1", id: "call_1" }
     expect(await refusal(runProbe(deps, {}, call))).toEqual(SIGN_IN)
     expect(await refusal(runEvents(deps, { since: SINCE }, call))).toEqual(SIGN_IN)
-    expect(await refusal(runSource(deps, { source: SOURCE, list: NOTIFICATIONS_LIST }, call))).toEqual(SIGN_IN)
   })
 })
 
@@ -955,7 +768,6 @@ describe("events_list's inner reads", () => {
       agent: { get: async () => ({ data: { permissions: agent } }) },
     }
     const api = await registerApiTool(ctx as never, {
-      access: "all",
       readOnly: false,
       endpoints: GITHUB_COM,
       service: "GitHub",
@@ -970,7 +782,7 @@ describe("events_list's inner reads", () => {
       },
     })
     const deps = { ctx: { permission: ctx.permission }, api, identity: () => api.identity(), now: () => NOW }
-    return { run: () => runEvents(deps as never, { since: SINCE }, call), probe: () => runProbe(deps as never, {}, call), list: () => runSource(deps as never, { source: SOURCE, list: NOTIFICATIONS_LIST, account: LOGIN }, call), api, fetched, asserted }
+    return { run: () => runEvents(deps as never, { since: SINCE }, call), probe: () => runProbe(deps as never, {}, call), api, fetched, asserted }
   }
 
   it("asserts github_events_list, then github_events_list on each GET /path before it is sent", async () => {
@@ -988,22 +800,6 @@ describe("events_list's inner reads", () => {
     expect(result).toMatchObject({ source: "github", owner: OWNER, events: [] })
     expect(fetched).toEqual(SENT)
     expect(asserted.every((entry) => entry.startsWith(`${EVENTS_ACTION} `))).toBe(true)
-  })
-
-  it("reads the notifications list under the same allow, with one GET /notifications and no search", async () => {
-    const { list, fetched, asserted } = await wired([], JELLY)
-    const result = await list()
-    expect(result).toMatchObject({ account: LOGIN, data: { items: [], editable: false }, trust: "untrusted" })
-    expect(fetched).toEqual(["/notifications"])
-    expect(asserted).toEqual([`${EVENTS_ACTION} *`, `${EVENTS_ACTION} GET /notifications`])
-  })
-
-  it("does not reach the notifications list from a rule that asks for or denies GET /notifications", async () => {
-    for (const effect of ["ask", "deny"] as const) {
-      const { list, fetched } = await wired([{ action: EVENTS_ACTION, resource: "GET /notifications", effect }], JELLY)
-      await expect(list()).rejects.toThrow(/PERMISSION_DENIED/)
-      expect(fetched).toEqual([])
-    }
   })
 
   it("is not decided by github_api rules: a session deny on github_api does not stop it", async () => {
@@ -1067,7 +863,6 @@ describe("events_list's inner reads", () => {
         agent: { get: async () => ({ data: { permissions: JELLY } }) },
       } as never,
       {
-        access: "all",
         readOnly: false,
         endpoints: GITHUB_COM,
         service: "GitHub",

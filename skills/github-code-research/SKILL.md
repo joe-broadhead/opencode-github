@@ -1,9 +1,9 @@
 ---
 name: github-code-research
-description: Research code in a GitHub repository: find where something is defined, read files at a branch, tag or commit, compare versions, and follow the commit history to explain when and why code changed, citing permalinks. Use when the user asks how code in a GitHub repository works, where something is defined, what changed between versions or tags, or when and why it changed; not for files in the local checkout.
+description: Research code in a GitHub repository: where something is defined, files at a ref, what changed between versions, and when and why, with permalinks. Use when the user asks how repository code works. Not for files in the local checkout.
 ---
 
-If GitHub's tools are absent, run `/connect` and choose GitHub (GitHub Enterprise for a configured Enterprise Server), or on Jelly call jelly_connection_request.
+If GitHub's tools are absent, run `/connect` and choose GitHub (GitHub Enterprise for a configured Enterprise Server).
 
 # Research code on GitHub
 

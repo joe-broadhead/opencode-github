@@ -118,8 +118,6 @@ export const TOOL_PREFIX = `${SERVER_NAME}_`
 /** The plugin's own github_api tool, which shares the prefix and the Code Mode namespace. */
 export const API_TOOL_NAME = "api"
 const API_TOOL = `${TOOL_PREFIX}${API_TOOL_NAME}`
-/** Nothing is pinned. A shown signature is sent on every turn; the skills name the tool, and search finds its parameters. */
-export const PINNED = [] as const
 /** The plugin's own github_events_list, Memory's source of GitHub events: a read, in the same namespace. */
 export const EVENTS_TOOL_NAME = "events_list"
 /** The source contract's probe: a tools RPC method (no tool), whose permission action is `github_probe`. */
@@ -180,13 +178,12 @@ type ServerTools = { readonly visible: number; readonly unknown: readonly string
 
 /**
  * Watches the github server's MCP tools: removes the hidden ones, counts the rest, records
- * the ones not in the catalog, removes those when `unknownTools` is "hide", and pins the
- * entry tools. A server named github
+ * the ones not in the catalog, and removes those when `unknownTools` is "hide". A server named github
  * that the user configured is left as it is (`owned()` is false).
  */
 export async function registerToolFilter(
   ctx: ToolContext,
-  options: { readonly unknownTools: "ask" | "hide"; readonly owned: () => boolean },
+  options: { readonly unknownTools: "list" | "hide"; readonly owned: () => boolean },
 ): Promise<{ dispose(): Promise<void>; tools(): ServerTools }> {
   let tools: ServerTools = { visible: 0, unknown: [] }
   const registration = await ctx.tool.transform((editor) => {
@@ -207,10 +204,6 @@ export async function registerToolFilter(
           editor.remove(tool.id)
           visible--
         }
-      } else if (owned && (PINNED as readonly string[]).includes(name) && tool.options?.codemode !== false) {
-        editor.update(tool.id, (item) => {
-          item.options = { ...item.options, codemode: true, pinned: true }
-        })
       }
     }
     tools = { visible, unknown: unknown.sort() }

@@ -1,9 +1,9 @@
 ---
 name: github-issue-triage
-description: Triage GitHub issues: list what is open or unlabelled, read issues, suggest labels from the repository's own and a priority, and find duplicates, open or closed, without changing anything unless asked. Use when the user asks what is open or unlabelled in a GitHub repository, to triage, sort or prioritise its issues, whether an issue is a duplicate, or to label, close or assign issues.
+description: Triage GitHub issues: what is open or unlabelled, labels and priority from the repository's own, duplicates. Use when the user asks to triage or prioritise; changes only when asked (label, close, assign).
 ---
 
-If GitHub's tools are absent, run `/connect` and choose GitHub (GitHub Enterprise for a configured Enterprise Server), or on Jelly call jelly_connection_request.
+If GitHub's tools are absent, run `/connect` and choose GitHub (GitHub Enterprise for a configured Enterprise Server).
 
 # Triage GitHub issues
 
