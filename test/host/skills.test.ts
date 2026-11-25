@@ -16,6 +16,9 @@ test("every shipped skill is registered on the real 2.4.1 host", async () => {
   assert.deepEqual(folders, [...SKILL_IDS].sort(), "SKILL_IDS must name every skills/*/SKILL.md folder")
 
   const directory = await mkdtemp(join(tmpdir(), "github-skills-"))
+  // OpenCode discovers `<project directory>/skills/` by itself. The project is an empty temp directory, never the repo
+  // root, so the four ids can only be present if the plugin's setup registers them.
+  assert.deepEqual(await readdir(directory), [], "the project directory is empty, so the host cannot discover project skills")
   const host = await OpenCode.create({
     plugins: [built],
     config: { directory },
