@@ -1,0 +1,10 @@
+# Who reviews what. The last matching line wins.
+#
+# Replace the placeholder owner with the plugin's maintainer. The contract maintainers review package.json, AGENTS.md
+# and docs/, because those carry the manifest and the standard (plugin standard §1).
+
+*                         @joe-broadhead
+
+/package.json             @joe-broadhead
+/AGENTS.md                @joe-broadhead
+/docs/                    @joe-broadhead

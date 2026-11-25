@@ -2,11 +2,16 @@
 
 ## 0.0.0 (unreleased)
 
-The first release in the new organisation, rebuilt on OpenCode 2.4.1 for plugin-contract v0.
-
-- OpenCode `>=2.4.1 <2.5.0`, tested on 2.4.1 only.
-- The package is `@we-the-rebel-alliance/github-plugin`; every URL, install line and doc link points at the new
-  repository.
-- Removed the legacy paths: contract-1 and pre-0.0.8 cursors, the notifications list snapshot, the deprecated
-  `readOnly` option and the `"ask"` alias of `unknownTools`.
-- The Code Mode namespace line is one line within the fixed-context budget, and the skill descriptions fit theirs.
+- Rebuilt on plugin-contract v0: one `register` call, the `github` plugin id, namespace and RPC id, one handler per
+  method, the provider in `src/provider/`, and generated docs.
+- Accounts are held by the `mcp` mechanism: one GitHub MCP server per alias (`github`, `github-work`, …), each with its
+  own sign-in; a profile's `host` selects a GitHub Enterprise Server, which has no hosted MCP server and uses an
+  integration of its own.
+- Every callable is declared in `capabilities.methods`: GitHub's 98 pass-through MCP tools with their classes, `api`
+  (admin), `events_list`, `probe` and `status`.
+- `api` keeps its REST and GraphQL reach, its download and upload, and its read/change distinction; it emits `changed`
+  after a write.
+- `events_list` reads the merged issue, pull request, commit and notification feed with a cursor bound to the alias.
+- The plugin emits `changed`, `status` and `account`.
+- The copied release and drift scripts are replaced by `plugin-kit`; the copied contract is replaced by the
+  `@we-the-rebel-alliance/plugin-contract` devDependency; `docs/`, `AGENTS.md` and the skills are written fresh.
