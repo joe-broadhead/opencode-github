@@ -205,7 +205,8 @@
           "graphql.mutation",
           "download",
           "upload"
-        ]
+        ],
+        "effect": "ask"
       },
       "events_list": {
         "class": "read",

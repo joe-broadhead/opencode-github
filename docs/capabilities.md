@@ -160,8 +160,9 @@ notifications. GitHub's API is not billed, so its cost class is `free`; GitHub's
 ## Actions and bus events
 
 The manifest declares no actions: no method here has a plan/commit pair, so there is nothing a person previews before a
-commit. A change through `api` asks through the access rules in an agent session. An app with no session has no ask to
-answer and no plan to commit, so this plugin offers it no change path: `api` writes are an agent-session operation here.
+commit. Every `api` call asks through the access rules in an agent session, because the one method can change GitHub;
+an app with no session has no ask to answer and no plan to commit, so this plugin offers it no change path: `api` is an
+agent-session operation here. At `read-only` it is off.
 
 The plugin emits `changed` after its own write, `status` when its state changes, and `account` when an alias signs in or
 needs sign-in.

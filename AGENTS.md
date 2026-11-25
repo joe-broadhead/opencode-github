@@ -47,7 +47,7 @@ src/accounts.ts           the mcp mechanism per alias, the Enterprise integratio
 src/skills.ts             reads skills/<name>/SKILL.md, parses the YAML frontmatter and registers each at setup
 src/handlers/             one file per method: status, probe, events_list, api
 src/provider/             GitHub's endpoints, REST/GraphQL client, activity feed, device flow
-test/unit/                options, accounts, provider, handlers, manifest, skills
+test/unit/                options, accounts, permissions, provider, handlers, manifest, skills
 test/conformance/         replays fixtures/conformance.json through the handlers
 test/host/host.test.ts    the host gate: 2.4.1 starts, 2.5.0 is refused
 test/host/skills.test.ts  the real 2.4.1 host registers every skill and its YAML description
@@ -113,6 +113,8 @@ scripts/record-fixture.mjs rebuilds the fake provider's recorded fixture
 - `test/unit/handlers.test.ts` drives every handler and checks the `changed`, `status` and `account` nudges.
 - `test/unit/accounts.test.ts` proves one MCP server per github.com alias, the Enterprise integration, and the
   credential states.
+- `test/unit/permissions.test.ts` proves `api` asks at every level where it runs and is off at read-only, while a
+  pass-through MCP read still runs.
 - `test/host/host.test.ts` proves the tested range and the clean `HOST_UNTESTED` refusal.
 - `test/unit/skills.test.ts` proves `readSkills`/`registerSkills`: the shipped set, a folded `>` description, the
   refusals and the transform.

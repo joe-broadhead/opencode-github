@@ -88,7 +88,7 @@ export function readSkills(directory = SKILLS): SkillFile[] {
     if (parsed.name === undefined || parsed.name === "") throw invalid(file, "has no frontmatter name")
     if (parsed.name !== name) throw invalid(file, `names "${parsed.name}", not its directory "${name}"`)
     if (parsed.description === undefined || parsed.description.trim() === "") throw invalid(file, "has no frontmatter description")
-    if (parsed.description.trim() === ">" || parsed.description.trim() === "|" || parsed.description.trim() === ">-" || parsed.description.trim() === "|-") {
+    if ([">", "|", ">-", "|-", ">+", "|+"].includes(parsed.description.trim())) {
       throw invalid(file, `has the frontmatter description "${parsed.description.trim()}", which is only a block marker; indent the text below it`)
     }
     if (parsed.content === "") throw invalid(file, "has no content below its frontmatter")

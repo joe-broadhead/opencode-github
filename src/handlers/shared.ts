@@ -36,7 +36,7 @@ export interface HandlerRuntime {
   readonly root: string
   /** The clock a page's `asOf` is stamped with; tests pass a fixed one. */
   readonly clock: () => number
-  /** The first account or setup problem, for `status.nextStep`, or null. */
+  /** The first account problem, for `status.nextStep`, or null. */
   nextStep(): string | null
   /** The last state status answered, so a change is one `status` nudge. */
   statusState: { last: string | undefined; lastAccounts: Map<string, string> }

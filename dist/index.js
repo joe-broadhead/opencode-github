@@ -22089,7 +22089,7 @@ function readSkills(directory = SKILLS) {
     if (parsed.name === void 0 || parsed.name === "") throw invalid2(file3, "has no frontmatter name");
     if (parsed.name !== name) throw invalid2(file3, `names "${parsed.name}", not its directory "${name}"`);
     if (parsed.description === void 0 || parsed.description.trim() === "") throw invalid2(file3, "has no frontmatter description");
-    if (parsed.description.trim() === ">" || parsed.description.trim() === "|" || parsed.description.trim() === ">-" || parsed.description.trim() === "|-") {
+    if ([">", "|", ">-", "|-", ">+", "|+"].includes(parsed.description.trim())) {
       throw invalid2(file3, `has the frontmatter description "${parsed.description.trim()}", which is only a block marker; indent the text below it`);
     }
     if (parsed.content === "") throw invalid2(file3, "has no content below its frontmatter");

@@ -37,8 +37,9 @@ A device sign-in with fewer toolsets and untrusted-content lockdown:
 
 ## `access`
 
-The plugin's ceiling. `all` runs every method; `ask-changes` asks before any method that is not a read; `read-only`
-turns every non-read method off. It generates one rule per method, or one per alias for the pass-through MCP tools. A
+The plugin's ceiling. `all` runs every method, except `api`, which asks on every call because its one row can change
+GitHub; `ask-changes` asks before any method that is not a read (and before `api`); `read-only` turns every non-read
+method off, `api` included. It generates one rule per method, or one per alias for the pass-through MCP tools. A
 person's own rule for one tool still wins, and an agent that lacks the generated rules is named in `status`, never
 patched.
 
