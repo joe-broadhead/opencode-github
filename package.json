@@ -967,6 +967,7 @@
     "pack": "node scripts/check-pack.mjs"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.6.9",
     "@opencode/client": "2.4.1",
     "@opencode/plugin": "2.4.1",
     "@opencode/sdk": "2.4.1",
@@ -974,6 +975,6 @@
     "@we-the-rebel-alliance/plugin-contract": "github:we-the-rebel-alliance/plugin-contract#v0.0.0",
     "esbuild": "0.28.2",
     "typescript": "5.9.3",
-    "@biomejs/biome": "2.6.9"
+    "yaml": "2.9.1"
   }
 }

@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { test } from "node:test"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { OpenCode } from "@opencode/sdk"
+import { parse as parseYaml } from "yaml"
 import { SKILL_IDS } from "../../src/skills.ts"
 
 const root = fileURLToPath(new URL("../../", import.meta.url))
@@ -45,13 +46,21 @@ test("every shipped skill is registered on the real 2.4.1 host", async () => {
       const skill = skills.find((held) => held.id === id)
       assert.ok(skill, id)
       const text = await readFile(join(root, "skills", id, "SKILL.md"), "utf8")
-      const description = /^description:\s*(.*)$/m.exec(text)?.[1]?.trim()
+      const frontmatter = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(text)
+      assert.ok(frontmatter, `${id}: no frontmatter`)
+      const parsed = parseYaml(frontmatter[1]!) as { name?: unknown; description?: unknown } | null
+      assert.ok(parsed !== null && typeof parsed === "object" && !Array.isArray(parsed), `${id}: the frontmatter is not a mapping`)
+      assert.equal(parsed.name, id)
+      assert.equal(typeof parsed.description, "string")
+      const description = parsed.description as string
       assert.equal(skill.name, id)
       assert.equal(skill.description, description)
-      assert.ok(skill.description !== undefined && skill.description.length > 0 && skill.description.length <= 300)
+      assert.ok(description.length > 0 && description.length <= 300)
+      assert.notEqual(description, ">")
+      assert.notEqual(description, "|")
       assert.match(skill.path, new RegExp(`/skills/${id}/SKILL\\.md$`))
       assert.ok(skill.content.trim().length > 0)
-      assert.equal(skill.content.trim(), text.slice(text.indexOf("\n---\n") + 5).trim())
+      assert.equal(skill.content.trim(), frontmatter[2]!.trim())
     }
     assert.equal(new Set(skills.filter((skill) => (SKILL_IDS as readonly string[]).includes(skill.id)).map((skill) => skill.id)).size, SKILL_IDS.length)
   } finally {
