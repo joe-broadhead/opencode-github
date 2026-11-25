@@ -2,6 +2,12 @@
   "name": "@we-the-rebel-alliance/github-plugin",
   "version": "0.0.0",
   "description": "GitHub's issues, pull requests, code and Actions in OpenCode, through the vendor's MCP server and its REST and GraphQL API.",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "github",
+    "plugin-contract"
+  ],
   "homepage": "https://github.com/we-the-rebel-alliance/github-plugin#readme",
   "bugs": {
     "url": "https://github.com/we-the-rebel-alliance/github-plugin/issues"
