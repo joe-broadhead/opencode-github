@@ -1,14 +1,23 @@
 {
   "compilerOptions": {
     "target": "ES2023",
+    "lib": ["ES2023"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "types": ["node"],
     "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
     "skipLibCheck": true,
-    "noEmit": true,
-    "jsx": "preserve",
-    "jsxImportSource": "@opentui/solid",
-    "types": ["node", "bun"]
+    "noEmit": true
   },
-  "include": ["src/**/*.ts", "src/tui/**/*.tsx", "test/unit/**/*.ts", "test/tui/**/*.ts", "test/host/**/*.ts", "test/stock/**/*.ts", "test/conformance/**/*.ts"]
+  "include": ["src", "test"]
 }

@@ -1,12 +1,37 @@
 # Changelog
 
-## 0.0.0 (unreleased)
+## 0.0.0 (2026-11-25)
 
-The first release in the new organisation, rebuilt on OpenCode 2.4.1 for plugin-contract v0.
+- GitHub's connector on plugin-contract v0: the hosted MCP tools passed through per account alias, plus `api`,
+  `events_list`, `probe` and `status`, one `register` call, and the provider behind `src/provider/`.
+- Accounts: one GitHub MCP server per github.com alias (`github`, `github-work`, …), each with GitHub device sign-in or
+  a personal access token; a profile `host` selects a GitHub Enterprise Server, which has no hosted MCP server and uses
+  an integration of its own.
+- `api` reads and changes GitHub's REST and GraphQL API, with pagination, downloads and release-asset uploads; a
+  successful change emits `changed`.
+- `events_list` reads the merged issue, pull request, commit and notification feed with a cursor bound to the alias;
+  `status` reports every alias and the agents whose rules miss the generated ones.
+- The plugin emits `changed`, `status` and `account`, declares the `github.activity` events source, and ships four
+  skills and generated documentation.
+- Tests: unit, host, a two-account conformance fixture and a packed-tarball check; `npm run check` also runs biome,
+  `plugin-kit check` and `plugin-kit docs --check`.
 
-- OpenCode `>=2.4.1 <2.5.0`, tested on 2.4.1 only.
-- The package is `@we-the-rebel-alliance/github-plugin`; every URL, install line and doc link points at the new
-  repository.
-- Removed the legacy paths: contract-1 and pre-0.0.8 cursors, the notifications list snapshot, the deprecated
-  `readOnly` option and the `"ask"` alias of `unknownTools`.
-- The Code Mode namespace line is one line within the fixed-context budget, and the skill descriptions fit theirs.
+### Removed since v0.0.11
+
+- `/github-status` command and its TUI status dialog: the contract's `status` method (agent tool, Code Mode and RPC)
+  answers the same state; a TUI dialog is outside the 4b scope.
+- `github.notifications` snapshot source: the notifications are part of the `github.activity` events feed, so a second
+  snapshot of the same inbox is redundant.
+- `describe`, the tools-RPC diagnostics method: contract v0 has no tools-RPC; `status` and the installed manifest are
+  the diagnostics.
+- `unknownTools` option: the contract's `methods` and `access` own tool classification; the plugin no longer filters the
+  vendor's tool list. The `host` option moved to the account profile's `host`; it is not removed.
+- `readOnly` option: deprecated in v0.0.11, where `true` meant `access: "read-only"` and `false` meant `"all"`; the
+  greenfield options take `access: "read-only"` or `"all"` directly, and an old config with `readOnly` is now
+  `OPTIONS_INVALID` instead of being silently mapped.
+- Status rows `Access`, `Toolsets`, `Tools`, `Rules that never match`, the shadowed-skills `Skills` row and the
+  `readOnly` deprecation `Note`: the contract's `status` schema keeps state, one entry per account, unguarded agents,
+  host version/range/tested and next step. Access is the person's own option; toolsets and the tool list are in the
+  configuration and docs; the unmatched-rule and shadowed-skill rows were pre-contract diagnostics; the `Note` row
+  existed only for the removed `readOnly` option. Connection, Account, Host/OpenCode and Next step are kept in the new
+  shape as `state`, `accounts[]`, `host` and `nextStep`.

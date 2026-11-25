@@ -1,117 +1,62 @@
-// The server part: registers GitHub's MCP server, sign-in on its integration, default
-// permission rules, the tool catalog filter, the github_api and events_list tools, status, the
-// tools RPC for scripts and skills. With the host option (GitHub Enterprise Server) there is no MCP server:
-// the sign-in moves to the plugin's own integration and github_api is the tool. Everything goes
-// through public OpenCode plugin APIs; nothing is stored.
+/**
+ * The plugin's one entry: `Plugin.define({ id, setup })`, the host gate, the accounts, and one `register` call.
+ *
+ * `register` wires doors 1–3 from `handlers`, resolves accounts and generates the access rules. This file never calls
+ * `ctx.tool`, `ctx.rpc` or `ctx.permission` itself.
+ */
 import { Plugin } from "@opencode/plugin"
-import { scriptApi } from "./api/script.js"
-import { registerApiTool } from "./api/tool.js"
-import { registerAuth } from "./auth.js"
-import { endpoints, loadOptions } from "./config.js"
-import { ENTERPRISE_NAME, registerEnterpriseAuth } from "./enterprise.js"
-import { checkHost } from "./host-version.js"
-import { registerToolsRpc } from "@we-the-rebel-alliance/source-contract/tools-rpc"
-import { observeMcp, registerMcp } from "./mcp.js"
-import { registerPermissionDefaults } from "./permissions.js"
-import { SERVER_NAME } from "./rpc.js"
-import { registerSignInStatus } from "./sign-in-status.js"
-import { SKILL_IDS, registerSkills, skillPath } from "./skills.js"
-import { eventsMethod, probeMethod, registerEventsTool } from "./source-events.js"
-import { type StatusDeps, registerStatus } from "./status.js"
-import { METHODS, PLUGIN } from "./tools-rpc.js"
-import { registerToolFilter, unavailableDetail } from "./tools.js"
-
-type Registration = { dispose(): Promise<void> }
+import { redactReason } from "@we-the-rebel-alliance/plugin-contract/accounts"
+import { assertHost, register } from "@we-the-rebel-alliance/plugin-contract/register"
+import { loadOptions, registerGithubAccounts } from "./accounts.ts"
+import { handlersFor, type HandlerRuntime } from "./handlers/index.ts"
+import { registerSkills } from "./skills.ts"
+import { manifest, version } from "./manifest.ts"
+import { createProvider } from "./provider/client.ts"
 
 export default Plugin.define({
-  id: "github.platform",
-  async setup(ctx) {
-    const options = loadOptions(ctx.options)
-    const hostWarning = checkHost(ctx.app.version, options.allowUntestedHost)
-    const registrations: Registration[] = []
-    const keep = <R extends Registration>(registration: R): R => {
-      registrations.push(registration)
-      return registration
+  id: manifest.plugin.name,
+  async setup(context) {
+    assertHost(context, manifest)
+    const options = loadOptions(context.options)
+
+    // One vendor MCP server per github.com alias, an integration of its own for an Enterprise alias, and GitHub's
+    // sign-in methods on each. A failure is recorded for status, never thrown from here.
+    const accounts = await registerGithubAccounts(context, { manifest, options })
+    // `register` owns the tools, RPC and bus, not the skills: read and add each `skills/<id>/SKILL.md` here. A broken
+    // skill is a status problem, never a setup failure.
+    const skills = await registerSkills(context)
+
+    const runtime: HandlerRuntime = {
+      plugin: manifest.plugin.name,
+      manifest,
+      version,
+      hostVersion: context.app.version,
+      accounts,
+      provider: createProvider({
+        deviceSignIn: options.clientId !== undefined,
+        ...(options.appSlug === undefined ? {} : { appSlug: options.appSlug }),
+      }),
+      root: context.location.directory,
+      clock: Date.now,
+      setupProblems: () => skills.problems,
+      nextStep: () => {
+        const problem = [...accounts.problems(), ...skills.problems][0]
+        return problem === undefined ? null : redactReason(problem)
+      },
+      statusState: { last: undefined, lastAccounts: new Map() },
     }
-    const cleanup = async () => {
-      for (const registration of registrations.splice(0).reverse()) await registration.dispose()
-    }
+
     try {
-      keep(await registerPermissionDefaults(ctx, options.access))
-      const api = endpoints(options)
-      const signIn = {
-        ...(options.clientId ? { clientId: options.clientId } : {}),
-        ...(options.appSlug ? { appSlug: options.appSlug } : {}),
-        scopes: options.scopes,
-        endpoints: api,
-        service: options.host ? ENTERPRISE_NAME : "GitHub",
+      const registration = await register(context, manifest, handlersFor(runtime))
+      return async () => {
+        await registration.dispose()
+        await accounts.dispose()
+        await skills.dispose()
       }
-      let source: Pick<StatusDeps, "conflict" | "integrationID" | "tools" | "enterprise">
-      // Whether the github server is this plugin's, for the tools RPC.
-      let managed: () => boolean
-      if (options.host) {
-        // GitHub Enterprise Server: no hosted MCP server, so the sign-in lives on the plugin's own integration.
-        const auth = keep(await registerEnterpriseAuth(ctx, signIn))
-        source = { conflict: () => false, integrationID: auth.integrationID, tools: () => ({ visible: 0, unknown: [] }), enterprise: options.host }
-        // No server of its own: GitHub's MCP methods are unavailable, and another server named github is not called.
-        const other = keep(await observeMcp(ctx))
-        managed = () => other.conflict() === false
-      } else {
-        // The MCP registration comes later; its conflict state is read lazily.
-        let conflict: () => boolean | undefined = () => undefined
-        const tools = keep(await registerToolFilter(ctx, { unknownTools: options.unknownTools, owned: () => conflict() === false }))
-        const mcp = keep(await registerMcp(ctx, options))
-        conflict = mcp.conflict
-        managed = () => mcp.conflict() === false
-        const auth = keep(await registerAuth(ctx, { ...signIn, serverName: SERVER_NAME, conflict: mcp.conflict }))
-        keep(await registerSignInStatus(ctx, { serverName: SERVER_NAME, integrationID: auth.integrationID }))
-        source = { conflict: mcp.conflict, integrationID: auth.integrationID, tools: tools.tools }
-      }
-      const apiTool = keep(
-        await registerApiTool(ctx, {
-          readOnly: options.readOnly,
-          endpoints: api,
-          service: options.host ? ENTERPRISE_NAME : "GitHub",
-          enterprise: options.host !== undefined,
-          toolsets: options.toolsets,
-          deviceSignIn: options.clientId !== undefined,
-          ...(options.appSlug ? { appSlug: options.appSlug } : {}),
-          root: ctx.location.directory,
-          integrationID: source.integrationID,
-        }),
-      )
-      // GitHub's source (package.json's `sources`): events_list, a Code Mode tool and a tools RPC method, and probe, a
-      // tools RPC method. Both read with GETs through github_api's spec; the account is the sign-in's recorded login.
-      const events = { ctx, api: apiTool, identity: () => apiTool.identity(), ...(options.host ? { host: options.host } : {}) }
-      keep(await registerEventsTool(ctx, events))
-      keep(
-        await registerStatus(ctx, {
-          options,
-          endpoints: api,
-          hostVersion: ctx.app.version,
-          skills: SKILL_IDS.map((id) => ({ id, path: skillPath(id) })),
-          ...(hostWarning ? { hostWarning } : {}),
-          ...source,
-        }),
-      )
-      // Scripts call every known tool and github_api with no model, as a session and its agent: a write, a download or
-      // an upload needs a prior allow rule for its action. A method GitHub does not list gets describe's detail: its
-      // toolset, and whether the toolsets option turns that on.
-      const stopTools = await registerToolsRpc(ctx as never, {
-        plugin: PLUGIN,
-        methods: [...METHODS, scriptApi(apiTool), eventsMethod(events), probeMethod(events)],
-        mcp: {
-          server: SERVER_NAME,
-          managed: () => managed(),
-          unavailableDetail: (method, code) => (code === "TOOL_UNAVAILABLE" ? unavailableDetail(method, options.toolsets) : undefined),
-        },
-      })
-      keep({ dispose: stopTools })
-      keep(await registerSkills(ctx))
     } catch (error) {
-      await cleanup().catch(() => undefined)
+      await accounts.dispose()
+      await skills.dispose()
       throw error
     }
-    return cleanup
   },
 })
