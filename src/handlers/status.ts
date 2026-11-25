@@ -17,7 +17,7 @@ export function statusHandler(runtime: HandlerRuntime): MethodHandler {
     output: STATUS_SCHEMA,
     async run(_input, call) {
       const signals: Record<string, AccountSignal> = {}
-      const problems: string[] = [...runtime.accounts.problems()]
+      const problems: string[] = [...runtime.setupProblems(), ...runtime.accounts.problems()]
       for (const account of runtime.accounts.accounts) {
         const signal = await runtime.accounts.state(account.alias)
         signals[account.alias] = signal

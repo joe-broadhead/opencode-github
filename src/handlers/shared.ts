@@ -36,6 +36,8 @@ export interface HandlerRuntime {
   readonly root: string
   /** The clock a page's `asOf` is stamped with; tests pass a fixed one. */
   readonly clock: () => number
+  /** What registering the skills could not do, read by status. */
+  setupProblems(): readonly string[]
   /** The first account or setup problem, for `status.nextStep`, or null. */
   nextStep(): string | null
   /** The last state status answered, so a change is one `status` nudge. */

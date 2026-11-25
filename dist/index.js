@@ -14630,7 +14630,7 @@ function statusHandler(runtime) {
     output: STATUS_SCHEMA,
     async run(_input, call) {
       const signals = {};
-      const problems = [...runtime.accounts.problems()];
+      const problems = [...runtime.setupProblems(), ...runtime.accounts.problems()];
       for (const account of runtime.accounts.accounts) {
         const signal = await runtime.accounts.state(account.alias);
         signals[account.alias] = signal;
@@ -14671,6 +14671,70 @@ function handlersFor(runtime) {
   };
 }
 
+// src/skills.ts
+import { readFile as readFile2 } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { Skill } from "@opencode/plugin";
+var SKILL_IDS = ["github", "github-pr-review", "github-issue-triage", "github-code-research"];
+function parseSkill(id, text4) {
+  const source2 = text4.replace(/\r\n/g, "\n");
+  const match = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(source2);
+  if (!match) throw new Error(`skills/${id}/SKILL.md has no frontmatter block`);
+  const fields = /* @__PURE__ */ new Map();
+  for (const line of match[1].split("\n")) {
+    const field = /^([a-z]+):\s*(.*)$/.exec(line);
+    if (!field || fields.has(field[1])) throw new Error(`skills/${id}/SKILL.md has an invalid frontmatter line: ${line.slice(0, 80)}`);
+    fields.set(field[1], field[2].trim());
+  }
+  const name = fields.get("name");
+  const description = fields.get("description");
+  const content = match[2].trimStart();
+  if (fields.size !== 2 || name !== id || description === void 0 || description.length === 0) {
+    throw new Error(`skills/${id}/SKILL.md needs exactly a name equal to "${id}" and a description`);
+  }
+  if (content.trim().length === 0) throw new Error(`skills/${id}/SKILL.md has no content`);
+  return { name, description, content };
+}
+function skillPath(id) {
+  return fileURLToPath(new URL(`../skills/${id}/SKILL.md`, import.meta.url));
+}
+async function registerSkills(ctx) {
+  const problems = [];
+  const skills = [];
+  for (const id of SKILL_IDS) {
+    const path = skillPath(id);
+    try {
+      const text4 = await readFile2(path, "utf8");
+      skills.push({ id, path, ...parseSkill(id, text4) });
+    } catch (error2) {
+      problems.push(`skills/${id}/SKILL.md: ${error2 instanceof Error ? error2.message : String(error2)}`);
+    }
+  }
+  let registration;
+  try {
+    registration = await ctx.skill.transform((editor) => {
+      for (const skill of skills) {
+        editor.add({
+          id: Skill.ID.make(skill.id),
+          name: Skill.Name.make(skill.name),
+          description: skill.description,
+          // The host brands absolute paths; this one comes from the package location.
+          path: skill.path,
+          content: skill.content
+        });
+      }
+    });
+  } catch (error2) {
+    problems.push(`skills: the host refused the skill transform: ${error2 instanceof Error ? error2.message : String(error2)}`);
+  }
+  return {
+    problems,
+    async dispose() {
+      await registration?.dispose().catch(() => void 0);
+    }
+  };
+}
+
 // src/manifest.ts
 import { readFileSync } from "node:fs";
 var file2 = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
@@ -14692,6 +14756,7 @@ var src_default = Plugin.define({
     assertHost(context, manifest);
     const options = loadOptions(context.options);
     const accounts = await registerGithubAccounts(context, { manifest, options });
+    const skills = await registerSkills(context);
     const runtime = {
       plugin: manifest.plugin.name,
       manifest,
@@ -14704,8 +14769,9 @@ var src_default = Plugin.define({
       }),
       root: context.location.directory,
       clock: Date.now,
+      setupProblems: () => skills.problems,
       nextStep: () => {
-        const problem = accounts.problems()[0];
+        const problem = [...accounts.problems(), ...skills.problems][0];
         return problem === void 0 ? null : redactReason(problem);
       },
       statusState: { last: void 0, lastAccounts: /* @__PURE__ */ new Map() }
@@ -14715,9 +14781,11 @@ var src_default = Plugin.define({
       return async () => {
         await registration.dispose();
         await accounts.dispose();
+        await skills.dispose();
       };
     } catch (error2) {
       await accounts.dispose();
+      await skills.dispose();
       throw error2;
     }
   }

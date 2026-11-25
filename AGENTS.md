@@ -44,11 +44,13 @@ The tests use Node 24's own test runner. `npm run check` bundles `dist/` before 
 src/index.ts              Plugin.define({ id, setup }), assertHost, the account wiring and one register call
 src/manifest.ts           reads package.json capabilities and checks it with the contract
 src/accounts.ts           the mcp mechanism per alias, the Enterprise integration, sign-in methods and credentials
+src/skills.ts             reads skills/<id>/SKILL.md and registers each through ctx.skill at setup
 src/handlers/             one file per method: status, probe, events_list, api
 src/provider/             GitHub's endpoints, REST/GraphQL client, activity feed, device flow
 test/unit/                options, accounts, provider, handlers, manifest
 test/conformance/         replays fixtures/conformance.json through the handlers
 test/host/host.test.ts    the host gate: 2.4.1 starts, 2.5.0 is refused
+test/host/skills.test.ts  the real 2.4.1 host registers every skills/*/SKILL.md id
 test/support/             the deterministic fake GitHub and the handler runtime
 skills/github/            the main skill; github-pr-review, github-issue-triage, github-code-research
 docs/                     capabilities, configuration, accounts, automations, architecture, security
@@ -110,6 +112,8 @@ scripts/record-fixture.mjs rebuilds the fake provider's recorded fixture
 - `test/unit/accounts.test.ts` proves one MCP server per github.com alias, the Enterprise integration, and the
   credential states.
 - `test/host/host.test.ts` proves the tested range and the clean `HOST_UNTESTED` refusal.
+- `test/host/skills.test.ts` loads the built plugin in the real embedded 2.4.1 host and proves every `skills/*/SKILL.md`
+  id is registered.
 - `test/conformance/fixture.test.ts` replays `fixtures/conformance.json` through the handlers, so a changed answer fails
   the test instead of drifting from the recording. `npm run fixtures` rebuilds the fake provider's recording.
 - `npx plugin-kit check` proves T0, T1 on OpenCode 2.4.1 and the unsupported-host refusal.

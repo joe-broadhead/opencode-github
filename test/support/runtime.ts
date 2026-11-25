@@ -74,6 +74,7 @@ export function runtimeFor(input: { options?: Readonly<Record<string, unknown>>;
     provider: createProvider({ deviceSignIn: true, fetch: fake.fetch }),
     root: process.cwd(),
     clock: () => NOW,
+    setupProblems: () => [],
     nextStep: () => null,
     statusState: { last: undefined, lastAccounts: new Map() },
     ...input.overrides,
