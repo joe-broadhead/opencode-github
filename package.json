@@ -2,12 +2,6 @@
   "name": "@we-the-rebel-alliance/github-plugin",
   "version": "0.0.0",
   "description": "GitHub's issues, pull requests, code and Actions in OpenCode, through the vendor's MCP server and its REST and GraphQL API.",
-  "keywords": [
-    "opencode",
-    "opencode-plugin",
-    "github",
-    "plugin-contract"
-  ],
   "homepage": "https://github.com/we-the-rebel-alliance/github-plugin#readme",
   "bugs": {
     "url": "https://github.com/we-the-rebel-alliance/github-plugin/issues"
@@ -29,8 +23,7 @@
     "skills",
     "assets",
     "README.md",
-    "LICENSE",
-    "NOTICE"
+    "LICENSE"
   ],
   "capabilities": {
     "version": 1,
@@ -959,12 +952,13 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json",
+    "lint": "biome check .",
     "test": "node --test \"test/**/*.test.ts\"",
     "fixtures": "node scripts/record-fixture.mjs",
     "docs": "plugin-kit docs",
     "docs:check": "plugin-kit docs --check",
-    "check": "npm run typecheck && npm run build && npm run test && npm run test:pack && plugin-kit check && plugin-kit docs --check",
-    "test:pack": "node scripts/pack-check.mjs"
+    "check": "npm run lint && npm run typecheck && npm run build && npm run test && npm run pack && plugin-kit check && plugin-kit docs --check",
+    "pack": "node scripts/check-pack.mjs"
   },
   "devDependencies": {
     "@opencode/client": "2.4.1",
@@ -973,6 +967,7 @@
     "@types/node": "24.19.2",
     "@we-the-rebel-alliance/plugin-contract": "github:we-the-rebel-alliance/plugin-contract#v0.0.0",
     "esbuild": "0.28.2",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "@biomejs/biome": "2.6.9"
   }
 }

@@ -1,7 +1,8 @@
 # GitHub
 
 GitHub's repositories, code, issues, pull requests, Actions and security alerts in OpenCode, through GitHub's hosted
-MCP server and its REST and GraphQL API.
+MCP server and its REST and GraphQL API. It is an OpenCode plugin on
+[plugin-contract](https://github.com/we-the-rebel-alliance/plugin-contract) v0.
 
 The plugin gives each account alias its own GitHub MCP server, so an agent can work in two GitHub accounts at once
 without one alias's token reaching the other's tools. On top of the vendor's tools it adds `api` for what they lack,
@@ -53,6 +54,14 @@ asks under `ask-changes` and is off under `read-only`. The pass-through MCP tool
 `api` is one `admin` method: it can read and change GitHub, and the plugin cannot split one class into a read half and
 a change half. It therefore runs under `all` and `ask-changes`, and is off under `read-only` — its reads included. Read
 GitHub through the MCP tools when `read-only` is set.
+
+## Configuration
+
+The options are `access` (above), `accounts` (one profile per alias), `toolsets` (which GitHub MCP toolsets every
+server offers), `lockdown` (GitHub's untrusted-content filter), `clientId` and `appSlug` (device sign-in and the
+GitHub App install link), `scopes` (the OAuth scopes device sign-in requests) and `allowUntestedHost` (leave it false;
+it starts the plugin on an OpenCode release outside the tested range). The generated table and examples are in
+[docs/configuration.md](docs/configuration.md).
 
 ## Capabilities
 
@@ -206,6 +215,35 @@ None.
 | `OPTIONS_INVALID` | the plugin's options do not match their schema |
 | `UNAVAILABLE` | the provider could not be reached |
 <!-- /generated:errors -->
+
+## Troubleshooting
+
+- **No GitHub tools are listed.** OpenCode has not loaded the plugin or its MCP server. Run `/connect`, choose GitHub
+  (or GitHub Enterprise for an Enterprise alias), and check that the OpenCode release is inside `>=2.4.1 <2.5.0`.
+- **`NEEDS_SIGN_IN`.** The alias's credential needs attention. Run `/connect`, choose GitHub, and sign in as that
+  alias; `status` names the alias and the next step.
+- **`ACCOUNT_REQUIRED` or `ACCOUNT_UNKNOWN`.** Pass `account` as one of the aliases `status` lists. Never guess an
+  alias; a call without one is refused when two or more are configured.
+- **`CURSOR_INVALID`.** The cursor belongs to another alias, source or scope, or the alias was signed in to another
+  GitHub login since it was issued. Read again without the cursor, with `since` if needed.
+- **`PERMISSION_DENIED`.** The person's access level or grant does not cover the call. Do not widen it yourself: ask
+  the person, or read `status`.
+- **`RATE_LIMITED` or `UNAVAILABLE`.** GitHub asked the plugin to slow down or could not be reached. Wait for the
+  reset the next step names, then try again; if it keeps failing, read `status`.
+- **`HOST_UNTESTED`.** OpenCode is outside the tested range. Install OpenCode 2.4.1, or set `allowUntestedHost` only
+  when you accept an untested host.
+- **Wrong repository or account data.** Each alias has its own token and its own MCP tools. Pass the alias explicitly,
+  and never reuse one alias's result for another.
+
+## Working on the plugin
+
+- **The contract pin.** `package.json` pins `github:we-the-rebel-alliance/plugin-contract#v0.0.0`. Move the pin to the
+  contract's next release tag; never follow a branch.
+- **`dist/` is generated.** `npm run build` writes it, CI builds it before the pack check and `plugin-kit check`, and
+  it is not committed. Never edit `dist/` by hand.
+- **The layout.** `src/index.ts` is the one entry, `src/accounts.ts` wires the MCP servers and sign-in, `src/handlers/`
+  holds one file per method, `src/provider/` is the only place a GitHub endpoint is named, `skills/` holds the agent
+  guides, and `docs/` is the documentation.
 
 ## Docs
 

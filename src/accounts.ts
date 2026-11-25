@@ -391,13 +391,16 @@ export async function registerGithubAccounts(ctx: Plugin.Context, request: Regis
     return serverIntegration(accountServerName(alias))
   }
 
+  type ConnectionInfo = Awaited<ReturnType<Plugin.Context["integration"]["connection"]["active"]>>
+  type CredentialValue = Awaited<ReturnType<Plugin.Context["integration"]["connection"]["resolve"]>>
+
   const read = async (alias: string, signal?: AbortSignal): Promise<Credential> => {
     signal?.throwIfAborted()
     const id = await integrationFor(alias)
     if (id === undefined) {
       throw signInFailure(`the ${alias} account's GitHub server is not registered yet`, "Wait a moment, then read status; sign the account in if it stays unregistered.")
     }
-    let connection
+    let connection: ConnectionInfo
     try {
       connection = await ctx.integration.connection.active(id)
     } catch {
@@ -406,7 +409,7 @@ export async function registerGithubAccounts(ctx: Plugin.Context, request: Regis
     if (connection === undefined) throw signInFailure(`the ${alias} account is not signed in`, `Run /connect and choose ${serviceOf(alias)} to sign in as ${alias}.`)
     const reported = "status" in connection ? connection.status : undefined
     if (reported?.status === "needs_auth") throw signInFailure(reported.message || `the ${alias} account needs sign-in again`, `Run /connect and choose ${serviceOf(alias)} to sign in again.`)
-    let credential
+    let credential: CredentialValue
     try {
       credential = await ctx.integration.connection.resolve(connection)
     } catch {

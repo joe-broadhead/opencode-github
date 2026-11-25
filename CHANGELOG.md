@@ -1,17 +1,17 @@
 # Changelog
 
-## 0.0.0 (unreleased)
+## 0.0.0 (2026-11-25)
 
-- Rebuilt on plugin-contract v0: one `register` call, the `github` plugin id, namespace and RPC id, one handler per
-  method, the provider in `src/provider/`, and generated docs.
-- Accounts are held by the `mcp` mechanism: one GitHub MCP server per alias (`github`, `github-work`, …), each with its
-  own sign-in; a profile's `host` selects a GitHub Enterprise Server, which has no hosted MCP server and uses an
-  integration of its own.
-- Every callable is declared in `capabilities.methods`: GitHub's 98 pass-through MCP tools with their classes, `api`
-  (admin), `events_list`, `probe` and `status`.
-- `api` keeps its REST and GraphQL reach, its download and upload, and its read/change distinction; it emits `changed`
-  after a write.
-- `events_list` reads the merged issue, pull request, commit and notification feed with a cursor bound to the alias.
-- The plugin emits `changed`, `status` and `account`.
-- The copied release and drift scripts are replaced by `plugin-kit`; the copied contract is replaced by the
-  `@we-the-rebel-alliance/plugin-contract` devDependency; `docs/`, `AGENTS.md` and the skills are written fresh.
+- GitHub's connector on plugin-contract v0: the hosted MCP tools passed through per account alias, plus `api`,
+  `events_list`, `probe` and `status`, one `register` call, and the provider behind `src/provider/`.
+- Accounts: one GitHub MCP server per github.com alias (`github`, `github-work`, …), each with GitHub device sign-in or
+  a personal access token; a profile `host` selects a GitHub Enterprise Server, which has no hosted MCP server and uses
+  an integration of its own.
+- `api` reads and changes GitHub's REST and GraphQL API, with pagination, downloads and release-asset uploads; a
+  successful change emits `changed`.
+- `events_list` reads the merged issue, pull request, commit and notification feed with a cursor bound to the alias;
+  `status` reports every alias and the agents whose rules miss the generated ones.
+- The plugin emits `changed`, `status` and `account`, declares the `github.activity` events source, and ships four
+  skills and generated documentation.
+- Tests: unit, a two-account conformance fixture and a packed-tarball check; `npm run check` also runs biome,
+  `plugin-kit check` and `plugin-kit docs --check`.

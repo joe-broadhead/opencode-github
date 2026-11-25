@@ -27,8 +27,9 @@ server: that alias gets an integration of its own and `api` is its tool.
 | Command | Does |
 |---|---|
 | `npm ci --ignore-scripts` | installs the dev tooling; there are no runtime dependencies |
-| `npm run check` | typecheck, build, the tests, `plugin-kit check` and `plugin-kit docs --check` |
-| `npm run test:pack` | packs the tarball and checks its files, size and self-contained entry |
+| `npm run check` | lint, typecheck, build, the tests, the pack check, `plugin-kit check` and `plugin-kit docs --check` |
+| `npm run lint` | `biome check`: the lint gate |
+| `npm run pack` | packs the tarball and checks the files a consumer receives |
 | `npx plugin-kit check` | the conformance gate: T0, T1, docs, forbidden patterns, no bundled kit |
 | `npm run docs` | regenerates the generated doc sections from the manifest |
 | `npm run fixtures` | rebuilds the fake provider's recorded conformance fixture |
@@ -52,7 +53,7 @@ skills/github/            the main skill; github-pr-review, github-issue-triage,
 docs/                     capabilities, configuration, accounts, automations, architecture, security
 fixtures/conformance.json the recorded conformance answers the kit replays
 scripts/build.mjs         builds dist/index.js with esbuild
-scripts/pack-check.mjs    checks the packed tarball
+scripts/check-pack.mjs   checks the packed tarball
 scripts/record-fixture.mjs rebuilds the fake provider's recorded fixture
 ```
 
@@ -99,6 +100,7 @@ scripts/record-fixture.mjs rebuilds the fake provider's recorded fixture
 
 ## Tests
 
+- `npm run lint` proves `biome check` finds no error.
 - `test/unit/options.test.ts` proves the options' defaults and the `OPTIONS_INVALID` refusals.
 - `test/unit/manifest.test.ts` proves the package name, the 102 methods, the classes and the source.
 - `test/unit/provider.test.ts` proves the REST and GraphQL mapping, the page and cursor, probe and the failure codes.

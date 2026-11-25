@@ -121,7 +121,7 @@ const URL_ENCODED = /[^!-~]|["<>`{}^]/gu
 function decodedFully(path: string): string | undefined {
   let current = path
   for (let round = 0; round < 8; round++) {
-    const next = current.replace(/%[0-9A-Fa-f]{2}/g, (escape) => String.fromCharCode(Number.parseInt(escape.slice(1), 16)))
+    const next = current.replace(/%[0-9A-Fa-f]{2}/g, (hex) => String.fromCharCode(Number.parseInt(hex.slice(1), 16)))
     if (next === current) return current
     current = next
   }
@@ -140,17 +140,17 @@ export function restTarget(input: Pick<RestInput, "method" | "path" | "query" | 
   const rawQuery = split === -1 ? "" : input.path.slice(split + 1)
   const wrong = (why: string) => invalid(`The path ${JSON.stringify(input.path.slice(0, 200))} ${why}`, "Pass a relative API path such as /repos/OWNER/REPO/pulls.")
   if (!rawPath.startsWith("/") || rawPath.startsWith("//")) throw wrong("must start with a single /")
-  if (/[\s\\#%]|[\u0000-\u001f\u007f]/.test(rawPath.replace(/%[0-9A-Fa-f]{2}/g, ""))) throw wrong("has characters a path cannot have")
+  if (/[\s\\#%]|\p{Cc}/u.test(rawPath.replace(/%[0-9A-Fa-f]{2}/g, ""))) throw wrong("has characters a path cannot have")
   // A . or .. segment, also encoded (%2e, .%2e, %2E., %252e…) or behind an encoded / or \, is refused.
   const decoded = decodedFully(rawPath)
   if (decoded === undefined || decoded.split(/[/\\]/).some((segment) => segment === "." || segment === "..")) throw wrong("has a . or .. segment")
   let path: string
   try {
     path = rawPath
-      .replace(/%[0-9A-Fa-f]{2}/g, (escape) => {
-        const char = String.fromCharCode(Number.parseInt(escape.slice(1), 16))
+      .replace(/%[0-9A-Fa-f]{2}/g, (hex) => {
+        const char = String.fromCharCode(Number.parseInt(hex.slice(1), 16))
         if (PLAIN.test(char)) throw wrong(`percent-encodes ${JSON.stringify(char)}; write it as itself`)
-        return escape.toUpperCase()
+        return hex.toUpperCase()
       })
       .replace(URL_ENCODED, (char) => encodeURIComponent(char))
   } catch (error) {

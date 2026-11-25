@@ -66,5 +66,6 @@ sign-in requests; a pasted token carries the scopes it was created with. No clie
 
 ## `allowUntestedHost`
 
-Starts the plugin on an OpenCode release outside `>=2.4.1 <2.5.0`. Without it, an untested host gets `HOST_UNTESTED` and
-the plugin does not load.
+The plugin refuses a host outside `>=2.4.1 <2.5.0` with `HOST_UNTESTED` and does not load. `allowUntestedHost: true`
+starts it anyway. **Leave it false**: it exists only for a person who accepts the risk of an untested host, and the
+plugin's tested range is what CI proves.

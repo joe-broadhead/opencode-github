@@ -19,10 +19,11 @@ npm run check
 
 | Step | What it proves |
 |---|---|
+| `npm run lint` | `@biomejs/biome` finds no lint error |
 | `npm run typecheck` | the sources and tests typecheck under strict settings |
 | `npm run build` | `dist/index.js` is built from `src/index.ts` with esbuild |
 | `npm test` | the options, accounts, manifest, provider, handlers and fixture tests pass |
-| `npm run test:pack` | the tarball carries the built entry, the manifest, the skills and the icons, and nothing else |
+| `npm run pack` | the tarball carries the built entry, the manifest, the skills, the icons, `README.md` and `LICENSE`, and nothing else |
 | `plugin-kit check` | conformance T0 and T1, the doc file set, the forbidden patterns and no bundled kit |
 | `plugin-kit docs --check` | every generated doc section matches the manifest |
 
@@ -31,9 +32,8 @@ CI runs the same steps in one job named `ci`. `dist/` is generated and is not co
 
 ## The contract pin
 
-`package.json` pins the contract to a commit of `we-the-rebel-alliance/plugin-contract`; a released plugin pins the
-release tag instead (`github:we-the-rebel-alliance/plugin-contract#v0.0.0`) and moves the pin with the contract's
-release. Never copy a contract module into this repository.
+`package.json` pins the contract to `github:we-the-rebel-alliance/plugin-contract#v0.0.0`. Move the pin to the
+contract's next release tag; never follow a branch. Never copy a contract module into this repository.
 
 The committed `package-lock.json` records the contract's repository over `git+https`, so a fresh `npm ci` needs no SSH
 key. Keep it that way; CI also rewrites an `ssh://git@github.com/` URL to HTTPS for an older lockfile.
