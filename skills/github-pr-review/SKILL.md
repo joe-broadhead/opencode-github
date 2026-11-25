@@ -1,6 +1,6 @@
 ---
 name: github-pr-review
-description: Review or summarise a GitHub pull request (URL, OWNER/REPO#123 or number) from its diff, reviews and checks, and find why CI failed. Use when the user asks for a review or a CI failure; changes only when asked.
+description: "Review or summarise a GitHub pull request (URL, OWNER/REPO#123 or number) from its diff, reviews and checks, and find why CI failed. Use when the user asks for a review or a CI failure; changes only when asked."
 ---
 # Review a GitHub pull request
 

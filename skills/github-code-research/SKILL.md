@@ -1,6 +1,6 @@
 ---
 name: github-code-research
-description: Research code in a GitHub repository — where something is defined, files at a ref, what changed between versions, and when and why, with permalinks. Use when the user asks how repository code works. Not for files in the local checkout.
+description: "Research code in a GitHub repository — where something is defined, files at a ref, what changed between versions, and when and why, with permalinks. Use when the user asks how repository code works. Not for files in the local checkout."
 ---
 # Research code on GitHub
 

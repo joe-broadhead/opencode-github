@@ -9,7 +9,7 @@ The plugin is one `Plugin.define` entry, one `register` call, and one provider d
 | Entry | `src/index.ts` | `Plugin.define`, `assertHost`, the options, the account wiring, one `register` call, cleanup |
 | Manifest | `src/manifest.ts` | reads `package.json` `capabilities`, checks it with the contract's manifest module |
 | Accounts | `src/accounts.ts` | the `mcp` mechanism per alias, the Enterprise integration, the sign-in methods, credential resolution, status states |
-| Skills | `src/skills.ts` | reads every `skills/<id>/SKILL.md` at setup and registers it through `ctx.skill`; a broken file is a status problem |
+| Skills | `src/skills.ts` | reads every `skills/<name>/SKILL.md`, parses its YAML frontmatter (including `>`/`|` block scalars), checks it and registers it through `ctx.skill.transform` |
 | Handlers | `src/handlers/` | one file per method: `status`, `probe`, `events_list`, `api` |
 | Provider | `src/provider/` | GitHub's REST and GraphQL client, the activity feed algorithm, device flow, endpoints |
 
@@ -32,10 +32,12 @@ resolved on each call and OpenCode renews it.
 
 ## Skills
 
-`setup` reads the package's four skills (`github`, `github-pr-review`, `github-issue-triage`, `github-code-research`)
-from `skills/<id>/SKILL.md`, checks that each frontmatter's `name` is the folder and its description and body are
-non-empty, and adds them to the host with `ctx.skill.transform`. `register` does not own skills, so without this they
-would ship in the package and never reach an agent. A missing or broken skill is reported by `status`, not thrown.
+`setup` calls `readSkills()`, which reads every `skills/<name>/SKILL.md`, parses its frontmatter as YAML and checks
+that `name` is the folder, the description is non-empty (a bare `>`, `|`, `>-` or `|-` is refused) and the body is
+non-empty; `registerSkills(context, skills)` then adds them to the host with `ctx.skill.transform`. YAML is what makes a
+block-scalar description register its folded or literal text instead of the marker. `register` does not own skills, so
+without this they would ship in the package and never reach an agent. A malformed skill throws
+`SCHEMA_VIOLATION` and fails setup, before any tool registers.
 
 ## The provider
 
