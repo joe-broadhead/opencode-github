@@ -58,6 +58,34 @@ test("a page within the window continues from its cursor without repeating an it
   assert.equal(second.more, false)
 })
 
+test("two events at the same timestamp across a page boundary are both listed, never skipped", async () => {
+  // The twin shares issue #7's updated_at exactly; the cursor must resume after the pair, not after the timestamp.
+  const twin = {
+    id: 7002,
+    number: 9,
+    title: "Second queue note",
+    body: "The same update time as the first note.",
+    state: "open",
+    updated_at: "2026-11-20T10:00:00Z",
+    html_url: "https://github.com/example/work/issues/9",
+    repository_url: "https://api.github.com/repos/example/work",
+    user: { login: "ana-work" },
+    labels: [],
+    assignees: [],
+  }
+  const fake = createFakeGitHub({ extraWorkIssues: [twin] })
+  const provider = createProvider({ deviceSignIn: true, fetch: fake.fetch })
+  const first = await provider.page({ credential: work, request: { alias: "work", login: work.login, request: request({ since: "2026-11-01T00:00:00.000Z", limit: 1 }), now: NOW, service: "GitHub" } })
+  assert.equal(first.events.length, 1)
+  assert.equal(first.more, true)
+  const second = await provider.page({ credential: work, request: { alias: "work", login: work.login, request: request({ cursor: first.cursor, limit: 1 }), now: NOW, service: "GitHub" } })
+  assert.equal(second.events.length, 1)
+  const listed = [...first.events, ...second.events].map((event) => event.external_id)
+  assert.equal(new Set(listed).size, 2)
+  assert.ok(listed.some((id) => id.startsWith("example/work#7@")), listed.join(", "))
+  assert.ok(listed.some((id) => id.startsWith("example/work#9@")), listed.join(", "))
+})
+
 test("a window with no item answers an empty page with a cursor", async () => {
   const { provider } = setup()
   const page = await provider.page({ credential: work, request: { alias: "work", login: work.login, request: request({ since: "2026-11-24T00:00:00.000Z" }), now: NOW, service: "GitHub" } })

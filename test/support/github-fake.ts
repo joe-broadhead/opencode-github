@@ -25,7 +25,7 @@ export const ACCOUNTS: Readonly<Record<string, Credential>> = {
   },
 }
 
-interface RawIssue {
+export interface RawIssue {
   readonly id: number
   readonly number: number
   readonly title: string
@@ -188,6 +188,11 @@ function pageOf<T>(items: readonly T[], url: URL): { items: T[]; total: number }
 }
 
 /** What one fake GitHub recorded: the requests, without a token, so a test can check what was asked. */
+/** What one test adds to the work account: extra issues at times it chooses. */
+export interface FakeOptions {
+  readonly extraWorkIssues?: readonly RawIssue[]
+}
+
 export interface FakeGitHub {
   readonly fetch: (url: string, init: RequestInit) => Promise<Response>
   readonly calls: readonly string[]
@@ -196,9 +201,11 @@ export interface FakeGitHub {
 }
 
 /** A fresh fake GitHub. Every instance starts empty, so a test gets the same answers every run. */
-export function createFakeGitHub(): FakeGitHub {
+export function createFakeGitHub(options: FakeOptions = {}): FakeGitHub {
   const calls: string[] = []
   const revoked = new Set<string>()
+  const data: Readonly<Record<string, AccountData>> =
+    options.extraWorkIssues === undefined ? DATA : { ...DATA, "ana-work": { ...WORK, issues: [...WORK.issues, ...options.extraWorkIssues] } }
 
   const loginFor = (init: RequestInit): string | undefined => {
     const headers = new Headers(init.headers)
@@ -215,14 +222,14 @@ export function createFakeGitHub(): FakeGitHub {
     calls.push(`${method} ${pathname}${url.search}`)
     const login = loginFor(init)
     if (login === undefined || revoked.has(login)) return json({ message: "Bad credentials" }, 401)
-    const data = DATA[login]
-    if (data === undefined) return json({ message: "Bad credentials" }, 401)
+    const account = data[login]
+    if (account === undefined) return json({ message: "Bad credentials" }, 401)
 
     if (pathname === "/user") return json({ login })
     if (pathname === "/search/issues") {
       const query = url.searchParams.get("q") ?? ""
       const pullRequest = query.includes("is:pull-request")
-      const issues = data.issues
+      const issues = account.issues
         .filter((issue) => (issue.pull_request !== undefined) === pullRequest)
         .filter((issue) => between(issue.updated_at, range(query, "updated").from, range(query, "updated").to))
         .sort((left, right) => left.updated_at.localeCompare(right.updated_at))
@@ -231,7 +238,7 @@ export function createFakeGitHub(): FakeGitHub {
     }
     if (pathname === "/search/commits") {
       const query = url.searchParams.get("q") ?? ""
-      const commits = data.commits
+      const commits = account.commits
         .filter((commit) => between(commit.commit.committer.date, range(query, "committer-date").from, range(query, "committer-date").to))
         .sort((left, right) => left.commit.committer.date.localeCompare(right.commit.committer.date))
       const page = pageOf(commits, url)
@@ -240,7 +247,7 @@ export function createFakeGitHub(): FakeGitHub {
     if (pathname === "/notifications") {
       const since = url.searchParams.get("since")
       const before = url.searchParams.get("before")
-      const notifications = data.notifications
+      const notifications = account.notifications
         .filter((notification) => between(notification.updated_at, since ?? undefined, before ?? undefined))
         .sort((left, right) => right.updated_at.localeCompare(left.updated_at))
       return json(pageOf(notifications, url).items)
@@ -249,8 +256,8 @@ export function createFakeGitHub(): FakeGitHub {
     if (pathname === "/repos/example/work/issues" && method === "GET") {
       const perPage = number(url.searchParams.get("per_page"), 30)
       const page = number(url.searchParams.get("page"), 1)
-      const items = data.issues.slice((page - 1) * perPage, page * perPage)
-      const next = page * perPage < data.issues.length ? { link: `<https://api.github.com/repos/example/work/issues?per_page=${perPage}&page=${page + 1}>; rel="next"` } : {}
+      const items = account.issues.slice((page - 1) * perPage, page * perPage)
+      const next = page * perPage < account.issues.length ? { link: `<https://api.github.com/repos/example/work/issues?per_page=${perPage}&page=${page + 1}>; rel="next"` } : {}
       return json(items, 200, next)
     }
     if (pathname === "/repos/example/work/issues" && method === "POST") {
