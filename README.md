@@ -17,7 +17,7 @@ The first release is `v0.0.0`; a later release pins its own tag. The plugin need
 
 ## Sign in
 
-Each alias is one GitHub MCP server, named `github` for `default` and `github-<alias>` for any other alias. GitHub's
+Each github.com alias is one GitHub MCP server, named `github` for `default` and `github-<alias>` for any other alias. GitHub's
 hosted MCP server has no dynamic client registration, so the plugin replaces its generic OAuth with GitHub's device flow
 (an OAuth App or GitHub App client ID) and a fine-grained personal access token. Sign in per alias with `/connect`:
 
