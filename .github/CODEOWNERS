@@ -3,8 +3,8 @@
 # The contract maintainers also review package.json, AGENTS.md and docs/, because those carry the manifest and the
 # standard (plugin standard §1).
 
-*                         @joe-broadhead
+*                         @we-the-rebel-alliance/plugin-maintainers
 
-/package.json             @joe-broadhead
-/AGENTS.md                @joe-broadhead
-/docs/                    @joe-broadhead
+/package.json             @we-the-rebel-alliance/contract-maintainers
+/AGENTS.md                @we-the-rebel-alliance/contract-maintainers
+/docs/                    @we-the-rebel-alliance/contract-maintainers
