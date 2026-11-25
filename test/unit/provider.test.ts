@@ -86,6 +86,34 @@ test("two events at the same timestamp across a page boundary are both listed, n
   assert.ok(listed.some((id) => id.startsWith("example/work#9@")), listed.join(", "))
 })
 
+test("since plus limit: 1, paged to the end with the cursor, returns each matching event exactly once", async () => {
+  const { provider } = setup()
+  const since = "2026-11-01T00:00:00.000Z"
+  const full = await provider.page({ credential: work, request: { alias: "work", login: work.login, request: request({ since, limit: 500 }), now: NOW, service: "GitHub" } })
+  const expected = full.events.map((event) => event.external_id)
+  async function pageThrough(withSince: boolean): Promise<string[]> {
+    const ids: string[] = []
+    let cursor: string | undefined
+    for (let page = 0; page < 20; page++) {
+      // The first page names the window; a later page may keep since or rely on the cursor carrying it.
+      const held = request({ limit: 1, ...(page === 0 || withSince ? { since } : {}), ...(cursor === undefined ? {} : { cursor }) })
+      const answer = await provider.page({ credential: work, request: { alias: "work", login: work.login, request: held, now: NOW, service: "GitHub" } })
+      ids.push(...answer.events.map((event) => event.external_id))
+      if (!answer.more) return ids
+      cursor = answer.cursor
+    }
+    throw new Error("the paged read did not end")
+  }
+  // The cursor carries the window: a consumer that drops since after the first page gets the same events once.
+  const cursorOnly = await pageThrough(false)
+  // Passing since with every page is the same read; it must not repeat an event either.
+  const everyPage = await pageThrough(true)
+  assert.deepEqual(cursorOnly, expected)
+  assert.deepEqual(everyPage, expected)
+  assert.equal(new Set(cursorOnly).size, cursorOnly.length)
+  assert.equal(new Set(everyPage).size, everyPage.length)
+})
+
 test("a window with no item answers an empty page with a cursor", async () => {
   const { provider } = setup()
   const page = await provider.page({ credential: work, request: { alias: "work", login: work.login, request: request({ since: "2026-11-24T00:00:00.000Z" }), now: NOW, service: "GitHub" } })
