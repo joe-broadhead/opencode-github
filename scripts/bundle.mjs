@@ -25,7 +25,10 @@ await build({
   external: ["@opencode/*"],
   legalComments: "none",
   logLevel: "warning",
-  banner: { js: `// ${pkg.name} ${pkg.version}. Built by scripts/bundle.mjs; do not edit.` },
+  // The YAML parser is CommonJS and reads `process` with require(); the bundle is ESM, so give it a real require.
+  banner: {
+    js: `import { createRequire } from "node:module";\nconst require = createRequire(import.meta.url);\n// ${pkg.name} ${pkg.version}. Built by scripts/bundle.mjs; do not edit.`,
+  },
 })
 
 console.log(`built ${pkg.name} ${pkg.version} into dist/index.js`)

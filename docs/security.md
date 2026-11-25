@@ -40,13 +40,13 @@ tool or a recipient. An event that holds a credential is refused by the contract
 
 ## Writes
 
-`api` is the plugin's one write path. It is class `admin`, so under `ask-changes` OpenCode asks before every call and
-under `read-only` it is off. A person's rule for a narrower resource still applies. A write emits `changed` only after
-GitHub accepted it.
+`api` is the plugin's one write path. It is class `admin` with `effect: "ask"`, so OpenCode asks before every call,
+a read included, under both `all` and `ask-changes`; under `read-only` it is off. A person's rule for a narrower
+resource still applies. A write emits `changed` only after GitHub accepted it.
 
 The plugin declares no actions and no plan/commit pair: it has nothing to preview, and it wires no action-grant
-verifier. A change through `api` is therefore an agent-session operation, where OpenCode can ask; an app with no
-session has no confirmation path for a write.
+verifier. Every `api` call is therefore an agent-session operation, where OpenCode asks; an app with no session has
+no confirmation path for a write.
 
 ## Reporting a vulnerability
 

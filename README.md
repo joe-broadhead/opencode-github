@@ -55,8 +55,8 @@ asks under `ask-changes` and is off under `read-only`. The pass-through MCP tool
 (`github-work_*` vs `github-personal_*`), so one alias's rule can never reach another's tool.
 
 `api` is one `admin` method: it can read and change GitHub, and the plugin cannot split one class into a read half and
-a change half. It therefore runs under `all` and `ask-changes`, and is off under `read-only` — its reads included. Read
-GitHub through the MCP tools when `read-only` is set.
+a change half. It therefore carries `effect: "ask"`: every call asks, a read included, under both `all` and
+`ask-changes`. `read-only` turns it off. Read GitHub through the MCP tools when `read-only` is set.
 
 ## Configuration
 

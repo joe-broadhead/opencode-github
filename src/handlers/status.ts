@@ -17,11 +17,11 @@ export function statusHandler(runtime: HandlerRuntime): MethodHandler {
     output: STATUS_SCHEMA,
     async run(_input, call) {
       const signals: Record<string, AccountSignal> = {}
-      const problems: string[] = [...runtime.setupProblems(), ...runtime.accounts.problems()]
+      const problems: string[] = [...runtime.accounts.problems()]
       for (const account of runtime.accounts.accounts) {
         const signal = await runtime.accounts.state(account.alias)
         signals[account.alias] = signal
-        // The status builder's overall state counts a setup problem, not an alias in error: report the alias's reason
+        // The status builder's overall state counts a problem, not an alias in error: report the alias's reason
         // as a problem too, so the plugin never says ready while an account cannot be read.
         if (signal.state === "error" && signal.reason !== undefined) problems.push(signal.reason)
         const held = runtime.statusState.lastAccounts.get(account.alias)

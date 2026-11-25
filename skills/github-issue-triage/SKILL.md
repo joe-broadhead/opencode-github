@@ -1,6 +1,6 @@
 ---
 name: github-issue-triage
-description: Triage GitHub issues: what is open or unlabelled, labels and priority from the repository's own, duplicates. Use when the user asks to triage or prioritise; changes only when asked (label, close, assign).
+description: "Triage GitHub issues; what is open or unlabelled, labels and priority from the repository's own, duplicates. Use when the user asks to triage or prioritise; changes only when asked (label, close, assign)."
 ---
 # Triage GitHub issues
 
