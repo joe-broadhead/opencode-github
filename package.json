@@ -971,7 +971,7 @@
     "@opencode/plugin": "2.4.1",
     "@opencode/sdk": "2.4.1",
     "@types/node": "24.19.2",
-    "@we-the-rebel-alliance/plugin-contract": "github:we-the-rebel-alliance/plugin-contract#79da83cfa1668c30a673e6bb392d3122155e6dc1",
+    "@we-the-rebel-alliance/plugin-contract": "github:we-the-rebel-alliance/plugin-contract#39ff71501e83ef73a437e19fd3b6e50bd5b7a734",
     "esbuild": "0.28.2",
     "typescript": "5.9.3"
   }

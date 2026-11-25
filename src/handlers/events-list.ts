@@ -2,7 +2,7 @@
  * `events_list`: the activity source's one read (contract §7). The input, its normalisation and the page come from the
  * contract's `events` module; this handler checks what only the plugin knows (the source) and asks the provider.
  */
-import { PAGE, parseEventsListInput, SourceError, PAGE_SCHEMA } from "@we-the-rebel-alliance/plugin-contract/events"
+import { parseEventsListInput, SourceError, PAGE_SCHEMA } from "@we-the-rebel-alliance/plugin-contract/events"
 import type { MethodHandler } from "@we-the-rebel-alliance/plugin-contract/register"
 import { credentialFor, refuseInput, refuseSource, serviceOf, type HandlerRuntime } from "./shared.ts"
 import { SOURCE } from "../provider/events.ts"
@@ -18,7 +18,7 @@ export function eventsListHandler(runtime: HandlerRuntime): MethodHandler {
         source: { type: "string", description: "The source to read; only github." },
         cursor: { type: "string", description: "The cursor a previous page returned." },
         since: { type: "string", description: "An ISO date or date-time; ignored when cursor is given." },
-        limit: { type: "integer", minimum: PAGE.min, maximum: PAGE.max, description: `How many events to list, from ${PAGE.min} to ${PAGE.max}.` },
+        limit: { type: "integer", minimum: 1, maximum: 500, description: "How many events to list, from 1 to 500." },
       },
       additionalProperties: false,
     },

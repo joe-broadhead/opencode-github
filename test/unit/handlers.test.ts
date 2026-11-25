@@ -46,11 +46,19 @@ test("an alias in error makes the whole status an error, with its redacted reaso
   assert.match(String(answer["nextStep"]), /connection failed/)
 })
 
-test("an unreadable agent list is a problem, never zero agents", async () => {
-  const failing = { unguardedAgents: async () => { throw new Error("the agent list could not be read") } } as unknown as Parameters<typeof unguardedOf>[0]
+test("status turns an unreadable agent list into a problem, never into zero agents", async () => {
+  const runtime = runtimeFor()
+  const answer = (await run(runtime, "status", {}, "work", [], { ok: false, error: "the agent list could not be read" })) as Record<string, unknown>
+  assert.equal(answer["state"], "error")
+  assert.match(String(answer["nextStep"]), /agent list could not be read/)
+  assert.deepEqual(answer["unguardedAgents"], [])
+})
+
+test("an unreadable agent list is a failure value, never zero agents", async () => {
+  const failing = { unguardedAgents: async () => ({ ok: false as const, error: "the agent list could not be read" }) } as unknown as Parameters<typeof unguardedOf>[0]
   const read = await unguardedOf(failing)
-  assert.deepEqual(read.agents, [])
-  assert.match(read.problem ?? "", /the agent list could not be read/)
+  assert.equal(read.ok, false)
+  if (!read.ok) assert.match(read.error, /the agent list could not be read/)
 })
 
 test("probe reads the signed-in owner and emits the account nudge only on a change", async () => {

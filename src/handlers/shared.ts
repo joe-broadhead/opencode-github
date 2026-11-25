@@ -1,6 +1,7 @@
 /** The shapes, refusals and bus nudges the handlers share. */
 import { SourceError } from "@we-the-rebel-alliance/plugin-contract/events"
 import type { JsonSchema, Manifest } from "@we-the-rebel-alliance/plugin-contract/manifest"
+import type { UnguardedAgentsResult } from "@we-the-rebel-alliance/plugin-contract/access"
 import type { MethodCall } from "@we-the-rebel-alliance/plugin-contract/register"
 import type { AccountWiring } from "../accounts.ts"
 import type { Provider, Credential } from "../provider/client.ts"
@@ -42,23 +43,12 @@ export interface HandlerRuntime {
 }
 
 /**
- * The agents whose rules no longer hold the generated ones, as `status` reports them. This is the one place the call's
- * shape is read: the contract's next release answers `{ ok, agents } | { ok: false, error }` instead of the array, and
- * only this helper changes.
+ * The agents whose rules no longer hold the generated ones, as `status` reports them. The call answers
+ * `{ ok: true, agents } | { ok: false, error }` and never throws; `statusAnswer` turns the failure into a problem and
+ * the empty list into unknown, never zero.
  */
-export async function unguardedOf(call: MethodCall): Promise<{ readonly agents: readonly string[]; readonly problem?: string }> {
-  let value: unknown
-  try {
-    value = await call.unguardedAgents()
-  } catch (error) {
-    return { agents: [], problem: error instanceof Error ? error.message : String(error) }
-  }
-  if (Array.isArray(value)) return { agents: value as readonly string[] }
-  if (value !== null && typeof value === "object" && "ok" in value) {
-    const answer = value as { readonly ok: boolean; readonly agents?: readonly string[]; readonly error?: unknown }
-    return answer.ok ? { agents: answer.agents ?? [] } : { agents: [], problem: String(answer.error ?? "the agent list could not be read") }
-  }
-  return { agents: [] }
+export function unguardedOf(call: MethodCall): Promise<UnguardedAgentsResult> {
+  return call.unguardedAgents()
 }
 
 /** The service name a next step shows: GitHub, or GitHub Enterprise. */

@@ -33,14 +33,13 @@ export function statusHandler(runtime: HandlerRuntime): MethodHandler {
       const next = runtime.nextStep()
       if (next !== null && problems.length === 0) problems.push(next)
       const unguarded = await unguardedOf(call)
-      if (unguarded.problem !== undefined) problems.push(unguarded.problem)
       const answer = statusAnswer({
         manifest: runtime.manifest,
         version: runtime.version,
         hostVersion: runtime.hostVersion,
         accounts: accountStatuses(runtime.accounts.accounts, signals),
         problems,
-        unguardedAgents: unguarded.agents,
+        unguardedAgents: unguarded,
       })
       if (runtime.statusState.last !== answer.state) {
         runtime.statusState.last = answer.state

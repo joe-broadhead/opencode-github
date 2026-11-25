@@ -82,8 +82,10 @@ scripts/record-fixture.mjs rebuilds the fake provider's recorded fixture
 - **Emit through `call.bus`.** `register` builds the typed writer and gives every handler call `call.bus`; only the
   manifest's declared events are registered. Never call `ctx.rpc.register` yourself.
 - **Answer status with `statusAnswer`.** Pass the manifest, the installed and host versions, `accountStatuses` of every
-  alias, the problems setup recorded, and the agents from `call.unguardedAgents()`. Keep no state between `register`
-  and the handler; `unguardedAgents` is read in `handlers/shared.ts` so a shape change is one edit.
+  alias, the problems setup recorded, and `call.unguardedAgents()`. That call answers `{ ok: true, agents }` or
+  `{ ok: false, error }` and never throws; `statusAnswer` turns the failure into a problem and reports no agents rather
+  than a zero it did not read. Keep no state between `register` and the handler; the one read is in
+  `handlers/shared.ts`.
 - **Reuse the output schemas.** `STATUS_SCHEMA` from `accounts`; `PAGE_SCHEMA` and `PROBE_SCHEMA` from `events`.
 - **One account resolves per call.** `handlers/shared.ts` reads the alias's credential and emits the `account` nudge.
 
