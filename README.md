@@ -4,9 +4,10 @@ GitHub's repositories, code, issues, pull requests, Actions and security alerts 
 MCP server and its REST and GraphQL API. It is an OpenCode plugin on
 [plugin-contract](https://github.com/we-the-rebel-alliance/plugin-contract) v0.
 
-The plugin gives each account alias its own GitHub MCP server, so an agent can work in two GitHub accounts at once
-without one alias's token reaching the other's tools. On top of the vendor's tools it adds `api` for what they lack,
-an `events_list` activity source with a cursor, `probe` and `status`.
+The plugin gives each github.com account alias its own GitHub MCP server, so an agent can work in two GitHub accounts
+at once without one alias's token reaching the other's tools. An Enterprise alias has no hosted MCP server; it gets an
+integration of its own and uses `api`. On top of the vendor's tools the plugin adds `api` for what they lack, an
+`events_list` activity source with a cursor, `probe` and `status`.
 
 ## Install
 
@@ -42,8 +43,10 @@ and `api` is its tool:
 { "accounts": { "work": {}, "enterprise": { "host": "github.example.com" } } }
 ```
 
-Methods that take an account accept `account: "work"` or `account: "enterprise"`. With two aliases and no account, a
-call is refused with `ACCOUNT_REQUIRED`; an alias the plugin does not serve is `ACCOUNT_UNKNOWN`.
+`api`, `events_list` and `probe` accept `account: "work"` or `account: "enterprise"`. With two aliases and no account,
+a call is refused with `ACCOUNT_REQUIRED`; an alias the plugin does not serve is `ACCOUNT_UNKNOWN`. The pass-through
+MCP tools take no `account`: choose the alias's tool name (`github_<tool>` for `default`, `github-<alias>_<tool>` for
+another alias).
 
 ## Access
 

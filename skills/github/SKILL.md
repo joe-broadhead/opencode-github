@@ -9,14 +9,15 @@ run, security alert or notification, or wants GitHub's REST or GraphQL API.
 
 ## Picking an account
 
-Every method that reads GitHub takes `account`, the alias the person configured. Pass it explicitly: with more than one
-alias and no account, the call is refused with `ACCOUNT_REQUIRED`; an alias the plugin does not serve is
-`ACCOUNT_UNKNOWN`. Never assume an alias exists.
+`tools.github.api`, `tools.github.events_list` and `tools.github.probe` take `account`, the alias the person configured.
+Pass it explicitly: with more than one alias and no account, the call is refused with `ACCOUNT_REQUIRED`; an alias the
+plugin does not serve is `ACCOUNT_UNKNOWN`. Never assume an alias exists.
 
 - `tools.github.status` lists every alias, its state and its owner, and takes no account. Read it first when unsure.
 - `tools.github.probe` reads one alias's signed-in owner and no content.
-- The pass-through tools are per alias: `github_<tool>` belongs to `default`, `github-work_<tool>` to `work`. The same
-  tool on another alias is a different rule and a different token; never reuse one alias's rule or result for another.
+- The pass-through MCP tools take no `account`: the alias is the tool name. `github_<tool>` belongs to `default` and
+  `github-<alias>_<tool>` to that alias (`github-work_<tool>` for `work`). Pick the alias's tool name; the same tool on
+  another alias is a different rule and a different token, so never reuse one alias's rule or result for another.
 - A GitHub Enterprise alias (`host` in its profile) has no pass-through tools; use `tools.github.api` with that account.
 
 ## Reading

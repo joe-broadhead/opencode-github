@@ -16,8 +16,8 @@ If no GitHub tool is listed, run `/connect` and choose GitHub (or GitHub Enterpr
 - A number alone, with no repository in the conversation: ask which repository before any call.
 - The user's own pull requests: `github_search_pull_requests` with `author:@me` (or `review-requested:@me`). `@me`
   works in search, so `github_get_me` is needed only when you must print the login.
-- Several aliases configured: pass `account`, and use that alias's tool name. Never mix an alias's rule or result with
-  another's.
+- Several aliases configured: for a pass-through tool use that alias's tool name (`github-work_<tool>` for `work`);
+  `tools.github.api` takes `account`. Never mix an alias's rule or result with another's.
 
 ## Read it one step at a time
 

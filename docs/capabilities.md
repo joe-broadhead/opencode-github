@@ -153,7 +153,7 @@ vendor's tool accepts. On a GitHub Enterprise alias there are no MCP tools; `api
 
 ## Source
 
-`github.activity` is an events source with kind `event`. Its labels say what each item was (`issue`, `pr`, `commit`,
+`github.activity` is an events source (`kind: "events"`, `reads: "event"`). Its labels say what each item was (`issue`, `pr`, `commit`,
 the notification's type) and its state. It is private: it reads repositories the sign-in can see and the person's
 notifications. GitHub's API is not billed, so its cost class is `free`; GitHub's rate limits still apply.
 
@@ -165,3 +165,8 @@ answer and no plan to commit, so this plugin offers it no change path: `api` wri
 
 The plugin emits `changed` after its own write, `status` when its state changes, and `account` when an alias signs in or
 needs sign-in.
+
+If one feed stream fails, the page is still returned: the other streams are listed, and `failed[]` holds the failed
+stream (`github:issues`, `github:pull_requests`, `github:commits` or `github:notifications`) with its error code. The
+failed stream keeps its cursor position, so the next read re-reads it; a consumer holds the cursor back whenever
+`failed[]` is not empty.

@@ -42,8 +42,9 @@ Pass `account: "<alias>"` on a method that takes one. With two aliases and none 
 for another with `CURSOR_INVALID`, and a cursor is also refused when the alias was signed in to a different GitHub login
 since it was issued.
 
-`probe` reports the alias's owner as `github:<login>` on github.com, or `github:<login>@<host>` on an Enterprise host.
-`status` lists every alias with its state and, once probed, its owner.
+`probe` reports the alias's owner as `github:<login>` on github.com, or `github:<login>@<host>` on an Enterprise host,
+and confirms the token with GitHub. `status` reads the saved connection and lists every alias with its state and the
+owner the sign-in recorded; it is not a probe.
 
 ## Per-alias tools
 

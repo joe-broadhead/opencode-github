@@ -5,6 +5,9 @@ import { join } from "node:path"
 import { test } from "node:test"
 import { createHash } from "node:crypto"
 import { parseEventsListInput, SourceError } from "@we-the-rebel-alliance/plugin-contract/events"
+import { findSource } from "@we-the-rebel-alliance/plugin-contract/manifest"
+import { acceptAnswer } from "@we-the-rebel-alliance/plugin-contract/read"
+import { manifest } from "../../src/manifest.ts"
 import { createProvider } from "../../src/provider/client.ts"
 import { ACCOUNTS, createFakeGitHub, NOW } from "../support/github-fake.ts"
 
@@ -84,6 +87,33 @@ test("two events at the same timestamp across a page boundary are both listed, n
   assert.equal(new Set(listed).size, 2)
   assert.ok(listed.some((id) => id.startsWith("example/work#7@")), listed.join(", "))
   assert.ok(listed.some((id) => id.startsWith("example/work#9@")), listed.join(", "))
+  // The third page is past the pair: it lists the next event and repeats neither of them.
+  const third = await provider.page({ credential: work, request: { alias: "work", login: work.login, request: request({ cursor: second.cursor, limit: 1 }), now: NOW, service: "GitHub" } })
+  assert.equal(third.events.length, 1)
+  assert.ok(third.events[0]?.external_id.startsWith("example/work#8@"), third.events[0]?.external_id)
+  assert.ok(!third.events.some((event) => /example\/work#(7|9)@/.test(event.external_id)))
+})
+
+test("a stream that fails leaves a partial page with failed[] and a cursor that re-reads it", async () => {
+  const since = "2026-11-01T00:00:00.000Z"
+  const broken = createFakeGitHub({ failPaths: ["/search/commits"] })
+  const provider = createProvider({ deviceSignIn: true, fetch: broken.fetch })
+  const first = await provider.page({ credential: work, request: { alias: "work", login: work.login, request: request({ since, limit: 100 }), now: NOW, service: "GitHub" } })
+  assert.deepEqual(first.failed, [{ external_id: "github:commits", code: "UNAVAILABLE" }])
+  assert.equal(first.more, true)
+  assert.ok(first.events.some((event) => event.external_id.startsWith("example/work#7@")))
+  assert.ok(first.events.some((event) => event.external_id.startsWith("notification:101@")))
+  assert.ok(!first.events.some((event) => event.external_id.startsWith("example/work@1a2b")))
+  const source = findSource(manifest, "github.activity")
+  if (source === undefined) throw new Error("the manifest declares no github.activity source")
+  const accepted = acceptAnswer(source, "work", first)
+  assert.equal(accepted.ok, true, accepted.ok ? "" : accepted.failure.message)
+  // The same cursor against a working GitHub re-reads the failed stream from the position it kept.
+  const working = createProvider({ deviceSignIn: true, fetch: createFakeGitHub().fetch })
+  const second = await working.page({ credential: work, request: { alias: "work", login: work.login, request: request({ cursor: first.cursor, limit: 100 }), now: NOW, service: "GitHub" } })
+  assert.equal(second.failed, undefined)
+  assert.ok(second.events.some((event) => event.external_id === "example/work@1a2b3c4d5e6f"))
+  assert.deepEqual(second.events.map((event) => event.external_id), ["example/work@1a2b3c4d5e6f"])
 })
 
 test("since plus limit: 1, paged to the end with the cursor, returns each matching event exactly once", async () => {

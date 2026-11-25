@@ -12956,6 +12956,12 @@ var LOOKBACK_REMEMBERED = 16;
 var AFTER_SECOND = "\uFFFF";
 var COVERED = /* @__PURE__ */ new Set(["Issue", "PullRequest"]);
 var STREAMS = ["i", "p", "c", "n"];
+var STREAM_IDS = {
+  i: "github:issues",
+  p: "github:pull_requests",
+  c: "github:commits",
+  n: "github:notifications"
+};
 var ORDER_KEY_LENGTH = 11;
 var orderKey = (id) => createHash6("sha256").update(id).digest("base64url").slice(0, ORDER_KEY_LENGTH);
 var notificationKey = (id) => /^\d{1,20}$/.test(id) ? id : orderKey(id);
@@ -13484,6 +13490,17 @@ async function listEvents(get, input) {
   const state = request.cursor !== void 0 ? stateOf(request.cursor, alias, login, owner) : { from: { i: start, p: start, c: start, n: start }, notified: { position: start, floor: start.t + 1e3, seen: /* @__PURE__ */ new Map() } };
   const from = state.from;
   const end = state.cut ?? Math.floor(now - SETTLE_MS);
+  const failed = [];
+  const failStream = (stream, error2) => {
+    const code = error2 instanceof SourceError ? error2.code : "UNAVAILABLE";
+    if (code === "NEEDS_SIGN_IN") throw error2;
+    failed.push({
+      external_id: STREAM_IDS[stream],
+      code,
+      ...error2 instanceof SourceError && error2.retryAfterSec !== void 0 ? { retryAfterSec: error2.retryAfterSec } : {}
+    });
+  };
+  const failedRead = (start2) => ({ items: [], complete: false, last: Number.POSITIVE_INFINITY, start: start2 });
   const searches = {
     // An item belongs to the stream that read it, so that stream's position moves past it.
     i: { path: "/search/issues", sort: "updated", query: (range) => `is:issue involves:${login} updated:${range}`, make: (raw) => streamOf(issueItem(raw, alias), "i") },
@@ -13504,24 +13521,44 @@ async function listEvents(get, input) {
   for (const stream of firsts) {
     const allowance = { left: Math.max(0, budget.left - others.length) };
     const allowed = allowance.left;
-    searched[stream] = await searchSecond(searchGet, searches[stream], from[stream], heldSecond(stream), allowance, true);
+    try {
+      searched[stream] = await searchSecond(searchGet, searches[stream], from[stream], heldSecond(stream), allowance, true);
+    } catch (error2) {
+      failStream(stream, error2);
+      searched[stream] = failedRead(from[stream]);
+    }
     budget.left -= allowed - allowance.left;
   }
   for (const [index, stream] of others.entries()) {
     const allowance = { left: Math.max(0, budget.left - (others.length - 1 - index)) };
     const allowed = allowance.left;
-    searched[stream] = await search(searchGet, searches[stream], from[stream], request.limit, allowance, end);
+    try {
+      searched[stream] = await search(searchGet, searches[stream], from[stream], request.limit, allowance, end);
+    } catch (error2) {
+      failStream(stream, error2);
+      searched[stream] = failedRead(from[stream]);
+    }
     budget.left -= allowed - allowance.left;
   }
   const stuck = ["i", "p", "c"].flatMap((stream) => searched[stream].stuck === void 0 ? [] : [{ stream, second: searched[stream].stuck }]);
   for (const { stream, second } of stuck.sort((a, b) => a.second - b.second || (a.stream < b.stream ? -1 : 1))) {
-    searched[stream] = await searchSecond(searchGet, searches[stream], searched[stream].start, second, budget);
+    try {
+      searched[stream] = await searchSecond(searchGet, searches[stream], searched[stream].start, second, budget);
+    } catch (error2) {
+      failStream(stream, error2);
+    }
   }
   const floor = end + SETTLE_MS - NOTIFICATION_RETENTION_MS;
   const outside = state.notified.position.t < floor;
   const restarted = { t: floor, i: "" };
   const notifiedFrom = outside ? { position: restarted, floor: restarted.t + 1e3, seen: /* @__PURE__ */ new Map() } : state.notified;
-  const notified = startOf(notifiedFrom.position) > end ? { items: [], complete: true, last: Number.POSITIVE_INFINITY, readable: false, state: state.notified, truncated: false } : await notifications(get, notifiedFrom, alias, end);
+  let notified;
+  try {
+    notified = startOf(notifiedFrom.position) > end ? { items: [], complete: true, last: Number.POSITIVE_INFINITY, readable: false, state: state.notified, truncated: false } : await notifications(get, notifiedFrom, alias, end);
+  } catch (error2) {
+    failStream("n", error2);
+    notified = { items: [], complete: false, last: Number.POSITIVE_INFINITY, readable: false, state: state.notified, truncated: false };
+  }
   const reads = { ...searched, n: notified };
   const horizon = Math.min(end + 1, ...STREAMS.filter((stream) => !reads[stream].complete).map((stream) => reads[stream].last));
   const merged = STREAMS.flatMap((stream) => reads[stream].items).filter((item2) => item2.t < horizon).sort((a, b) => a.t - b.t || (a.s < b.s ? -1 : a.s > b.s ? 1 : 0) || compare(a, b));
@@ -13590,6 +13627,7 @@ async function listEvents(get, input) {
   const cursor = encodeState(alias, login, owner, positions, lookback, remembered.seen, { gapAt, cut: more ? end : void 0, lostAt, held: more ? held : void 0 });
   return eventsListResult({ source: SOURCE, account: alias, owner }, listed.map((item2) => item2.event), cursor, more, {
     ...refused.length === 0 ? {} : { refused },
+    ...failed.length === 0 ? {} : { failed },
     ...gap === void 0 ? {} : { gap },
     plugin: PACKAGE,
     asOf: new Date(now).toISOString()

@@ -8,7 +8,7 @@ The options and their defaults, generated from `capabilities.options`.
 | `access` | `all` \| `ask-changes` \| `read-only` | `"all"` | How much the plugin's methods may do: all, ask-changes or read-only. |
 | `accounts` | object | — | One profile per account alias, keyed by alias. |
 | `allowUntestedHost` | boolean | `false` | Start on an OpenCode release outside the tested range. |
-| `toolsets` | array | `["context","repos","issues","pull_requests","users","actions","git","labels","code_quality","code_security","secret_protection","dependabot","security_advisories","discussions","orgs"]` | Which GitHub MCP toolsets every alias's server offers. |
+| `toolsets` | array | `["context","repos","issues","pull_requests","users","actions","git","labels","code_quality","code_security","secret_protection","dependabot","security_advisories","discussions","orgs"]` | Which GitHub MCP toolsets every github.com alias's MCP server offers. |
 | `lockdown` | boolean | `false` | Send GitHub's X-MCP-Lockdown header to restrict untrusted issue and pull request content. |
 | `clientId` | string | — | An OAuth App or GitHub App client ID for device sign-in; without one only a fine-grained personal access token can be used. |
 | `appSlug` | string | — | The GitHub App's URL name, for the install link when a sign-in reaches no installation. |
@@ -50,7 +50,7 @@ field.
 
 ## `toolsets`
 
-The GitHub MCP toolsets every alias's server offers, sent as the `X-MCP-Toolsets` header. `context` and `repos` are the
+The GitHub MCP toolsets every github.com alias's MCP server offers, sent as the `X-MCP-Toolsets` header. An Enterprise alias has no MCP server and no toolset header. `context` and `repos` are the
 ones most work needs. The plugin's own `api` method needs no toolset.
 
 ## `lockdown`

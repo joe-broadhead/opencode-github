@@ -191,6 +191,8 @@ function pageOf<T>(items: readonly T[], url: URL): { items: T[]; total: number }
 /** What one test adds to the work account: extra issues at times it chooses. */
 export interface FakeOptions {
   readonly extraWorkIssues?: readonly RawIssue[]
+  /** API paths that answer 500 this time, to exercise a partial page. */
+  readonly failPaths?: readonly string[]
 }
 
 export interface FakeGitHub {
@@ -225,6 +227,7 @@ export function createFakeGitHub(options: FakeOptions = {}): FakeGitHub {
     const account = data[login]
     if (account === undefined) return json({ message: "Bad credentials" }, 401)
 
+    if (options.failPaths?.includes(pathname)) return json({ message: "Server error" }, 500)
     if (pathname === "/user") return json({ login })
     if (pathname === "/search/issues") {
       const query = url.searchParams.get("q") ?? ""

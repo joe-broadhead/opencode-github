@@ -48,6 +48,7 @@ src/handlers/             one file per method: status, probe, events_list, api
 src/provider/             GitHub's endpoints, REST/GraphQL client, activity feed, device flow
 test/unit/                options, accounts, provider, handlers, manifest
 test/conformance/         replays fixtures/conformance.json through the handlers
+test/host/host.test.ts    the host gate: 2.4.1 starts, 2.5.0 is refused
 test/support/             the deterministic fake GitHub and the handler runtime
 skills/github/            the main skill; github-pr-review, github-issue-triage, github-code-research
 docs/                     capabilities, configuration, accounts, automations, architecture, security
@@ -61,7 +62,8 @@ scripts/record-fixture.mjs rebuilds the fake provider's recorded fixture
 
 1. **The manifest is the source of truth.** Add or change a method, source or action in `package.json` `capabilities`
    first, then its handler, then its tests. Never register a tool by hand: `register` does it.
-2. **Every method takes the account** when it signs in to the provider. Never assume `default`. Resolve with the
+2. **`api`, `events_list` and `probe` take the account**; the pass-through `mcp:` tools take no `account`, because the
+   alias is in the tool name (`github_<tool>` / `github-<alias>_<tool>`). Never assume `default`; resolve with the
    contract's `accounts` module.
 3. **Classify every method truthfully.** A delete is `delete`, a send is `send`, a share is `share`. If in doubt, choose
    the stricter class. `api` reaches every class, so it is `admin`.
@@ -105,7 +107,9 @@ scripts/record-fixture.mjs rebuilds the fake provider's recorded fixture
 - `test/unit/manifest.test.ts` proves the package name, the 102 methods, the classes and the source.
 - `test/unit/provider.test.ts` proves the REST and GraphQL mapping, the page and cursor, probe and the failure codes.
 - `test/unit/handlers.test.ts` drives every handler and checks the `changed`, `status` and `account` nudges.
-- `test/unit/accounts.test.ts` proves one MCP server per alias, the Enterprise integration, and the credential states.
+- `test/unit/accounts.test.ts` proves one MCP server per github.com alias, the Enterprise integration, and the
+  credential states.
+- `test/host/host.test.ts` proves the tested range and the clean `HOST_UNTESTED` refusal.
 - `test/conformance/fixture.test.ts` replays `fixtures/conformance.json` through the handlers, so a changed answer fails
   the test instead of drifting from the recording. `npm run fixtures` rebuilds the fake provider's recording.
 - `npx plugin-kit check` proves T0, T1 on OpenCode 2.4.1 and the unsupported-host refusal.

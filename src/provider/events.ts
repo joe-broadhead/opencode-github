@@ -77,6 +77,13 @@ type Data = Record<string, unknown>
 /** Issues, pull requests, commits and notifications: GitHub searches issues and pull requests separately. */
 type StreamName = "i" | "p" | "c" | "n"
 const STREAMS: readonly StreamName[] = ["i", "p", "c", "n"]
+/** The external id a page's `failed[]` uses when a whole stream could not be read. */
+const STREAM_IDS: Readonly<Record<StreamName, string>> = {
+  i: "github:issues",
+  p: "github:pull_requests",
+  c: "github:commits",
+  n: "github:notifications",
+}
 
 /** A GET through the api client: `maxBytes` is how much of the answer to read whole. */
 export type Get = (path: string, query: Record<string, string | number | boolean>, maxBytes?: number) => Promise<ApiOutput>
@@ -852,6 +859,17 @@ export async function listEvents(get: Get, input: PageRequest): Promise<EventsLi
   // The read's cut, pinned on its first page: an event is listed once it is SETTLE_MS old, and nothing newer than the cut
   // is listed on any page of the read; the next read lists it.
   const end = state.cut ?? Math.floor(now - SETTLE_MS)
+  const failed: { external_id: string; code: string; retryAfterSec?: number }[] = []
+  const failStream = (stream: StreamName, error: unknown): void => {
+    const code = error instanceof SourceError ? error.code : "UNAVAILABLE"
+    if (code === "NEEDS_SIGN_IN") throw error
+    failed.push({
+      external_id: STREAM_IDS[stream],
+      code,
+      ...(error instanceof SourceError && error.retryAfterSec !== undefined ? { retryAfterSec: error.retryAfterSec } : {}),
+    })
+  }
+  const failedRead = (start: Key): SearchRead => ({ items: [], complete: false, last: Number.POSITIVE_INFINITY, start })
 
   // GitHub refuses a search for issues and pull requests together from a GitHub App user token (HTTP 422): one each.
   const searches: Record<"i" | "p" | "c", Search> = {
@@ -877,20 +895,34 @@ export async function listEvents(get: Get, input: PageRequest): Promise<EventsLi
   for (const stream of firsts) {
     const allowance: Budget = { left: Math.max(0, budget.left - others.length) }
     const allowed = allowance.left
-    searched[stream] = await searchSecond(searchGet, searches[stream], from[stream], heldSecond(stream)!, allowance, true)
+    try {
+      searched[stream] = await searchSecond(searchGet, searches[stream], from[stream], heldSecond(stream)!, allowance, true)
+    } catch (error) {
+      failStream(stream, error)
+      searched[stream] = failedRead(from[stream])
+    }
     budget.left -= allowed - allowance.left
   }
   // Each search leaves one request for every search after it, so none is left without a page to read.
   for (const [index, stream] of others.entries()) {
     const allowance: Budget = { left: Math.max(0, budget.left - (others.length - 1 - index)) }
     const allowed = allowance.left
-    searched[stream] = await search(searchGet, searches[stream], from[stream], request.limit, allowance, end)
+    try {
+      searched[stream] = await search(searchGet, searches[stream], from[stream], request.limit, allowance, end)
+    } catch (error) {
+      failStream(stream, error)
+      searched[stream] = failedRead(from[stream])
+    }
     budget.left -= allowed - allowance.left
   }
   // A stream whose read found only one second reads that second whole, with what is left of the budget.
   const stuck = (["i", "p", "c"] as const).flatMap((stream) => (searched[stream].stuck === undefined ? [] : [{ stream, second: searched[stream].stuck! }]))
   for (const { stream, second } of stuck.sort((a, b) => a.second - b.second || (a.stream < b.stream ? -1 : 1))) {
-    searched[stream] = await searchSecond(searchGet, searches[stream], searched[stream].start, second, budget)
+    try {
+      searched[stream] = await searchSecond(searchGet, searches[stream], searched[stream].start, second, budget)
+    } catch (error) {
+      failStream(stream, error)
+    }
   }
 
   // GitHub keeps notifications for three months: a stream that starts before that may have lost some, so it restarts at
@@ -899,10 +931,16 @@ export async function listEvents(get: Get, input: PageRequest): Promise<EventsLi
   const outside = state.notified.position.t < floor
   const restarted: Key = { t: floor, i: "" }
   const notifiedFrom: Notified = outside ? { position: restarted, floor: restarted.t + 1000, seen: new Map() } : state.notified
-  const notified: NotificationsRead =
-    startOf(notifiedFrom.position) > end
-      ? { items: [], complete: true, last: Number.POSITIVE_INFINITY, readable: false, state: state.notified, truncated: false }
-      : await notifications(get, notifiedFrom, alias, end)
+  let notified: NotificationsRead
+  try {
+    notified =
+      startOf(notifiedFrom.position) > end
+        ? { items: [], complete: true, last: Number.POSITIVE_INFINITY, readable: false, state: state.notified, truncated: false }
+        : await notifications(get, notifiedFrom, alias, end)
+  } catch (error) {
+    failStream("n", error)
+    notified = { items: [], complete: false, last: Number.POSITIVE_INFINITY, readable: false, state: state.notified, truncated: false }
+  }
   const reads: Record<StreamName, Read> = { ...searched, n: notified }
   // Nothing at or after a stream's last read time is listed while that stream has more: it could still come first.
   const horizon = Math.min(end + 1, ...STREAMS.filter((stream) => !reads[stream].complete).map((stream) => reads[stream].last))
@@ -988,6 +1026,7 @@ export async function listEvents(get: Get, input: PageRequest): Promise<EventsLi
   const cursor = encodeState(alias, login, owner, positions, lookback, remembered.seen, { gapAt, cut: more ? end : undefined, lostAt, held: more ? held : undefined })
   return eventsListResult({ source: SOURCE, account: alias, owner }, listed.map((item) => item.event), cursor, more, {
     ...(refused.length === 0 ? {} : { refused }),
+    ...(failed.length === 0 ? {} : { failed }),
     ...(gap === undefined ? {} : { gap }),
     plugin: PACKAGE,
     asOf: new Date(now).toISOString(),

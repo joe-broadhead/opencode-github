@@ -109,7 +109,7 @@
         "toolsets": {
           "type": "array",
           "title": "Toolsets",
-          "description": "Which GitHub MCP toolsets every alias's server offers.",
+          "description": "Which GitHub MCP toolsets every github.com alias's MCP server offers.",
           "items": {
             "type": "string",
             "enum": [

@@ -12,8 +12,10 @@ The plugin is one `Plugin.define` entry, one `register` call, and one provider d
 | Handlers | `src/handlers/` | one file per method: `status`, `probe`, `events_list`, `api` |
 | Provider | `src/provider/` | GitHub's REST and GraphQL client, the activity feed algorithm, device flow, endpoints |
 
-`register` wires doors 1–3: one agent tool per method in the `github` namespace, the same tools in Code Mode, one RPC
-id `github`, the bus events, and the access rules from `capabilities.methods` and `options.access`. No handler touches
+`register` wires doors 1–3: one agent tool per plugin method (`status`, `probe`, `events_list`, `api`) in the `github`
+namespace, the same tools in Code Mode, one RPC id `github`, the bus events, and the access rules from
+`capabilities.methods` and `options.access`. The 98 pass-through `mcp:<tool>` methods are the vendor MCP server's own
+tools; the plugin classifies them for the access rules and does not register or proxy them. No handler touches
 `ctx.tool`, `ctx.rpc` or `ctx.permission` itself.
 
 ## Accounts
@@ -36,7 +38,9 @@ to a temporary file beside its target and publishes it atomically.
 
 `src/provider/events.ts` merges GitHub's three searches (issues, pull requests, commits) and the notifications inbox.
 Each stream has its own position in the cursor; a read pins a cut, lists the oldest item first, and answers a gap once
-when GitHub's retention or a result over the read's byte limit loses history.
+when GitHub's retention or a result over the read's byte limit loses history. If one stream fails, the page still lists
+the others and puts the failed stream in `failed[]` (`github:issues`, `github:pull_requests`, `github:commits` or
+`github:notifications`, with the error code), leaving that stream's cursor position where it was.
 
 `src/provider/device-flow.ts` implements RFC 8628 device flow, the GitHub App token refresh, the token identity check
 and the installation count. No client secret is used.

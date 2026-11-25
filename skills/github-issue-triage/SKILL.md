@@ -16,7 +16,7 @@ If no GitHub tool is listed, run `/connect` and choose GitHub (or GitHub Enterpr
 - `github_list_issues` filters by `state`, `labels` and other GitHub search qualifiers, or by `owner` and `repo`. Read
   the open set and the unlabelled set separately.
 - `github_issue_read` reads one issue with its comments. `github_search_issues` finds candidates across repositories.
-- Set the alias with `account` when more than one is configured, and keep one alias's results separate.
+- The pass-through tools take no `account`: pick the alias's tool name (`github-work_<tool>` for `work`); `tools.github.api` takes `account`. Keep one alias's results separate.
 
 ## Triage
 

@@ -19,6 +19,10 @@ The read lists an item once it is five minutes old, so the index has settled, an
 plain read without a cursor starts at `since` or 24 hours ago. When GitHub's notifications retention is exceeded, the
 page answers a `gap` with the time it restarts from; render the gap, never invent the missing items.
 
+If one stream fails, the page still lists the others and `failed[]` names the failed stream
+(`github:issues`, `github:pull_requests`, `github:commits` or `github:notifications`) with its code; do not save the
+cursor past a failed entry. The next read re-reads that stream from the position it kept.
+
 Subscribe to `rpc.github.changed` to re-read sooner: the plugin emits it after its own `api` write. The event carries no
 content; re-read the source through `events_list`.
 
