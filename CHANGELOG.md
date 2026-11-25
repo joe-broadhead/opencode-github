@@ -26,3 +26,12 @@
   the diagnostics.
 - `unknownTools` option: the contract's `methods` and `access` own tool classification; the plugin no longer filters the
   vendor's tool list. The `host` option moved to the account profile's `host`; it is not removed.
+- `readOnly` option: deprecated in v0.0.11, where `true` meant `access: "read-only"` and `false` meant `"all"`; the
+  greenfield options take `access: "read-only"` or `"all"` directly, and an old config with `readOnly` is now
+  `OPTIONS_INVALID` instead of being silently mapped.
+- Status rows `Access`, `Toolsets`, `Tools`, `Rules that never match`, the shadowed-skills `Skills` row and the
+  `readOnly` deprecation `Note`: the contract's `status` schema keeps state, one entry per account, unguarded agents,
+  host version/range/tested and next step. Access is the person's own option; toolsets and the tool list are in the
+  configuration and docs; the unmatched-rule and shadowed-skill rows were pre-contract diagnostics; the `Note` row
+  existed only for the removed `readOnly` option. Connection, Account, Host/OpenCode and Next step are kept in the new
+  shape as `state`, `accounts[]`, `host` and `nextStep`.
