@@ -956,14 +956,14 @@
     }
   },
   "scripts": {
-    "build": "node scripts/build.mjs",
+    "bundle": "node scripts/bundle.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "biome check .",
     "test": "node --test \"test/**/*.test.ts\"",
     "fixtures": "node scripts/record-fixture.mjs",
     "docs": "plugin-kit docs",
     "docs:check": "plugin-kit docs --check",
-    "check": "npm run lint && npm run typecheck && npm run build && npm run test && npm run pack && plugin-kit check && plugin-kit docs --check",
+    "check": "npm run lint && npm run typecheck && npm run bundle && npm run test && npm run pack && plugin-kit check && plugin-kit docs --check",
     "pack": "node scripts/check-pack.mjs"
   },
   "devDependencies": {

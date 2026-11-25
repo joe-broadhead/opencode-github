@@ -21,14 +21,14 @@ npm run check
 |---|---|
 | `npm run lint` | `@biomejs/biome` finds no lint error |
 | `npm run typecheck` | the sources and tests typecheck under strict settings |
-| `npm run build` | `dist/index.js` is built from `src/index.ts` with esbuild |
+| `npm run bundle` | `dist/index.js` is built from `src/index.ts` with esbuild; commit the result |
 | `npm test` | the options, accounts, manifest, provider, handlers and fixture tests pass |
 | `npm run pack` | the tarball carries the built entry, the manifest, the skills, the icons, `README.md` and `LICENSE`, and nothing else |
 | `plugin-kit check` | conformance T0 and T1, the doc file set, the forbidden patterns and no bundled kit |
 | `plugin-kit docs --check` | every generated doc section matches the manifest |
 
-CI runs the same steps in one job named `ci`. `dist/` is generated and is not committed, so CI builds it before
-`plugin-kit check`.
+CI runs the same steps in one job named `ci`. `dist/` is generated and committed; CI bundles it again and fails when
+the committed copy is stale.
 
 ## The contract pin
 

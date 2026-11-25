@@ -1,7 +1,7 @@
 name: CI
 
 # One job, named ci: the org ruleset requires a check with that name. It runs the whole gate, so the required check
-# covers lint, typecheck, build, tests, the pack check, conformance, docs drift and the forbidden scan.
+# covers lint, typecheck, bundle, tests, the pack check, conformance, docs drift and the forbidden scan.
 #
 # It runs locally too: npm ci --ignore-scripts && npm run check
 #
@@ -40,7 +40,8 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run lint
       - run: npm run typecheck
-      - run: npm run build
+      - run: npm run bundle
+      - run: npm run bundle && git diff --exit-code dist/
       - run: npm test
       - run: npm run pack
       - run: npx plugin-kit check

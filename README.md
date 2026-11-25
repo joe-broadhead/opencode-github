@@ -239,8 +239,8 @@ None.
 
 - **The contract pin.** `package.json` pins `github:we-the-rebel-alliance/plugin-contract#v0.0.0`. Move the pin to the
   contract's next release tag; never follow a branch.
-- **`dist/` is generated.** `npm run build` writes it, CI builds it before the pack check and `plugin-kit check`, and
-  it is not committed. Never edit `dist/` by hand.
+- **`dist/` is generated and committed.** `npm run bundle` writes it; commit the result with the source change. CI
+  runs `npm run bundle && git diff --exit-code dist/`, so a stale bundle fails the build. Never edit `dist/` by hand.
 - **The layout.** `src/index.ts` is the one entry, `src/accounts.ts` wires the MCP servers and sign-in, `src/handlers/`
   holds one file per method, `src/provider/` is the only place a GitHub endpoint is named, `skills/` holds the agent
   guides, and `docs/` is the documentation.
