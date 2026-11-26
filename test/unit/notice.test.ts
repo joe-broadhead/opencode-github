@@ -56,6 +56,10 @@ async function bundledPackages(): Promise<Map<string, Bundled>> {
     const text = readFileSync(join(root, path), "utf8")
     for (const match of text.matchAll(/\/\/\s*node_modules\/((?:@[^/\s]+\/)?[^/\s]+)\//g)) if (keep(match[1])) names.add(match[1]!)
   }
+  // plugin-contract's dist carries zod pre-bundled, so zod has no input of its own and a name or comment scan can
+  // miss it. Its code in the built bundle is the proof that it is inlined and must be noticed.
+  const bundle = result.outputFiles?.[0]?.text ?? ""
+  if (/\$ZodType|ZodError/.test(bundle)) names.add("zod")
   const packages = new Map<string, Bundled>()
   for (const name of [...names].sort()) {
     const pkg = JSON.parse(readFileSync(join(root, "node_modules", name, "package.json"), "utf8")) as { version?: string; license?: string }
@@ -84,6 +88,7 @@ test("every package the bundle inlines has its verbatim licence in NOTICE", asyn
   assert.ok(packages.size > 0, "the bundle inlines no third-party package")
   assert.ok(packages.has("yaml"), "the YAML parser is bundled")
   assert.ok(packages.has("@we-the-rebel-alliance/plugin-contract"), "plugin-contract is bundled")
+  assert.ok(packages.has("zod"), "zod's code is inlined inside plugin-contract's dist")
   assert.deepEqual(problems(readFileSync(join(root, "NOTICE"), "utf8"), packages), [])
 })
 
