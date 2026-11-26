@@ -21,6 +21,7 @@ if (typeof plugin !== "string" || plugin === "") {
 
 const expected = [
   "LICENSE",
+  "NOTICE",
   "README.md",
   "assets/icon-128.png",
   "assets/icon-256.png",
