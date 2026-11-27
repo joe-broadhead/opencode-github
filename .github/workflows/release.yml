@@ -19,7 +19,7 @@ concurrency:
 jobs:
   release:
     name: release
-    runs-on: ubuntu-24.04
+    runs-on: boxd-public
     timeout-minutes: 20
     permissions:
       contents: write
